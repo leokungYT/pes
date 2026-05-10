@@ -1,0 +1,900 @@
+import os
+import cv2
+import numpy as np
+import time
+import subprocess
+import threading
+import struct
+import shutil
+import concurrent.futures
+import json
+import glob
+from ppadb.client import Client as AdbClient
+from colorama import Fore, Style, init
+
+try:
+    import tkinter as tk
+    from tkinter import ttk, messagebox
+    import customtkinter as ctk
+    from PIL import Image, ImageTk
+    GUI_ENABLED = True
+except ImportError:
+    GUI_ENABLED = False
+    print(f"{Fore.YELLOW}[WARN] customtkinter or PIL not found. GUI disabled.{Style.RESET_ALL}")
+
+# Reduce CPU contention for OpenCV when running multiple instances
+cv2.setNumThreads(1)
+
+init(autoreset=True)
+
+# Global ADB path
+adb_path = "adb"
+bot_running = False
+gui_instance = None
+
+if GUI_ENABLED:
+    ctk.set_appearance_mode("Dark")
+    ctk.set_default_color_theme("blue")
+
+    class DeviceMonitorWidget(ctk.CTkFrame):
+        def __init__(self, parent, serial, index):
+            super().__init__(parent)
+            self.serial = serial
+            self.grid_columnconfigure(0, weight=1)
+            self.grid_columnconfigure(1, weight=0)
+            
+            # Info Panel
+            info_panel = ctk.CTkFrame(self, fg_color="transparent")
+            info_panel.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+            
+            # Header Line
+            header = ctk.CTkFrame(info_panel, fg_color="transparent")
+            header.pack(fill="x")
+            ctk.CTkLabel(header, text=f"#{index}", font=ctk.CTkFont(size=14, weight="bold"), text_color="gray").pack(side="left")
+            ctk.CTkLabel(header, text=f"  {serial}", font=ctk.CTkFont(size=13, weight="bold")).pack(side="left")
+            
+            # Reset Button
+            self.btn_reset = ctk.CTkButton(header, text="↺ RESET", width=60, height=20, font=ctk.CTkFont(size=10, weight="bold"), fg_color="#ff5555", hover_color="#cc4444", command=lambda: trigger_manual_reset(serial))
+            self.btn_reset.pack(side="right", padx=(5, 0))
+            
+            self.lbl_status = ctk.CTkLabel(header, text="IDLE", font=ctk.CTkFont(size=11, weight="bold"), text_color="gray")
+            self.lbl_status.pack(side="right")
+            
+            self.lbl_step = ctk.CTkLabel(info_panel, text="Step: Initializing", anchor="w")
+            self.lbl_step.pack(fill="x", pady=(5,0))
+            self.lbl_log = ctk.CTkLabel(info_panel, text="...", font=ctk.CTkFont(size=11), text_color="gray70", anchor="w")
+            self.lbl_log.pack(fill="x")
+
+            # Image Preview
+            self.img_frame = ctk.CTkFrame(self, width=160, height=90, fg_color="black", corner_radius=5)
+            self.img_frame.grid(row=0, column=1, padx=10, pady=10)
+            self.img_frame.pack_propagate(False)
+            self.img_label = ctk.CTkLabel(self.img_frame, text="NO SIGNAL", text_color="gray")
+            self.img_label.pack(fill="both", expand=True)
+
+        def update_state(self, step=None, status=None, log=None, screenshot=None):
+            if step: self.lbl_step.configure(text=f"Step: {step}")
+            if log: self.lbl_log.configure(text=f"> {log}")
+            if status:
+                color = "gray"
+                if status.lower() == 'working': color = "#2cc985"
+                elif status.lower() == 'stuck': color = "#ff5555"
+                elif status.lower() == 'waiting': color = "#F2C94C"
+                self.lbl_status.configure(text=status.upper(), text_color=color)
+            if screenshot is not None:
+                try:
+                    pil_img = Image.fromarray(cv2.cvtColor(screenshot, cv2.COLOR_BGR2RGB))
+                    ctk_img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(160, 90))
+                    self.img_label.configure(image=ctk_img, text="")
+                    self.img_label.image = ctk_img
+                except: pass
+
+    class ModernBotGUI(ctk.CTk):
+        def __init__(self):
+            super().__init__()
+            global gui_instance
+            gui_instance = self
+            self.title("🎮 PES MOBILE BOT - CONTROL CENTER")
+            self.geometry("820x550")
+            self.adb_connected = False
+            self.device_monitors = {}
+            self.threads = []
+            self.setup_ui()
+            self.after(500, self.connect_adb)
+            self.after(2000, self.update_realtime_stats)
+
+        def setup_ui(self):
+            self.grid_columnconfigure(1, weight=1)
+            self.grid_rowconfigure(0, weight=1)
+            
+            # Left Panel
+            left_panel = ctk.CTkFrame(self, width=220, corner_radius=0)
+            left_panel.grid(row=0, column=0, sticky="nsew")
+            left_panel.grid_propagate(False)
+            
+            ctk.CTkLabel(left_panel, text="🤖 PES BOT CONTROL", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(20, 15))
+            
+            self.btn_start = ctk.CTkButton(left_panel, text="▶ START BOT", font=ctk.CTkFont(size=13, weight="bold"), height=36, fg_color="#2cc985", hover_color="#229f69", command=self.toggle_bot)
+            self.btn_start.pack(padx=15, pady=8, fill="x")
+
+            self.btn_config = ctk.CTkButton(left_panel, text="⚙️ Config", font=ctk.CTkFont(size=12, weight="bold"), height=30, fg_color="#1565c0", hover_color="#0d47a1", command=self.open_config_dialog)
+            self.btn_config.pack(padx=15, pady=(0, 8), fill="x")
+            
+            self.lbl_backup_count = ctk.CTkLabel(left_panel, text="Backup: 0", font=ctk.CTkFont(size=12, weight="bold"), text_color="#4caf50")
+            self.lbl_backup_count.pack(pady=4)
+            
+            self.lbl_adb_status = ctk.CTkLabel(left_panel, text="ADB: Connecting...", text_color="#F2C94C")
+            self.lbl_adb_status.pack(pady=5)
+            
+            ctk.CTkLabel(left_panel, text="SYSTEM LOG", font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", padx=20, pady=(20, 5))
+            self.log_text = ctk.CTkTextbox(left_panel, font=ctk.CTkFont(family="Consolas", size=11))
+            self.log_text.pack(fill="both", expand=True, padx=10, pady=10)
+            self.log_text.configure(state="disabled")
+
+            # Right Panel
+            right_panel = ctk.CTkFrame(self, fg_color="transparent")
+            right_panel.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
+            ctk.CTkLabel(right_panel, text="LIVE DEVICE MONITOR", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", pady=(0, 5))
+            self.monitor_frame = ctk.CTkScrollableFrame(right_panel, label_text="Connected Devices")
+            self.monitor_frame.pack(fill="both", expand=True)
+
+        def update_realtime_stats(self):
+            try:
+                backup_dir = "backup"
+                if os.path.exists(backup_dir):
+                    backup_count = len(glob.glob(os.path.join(backup_dir, "*.dat")))
+                    self.lbl_backup_count.configure(text=f"✅ Backup Generated: {backup_count}")
+            except Exception:
+                pass
+            self.after(2000, self.update_realtime_stats)
+
+        def open_config_dialog(self):
+            import importlib, config as cfg
+            importlib.reload(cfg)
+
+            win = ctk.CTkToplevel(self)
+            win.title("⚙️ Config")
+            win.geometry("320x180")
+            win.resizable(False, False)
+            win.grab_set()
+
+            ctk.CTkLabel(win, text="Bot Configuration",
+                         font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(16, 8))
+
+            row = ctk.CTkFrame(win, fg_color="transparent")
+            row.pack(fill="x", padx=20, pady=4)
+            ctk.CTkLabel(row, text="Open Box Sequence",
+                         font=ctk.CTkFont(size=12)).pack(side="left")
+            var_box = ctk.IntVar(value=cfg.DO_BOX)
+            ctk.CTkSwitch(row, text="", variable=var_box,
+                          onvalue=1, offvalue=0).pack(side="right")
+
+            def _save():
+                global DO_BOX
+                new_val = var_box.get()
+                cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.py")
+                with open(cfg_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                import re
+                content = re.sub(r"^DO_BOX\s*=\s*\d", f"DO_BOX = {new_val}",
+                                 content, flags=re.MULTILINE)
+                with open(cfg_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+                DO_BOX = new_val
+                importlib.reload(cfg)
+                label_status.configure(text=f"✅ Saved! DO_BOX = {new_val}",
+                                       text_color="#4caf50")
+                self.log(f"Config saved: DO_BOX = {new_val}")
+
+            ctk.CTkButton(win, text="💾 Save", fg_color="#2cc985",
+                          hover_color="#229f69", command=_save).pack(pady=8)
+            label_status = ctk.CTkLabel(win, text="", font=ctk.CTkFont(size=11))
+            label_status.pack()
+
+        def log(self, msg):
+            timestamp = time.strftime("%H:%M:%S")
+            self.log_text.configure(state="normal")
+            self.log_text.insert("end", f"[{timestamp}] {msg}\n")
+            self.log_text.see("end")
+            self.log_text.configure(state="disabled")
+
+        def connect_adb(self):
+            self.log("Searching for ADB...")
+            def _thread():
+                if find_adb_executable():
+                    connect_known_ports()
+                    devices = get_connected_devices()
+                    self.after(0, lambda: self._on_adb_ready(devices))
+                else:
+                    self.after(0, lambda: self.lbl_adb_status.configure(text="ADB: NOT FOUND", text_color="#ff5555"))
+            threading.Thread(target=_thread, daemon=True).start()
+
+        def _on_adb_ready(self, devices):
+            self.adb_connected = True
+            self.lbl_adb_status.configure(text=f"ADB: ONLINE ({len(devices)} Devices)", text_color="#2cc985")
+            for i, serial in enumerate(devices):
+                monitor = DeviceMonitorWidget(self.monitor_frame, serial, i+1)
+                monitor.pack(fill="x", pady=5, padx=5)
+                self.device_monitors[serial] = monitor
+            self.log(f"Found {len(devices)} devices.")
+
+        def toggle_bot(self):
+            global bot_running
+            if not bot_running:
+                bot_running = True
+                self.btn_start.configure(text="⏹ STOP BOT", fg_color="#ff5555", hover_color="#cc4444")
+                self.start_bot_threads()
+            else:
+                bot_running = False
+                self.btn_start.configure(text="▶ START BOT", fg_color="#2cc985", hover_color="#229f69")
+
+        def start_bot_threads(self):
+            devices = list(self.device_monitors.keys())
+            # If no devices yet, connect ADB first
+            if not devices:
+                self.log("No devices loaded yet, connecting ADB...")
+                connect_known_ports()
+                found = get_connected_devices()
+                for i, serial in enumerate(found):
+                    if serial not in self.device_monitors:
+                        m = DeviceMonitorWidget(self.monitor_frame, serial, i+1)
+                        m.pack(fill="x", pady=5, padx=5)
+                        self.device_monitors[serial] = m
+                self.lbl_adb_status.configure(text=f"ADB: ONLINE ({len(self.device_monitors)} Devices)", text_color="#2cc985")
+                devices = list(self.device_monitors.keys())
+            if not devices:
+                self.log("ERROR: Still no devices found!")
+                return
+            client = AdbClient(host="127.0.0.1", port=5037)
+            self.log(f"Starting threads for {len(devices)} devices...")
+            for serial in devices:
+                device = client.device(serial)
+                if device is None:
+                    self.log(f"ERROR: Cannot get device {serial} from ADB!")
+                    continue
+                self.log(f"✅ Started bot on {serial}")
+                t = threading.Thread(target=process_device, args=(device,), daemon=True)
+                t.start()
+                self.threads.append(t)
+                time.sleep(1)
+
+        def update_device(self, serial, **kwargs):
+            if serial in self.device_monitors:
+                self.device_monitors[serial].update_state(**kwargs)
+
+DEVICE_RESET_FLAGS = {}
+
+def trigger_manual_reset(serial):
+    DEVICE_RESET_FLAGS[serial] = True
+    print(f"{Fore.YELLOW}[MANUAL] Reset triggered for {serial}{Style.RESET_ALL}")
+    update_gui(serial, status="RESETTING...", log="Manual Reset Pending...")
+
+class DeviceResetException(Exception):
+    pass
+
+class CycleTimeoutException(Exception):
+    pass
+
+CYCLE_TIMEOUT = 800  # 6 minutes in seconds
+
+def check_device_reset(serial, cycle_start=None):
+    if DEVICE_RESET_FLAGS.get(serial, False):
+        DEVICE_RESET_FLAGS[serial] = False
+        raise DeviceResetException(f"Manual Reset for {serial}")
+    if cycle_start is not None and (time.time() - cycle_start) > CYCLE_TIMEOUT:
+        raise CycleTimeoutException(f"Cycle timeout (6min) for {serial}")
+
+def update_gui(serial, **kwargs):
+    if gui_instance:
+        gui_instance.after(0, lambda: gui_instance.update_device(serial, **kwargs))
+
+def gui_log(serial, msg, step=None, status=None):
+    print(f"{Fore.CYAN}[DEVICE {serial}] {msg}{Style.RESET_ALL}")
+    update_gui(serial, log=msg, step=step, status=status)
+
+# --- Configuration ---
+from config import DO_BOX, IMG_DIR
+IMAGE_CACHE = {}
+
+def find_adb_executable():
+    global adb_path
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    adb_locations = [
+        os.path.join(script_dir, "adb", "adb.exe"),
+        os.path.join(script_dir, "adb", "adb"),
+        "adb",
+    ]
+    
+    for loc in adb_locations:
+        if os.path.exists(loc):
+            try:
+                result = subprocess.run([loc, "version"], capture_output=True, text=True, timeout=5, shell=(os.name == 'nt'))
+                if result.returncode == 0:
+                    adb_path = loc
+                    print(f"{Fore.GREEN}[ADB] Verified: {adb_path}{Style.RESET_ALL}")
+                    return True
+            except: pass
+    
+    # Try system PATH
+    adb_in_path = shutil.which("adb")
+    if adb_in_path:
+        adb_path = os.path.abspath(adb_in_path)
+        return True
+        
+    return False
+
+def connect_known_ports():
+    """Auto-scan ALL emulator ports, connect everything that responds"""
+    try:
+        # Kill & start adb server
+        subprocess.run([adb_path, "kill-server"], capture_output=True, timeout=5, shell=(os.name == 'nt'))
+        time.sleep(1)
+        subprocess.run([adb_path, "start-server"], capture_output=True, timeout=5, shell=(os.name == 'nt'))
+        time.sleep(1)
+
+        # Scan ports 5555-5755 (odd ports for MuMu)
+        ports = list(range(5555, 5756, 2))
+        print(f"{Fore.YELLOW}[ADB] Auto-scanning {len(ports)} ports (5555-5755)...{Style.RESET_ALL}")
+        
+        def try_connect_port(port):
+            try:
+                addr = f"127.0.0.1:{port}"
+                result = subprocess.run([adb_path, "connect", addr], capture_output=True, timeout=2, text=True, shell=(os.name == 'nt'))
+                out = result.stdout.lower()
+                if ("connected" in out or "already connected" in out) and "cannot" not in out:
+                    return addr
+            except: pass
+            return None
+
+        connected = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
+            futures = {executor.submit(try_connect_port, p): p for p in ports}
+            for future in concurrent.futures.as_completed(futures):
+                res = future.result()
+                if res: connected.append(res)
+        
+        if connected:
+            print(f"{Fore.GREEN}[ADB] Port scan found {len(connected)} device(s): {', '.join(sorted(connected))}{Style.RESET_ALL}")
+    except Exception as e:
+        print(f"{Fore.RED}[ADB] Port scan error: {e}{Style.RESET_ALL}")
+
+def get_connected_devices():
+    """Get online devices from adb devices (filtered and de-duplicated)"""
+    try:
+        result = subprocess.run([adb_path, "devices"], capture_output=True, text=True, timeout=10, shell=(os.name == 'nt'))
+        lines = result.stdout.strip().split("\n")[1:]
+        raw_devices = []
+        for line in lines:
+            parts = line.strip().split()
+            if len(parts) >= 2 and parts[1] == "device":
+                raw_devices.append(parts[0])
+        
+        if not raw_devices: return []
+                
+        emulator_adb_ports = set()
+        for d in raw_devices:
+            if d.startswith("emulator-"):
+                try:
+                    console_port = int(d.replace("emulator-", ""))
+                    emulator_adb_ports.add(console_port + 1)
+                except: pass
+        
+        final_devices = []
+        seen = set()
+        for d in raw_devices:
+            if d in seen: continue
+            if d.startswith("127.0.0.1:"):
+                try:
+                    port = int(d.split(":")[1])
+                    if port in emulator_adb_ports: continue
+                except: pass
+            seen.add(d)
+            final_devices.append(d)
+        return final_devices
+    except: return []
+
+def get_screen_capture(device):
+    """Unique screencap per device serial to avoid conflicts in multi-threading"""
+    try:
+        raw = device.screencap()
+        if raw:
+            # Decode จากหน่วยความจำโดยตรงเพื่อความเร็วที่สูงกว่าเดิม
+            nparr = np.frombuffer(raw, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            
+            # Global check for namesom.bmp (Automatic Reset)
+            if img is not None:
+                if ImgSearchADB(img, os.path.join(IMG_DIR, "namesom.bmp"), threshold=0.9):
+                    gui_log(device.serial, "⚠️ NAMESOM DETECTED! Restarting bot...", status="stuck")
+                    DEVICE_RESET_FLAGS[device.serial] = True
+
+                # Global floating checks for download and fixgoogle
+                dl_pts = ImgSearchADB(img, os.path.join(IMG_DIR, "download.bmp"))
+                if dl_pts:
+                    gui_log(device.serial, "Floating: download.bmp found! Clicking...", step="Floating")
+                    x, y = dl_pts[0]
+                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                
+                fg_pts = ImgSearchADB(img, os.path.join(IMG_DIR, "fixgoogle.bmp"))
+                if fg_pts:
+                    gui_log(device.serial, "Floating: fixgoogle.bmp found! Clicking...", step="Floating")
+                    x, y = fg_pts[0]
+                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+
+            # Send to GUI for preview
+            update_gui(device.serial, screenshot=img)
+            return img
+        return None
+    except Exception as e:
+        return None
+
+def load_template(find_img_path):
+    if find_img_path not in IMAGE_CACHE:
+        template = cv2.imread(find_img_path, cv2.IMREAD_GRAYSCALE)
+        if template is not None:
+            IMAGE_CACHE[find_img_path] = template
+    return IMAGE_CACHE.get(find_img_path)
+
+def ImgSearchADB(adb_img, find_img_path, threshold=0.8):
+    try:
+        if adb_img is None:
+            return []
+        
+        if len(adb_img.shape) == 3:
+            img_gray = cv2.cvtColor(adb_img, cv2.COLOR_BGR2GRAY)
+        else:
+            img_gray = adb_img
+
+        find_img = load_template(find_img_path)
+        if find_img is None:
+            print(f"{Fore.RED}[ERROR] Image not found: {find_img_path}{Style.RESET_ALL}")
+            return []
+            
+        needle_w = find_img.shape[1]
+        needle_h = find_img.shape[0]
+        
+        result = cv2.matchTemplate(img_gray, find_img, cv2.TM_CCOEFF_NORMED)
+        locations = np.where(result >= threshold)
+        locations = list(zip(*locations[::-1]))
+        
+        rectangles = []
+        for loc in locations:
+            rect = [int(loc[0]), int(loc[1]), needle_w, needle_h]
+            rectangles.append(rect)
+            rectangles.append(rect)
+            
+        if len(rectangles) > 0:
+            rectangles, _ = cv2.groupRectangles(rectangles, groupThreshold=1, eps=1)
+            
+        points = []
+        if len(rectangles):
+            for (x, y, w, h) in rectangles:
+                center_x = x + int(w/2)
+                center_y = y + int(h/2)
+                points.append((center_x, center_y))
+                
+        return points
+    except Exception as e:
+        print(f"Error in ImgSearchADB: {e}")
+        return []
+
+def delete_save_data(device):
+    """Delete the specific save file before starting"""
+    target_file = "/data/data/jp.konami.pesam/files/SaveData/AUTH/online_user_id_data.dat"
+    target_folder = "/data/data/jp.konami.pesam/files/SaveData/AUTH"
+    
+    print(f"{Fore.YELLOW}[DEVICE {device.serial}] Deleting: {target_file}{Style.RESET_ALL}")
+    
+    device.shell(f"su -c 'rm -f {target_file}'")
+    device.shell(f"su -c 'rm -rf {target_folder}/*'")
+    
+    time.sleep(1)
+
+def backup_uid_file(device, adb_full_path, remote_path, local_path):
+    """Copy the UID file from device to local backup using direct binary capture"""
+    search_cmd = "su -c 'find /data/data/jp.konami.pesam/ -name \"*online_user_id_data.dat*\"'"
+    found_path = device.shell(search_cmd).strip()
+    
+    if not found_path or "No such file" in found_path:
+        return False
+        
+    actual_remote_path = found_path.split('\n')[0].strip()
+    try:
+        with open(local_path, "wb") as f:
+            cmd = [adb_full_path, "-s", device.serial, "shell", f"su -c 'cat {actual_remote_path}'"]
+            result = subprocess.run(cmd, stdout=f, stderr=subprocess.PIPE, shell=(os.name == 'nt'))
+            
+        if result.returncode == 0 and os.path.exists(local_path) and os.path.getsize(local_path) > 0:
+            return True
+        else:
+            if os.path.exists(local_path):
+                os.remove(local_path)
+            return False
+    except Exception:
+        return False
+
+def process_device(device):
+    serial = device.serial
+    gui_log(serial, "Starting automation...", step="Initializing", status="working")
+    
+    while bot_running: # Respect global bot_running flag
+        try:
+            check_device_reset(serial)
+            
+            # 0. Force stop before cleanup
+            gui_log(serial, "Force closing app before cleanup...", step="Cleanup", status="working")
+            device.shell("am force-stop jp.konami.pesam")
+            time.sleep(2)
+            
+            # 1. Initialization - START 6min timer here
+            gui_log(serial, "Deleting save data...", step="Resetting", status="working")
+            delete_save_data(device)
+            cycle_start = time.time()
+            
+            # 2. Launch app
+            gui_log(serial, "Launching PES app...", step="Launching", status="working")
+            device.shell("monkey -p jp.konami.pesam -c android.intent.category.LAUNCHER 1")
+            time.sleep(15)
+            
+            # 3. Main sequence: play1 - play19
+            sequence_1 = [f"play{i}.bmp" for i in range(1, 20)]
+            for img_name in sequence_1:
+                if img_name == "play19.bmp": break # Handle play19 later after UID
+                
+                img_path = os.path.join(IMG_DIR, img_name)
+                found = False
+                img_num = int(img_name.replace("play", "").replace(".bmp", ""))
+                has_timeout = img_num >= 13
+                start_time = time.time()
+                
+                while not found:
+                    check_device_reset(serial, cycle_start)
+                    if has_timeout and (time.time() - start_time > 5):
+                        gui_log(serial, f"Timeout for {img_name}.", step="Skipping")
+                        break
+                    adb_img = get_screen_capture(device)
+                    if adb_img is None: continue
+                    points = None
+                    if img_name == "play1.bmp": points = [(871, 508)]
+                    elif img_name == "play10.bmp" or img_name == "play12.bmp": points = [(675, 476)]
+                    else: points = ImgSearchADB(adb_img, img_path)
+                    if points:
+                        x, y = points[0]
+                        gui_log(serial, f"Found {img_name} at ({x}, {y})", step=f"Clicking {img_name}")
+                        if img_name in ["play10.bmp", "play12.bmp"]:
+                            for i in range(3):
+                                gui_log(serial, f"Clicking {img_name} ({i+1}/3)...", step="Multi-Click")
+                                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                time.sleep(1)
+                        else:
+                            device.shell(f"input swipe {x} {y} {x} {y} 100")
+
+                        if img_name == "play8.bmp":
+                            while True:
+                                check_device_reset(serial, cycle_start)
+                                time.sleep(5)
+                                p9_img = get_screen_capture(device)
+                                if p9_img is not None and ImgSearchADB(p9_img, os.path.join(IMG_DIR, "play9.bmp")): break
+                                device.shell(f"input swipe {x} {y} {x} {y} 100")
+
+                        if img_name == "play2.bmp":
+                            time.sleep(10)
+                            check_device_reset(serial, cycle_start)
+                            p2_img = get_screen_capture(device)
+                            if p2_img is not None and ImgSearchADB(p2_img, img_path):
+                                gui_log(serial, "Still found play2.bmp, clicking again...", step="Retry play2")
+                                device.shell(f"input swipe {x} {y} {x} {y} 100")
+
+                        time.sleep(5)
+                        found = True
+                    time.sleep(0.01)
+            
+            # 4. UID Flow (Existing)
+            gui_log(serial, "Waiting for UID check screen...", step="UID Backup", status="working")
+            while True:
+                check_device_reset(serial, cycle_start)
+                adb_img = get_screen_capture(device)
+                if adb_img is not None and ImgSearchADB(adb_img, os.path.join(IMG_DIR, "uidcheck.bmp")):
+                    gui_log(serial, "Found UID check! Capturing data...", step="Extracting UID")
+                    device.shell("input swipe 215 369 215 369 5000")
+                    time.sleep(2)
+                    device.shell("input swipe 81 522 81 522 5000")
+                    time.sleep(2)
+                    break
+                time.sleep(0.01)
+                
+            uid1_done = False
+            while True:
+                check_device_reset(serial, cycle_start)
+                adb_img = get_screen_capture(device)
+                if adb_img is not None:
+                    p2 = ImgSearchADB(adb_img, os.path.join(IMG_DIR, "uid2.bmp"))
+                    if p2:
+                        x, y = p2[0]
+                        device.shell(f"input swipe {x} {y} {x} {y} 100")
+                        time.sleep(3)
+                        break
+                    if not uid1_done:
+                        p1 = ImgSearchADB(adb_img, os.path.join(IMG_DIR, "uid1.bmp"))
+                        if p1:
+                            x, y = p1[0]
+                            device.shell(f"input swipe {x} {y} {x} {y} 100")
+                            uid1_done = True
+                            time.sleep(3)
+                time.sleep(0.01)
+
+            # play19
+            gui_log(serial, "Waiting for play19.bmp...", step="Post-UID")
+            while True:
+                check_device_reset(serial, cycle_start)
+                adb_img = get_screen_capture(device)
+                if adb_img is not None:
+                    p = ImgSearchADB(adb_img, os.path.join(IMG_DIR, "play19.bmp"))
+                    if p:
+                        x, y = p[0]
+                        device.shell(f"input swipe {x} {y} {x} {y} 100")
+                        gui_log(serial, "play19 clicked. Waiting 20s...", step="Play19 Clicked")
+                        time.sleep(20)
+                        break
+                time.sleep(0.01)
+
+            # Transition to play21
+            gui_log(serial, "Searching for play21.bmp via (815, 355)...", step="Transition")
+            while True:
+                check_device_reset(serial, cycle_start)
+                device.shell("input swipe 815 355 815 355 100")
+                found_p21 = False
+                for _ in range(5):
+                    check_device_reset(serial, cycle_start)
+                    adb_img = get_screen_capture(device)
+                    if adb_img is not None:
+                        p = ImgSearchADB(adb_img, os.path.join(IMG_DIR, "play21.bmp"))
+                        if p:
+                            x, y = p[0]
+                            gui_log(serial, f"Found play21.bmp at ({x}, {y})", step="Found Play21")
+                            device.shell(f"input swipe {x} {y} {x} {y} 100")
+                            time.sleep(5)
+                            found_p21 = True
+                            break
+                    time.sleep(0.01)
+                if found_p21: break
+            
+            # play22 - play25
+            seq_ext = [f"play{i}.bmp" for i in range(22, 26)]
+            for img_name in seq_ext:
+                if img_name == "play22.bmp":
+                    gui_log(serial, "Clicking 815 355 until play22/play23...", step="Loop play22")
+                    while True:
+                        check_device_reset(serial, cycle_start)
+                        adb_img = get_screen_capture(device)
+                        if adb_img is not None:
+                            if ImgSearchADB(adb_img, os.path.join(IMG_DIR, "play23.bmp")):
+                                gui_log(serial, "Found play23.bmp! Proceeding...", step="Found play23")
+                                break
+                            p22 = ImgSearchADB(adb_img, os.path.join(IMG_DIR, "play22.bmp"))
+                            if p22:
+                                x, y = p22[0]
+                                gui_log(serial, "Clicking play22.bmp again...", step="Repeat play22")
+                                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                time.sleep(3)
+                            else:
+                                # Not found play22 or play23, spam click 815 355
+                                device.shell("input swipe 815 355 815 355 100")
+                                time.sleep(0.5)
+                        time.sleep(0.01)
+                    continue
+
+                gui_log(serial, f"Waiting for {img_name}...", step=f"Wait {img_name}")
+                while True:
+                    check_device_reset(serial, cycle_start)
+                    adb_img = get_screen_capture(device)
+                    if adb_img is not None:
+                        p = ImgSearchADB(adb_img, os.path.join(IMG_DIR, img_name))
+                        if p:
+                            x, y = p[0]
+                            gui_log(serial, f"Found {img_name} at ({x}, {y})", step=f"Click {img_name}")
+                            device.shell(f"input swipe {x} {y} {x} {y} 100")
+                            time.sleep(5)
+                            break
+                    time.sleep(0.01)
+
+            # play26 - play31 and box sequences
+            if DO_BOX == 1:
+                box2_found = False
+                while not box2_found:
+                    seq_timeout = [f"play{i}.bmp" for i in range(26, 32)]
+                    for img_name in seq_timeout:
+                        gui_log(serial, f"Waiting for {img_name} (3s timeout)...", step=f"Wait {img_name}")
+                        start_t = time.time()
+                        found = False
+                        while time.time() - start_t < 3:
+                            check_device_reset(serial, cycle_start)
+                            adb_img = get_screen_capture(device)
+                            if adb_img is not None:
+                                p = ImgSearchADB(adb_img, os.path.join(IMG_DIR, img_name))
+                                if p:
+                                    x, y = p[0]
+                                    gui_log(serial, f"Found {img_name} at ({x}, {y})", step=f"Click {img_name}")
+                                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                    time.sleep(5)
+                                    found = True
+                                    break
+                            time.sleep(0.01)
+                        if not found:
+                            gui_log(serial, f"{img_name} timed out.", step="Skipping")
+
+                    # box1
+                    gui_log(serial, "Waiting for box1.bmp (15s timeout)...", step="Wait box1.bmp")
+                    start_box1 = time.time()
+                    box1_found = False
+                    while time.time() - start_box1 < 15:
+                        check_device_reset(serial, cycle_start)
+                        adb_img = get_screen_capture(device)
+                        if adb_img is not None:
+                            p = ImgSearchADB(adb_img, os.path.join(IMG_DIR, "box1.bmp"))
+                            if p:
+                                x, y = p[0]
+                                gui_log(serial, f"Found box1.bmp at ({x}, {y})", step="Click box1.bmp")
+                                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                time.sleep(5)
+                                box1_found = True
+                                break
+                        time.sleep(0.01)
+                    
+                    if not box1_found:
+                        gui_log(serial, "box1.bmp not found, retrying play26-play31...", step="Retry play26-31")
+                        continue
+
+                    # box2
+                    gui_log(serial, "Waiting for box2.bmp (15s timeout)...", step="Wait box2.bmp")
+                    start_box2 = time.time()
+                    while time.time() - start_box2 < 15:
+                        check_device_reset(serial, cycle_start)
+                        adb_img = get_screen_capture(device)
+                        if adb_img is not None:
+                            p = ImgSearchADB(adb_img, os.path.join(IMG_DIR, "box2.bmp"))
+                            if p:
+                                x, y = p[0]
+                                gui_log(serial, f"Found box2.bmp at ({x}, {y})", step="Click box2.bmp")
+                                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                time.sleep(5)
+                                box2_found = True
+                                break
+                        time.sleep(0.01)
+                    
+                    if not box2_found:
+                        gui_log(serial, "box2.bmp not found, retrying play26-play31...", step="Retry play26-31")
+                        continue
+
+                # box3 - box4
+                seq_box = [f"box{i}.bmp" for i in range(3, 5)]
+                for img_name in seq_box:
+                    gui_log(serial, f"Waiting for {img_name}...", step=f"Wait {img_name}")
+                    while True:
+                        check_device_reset(serial, cycle_start)
+                        adb_img = get_screen_capture(device)
+                        if adb_img is not None:
+                            p = ImgSearchADB(adb_img, os.path.join(IMG_DIR, img_name))
+                            if p:
+                                x, y = p[0]
+                                gui_log(serial, f"Found {img_name} at ({x}, {y})", step=f"Click {img_name}")
+                                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                time.sleep(5)
+                                break
+                        time.sleep(0.01)
+            else:
+                # DO_BOX = 0 -> แค่ทำ play26-play31 รอบเดียวแล้วข้าม box เลย
+                seq_timeout = [f"play{i}.bmp" for i in range(26, 32)]
+                for img_name in seq_timeout:
+                    gui_log(serial, f"Waiting for {img_name} (3s timeout)...", step=f"Wait {img_name}")
+                    start_t = time.time()
+                    found = False
+                    while time.time() - start_t < 3:
+                        check_device_reset(serial, cycle_start)
+                        adb_img = get_screen_capture(device)
+                        if adb_img is not None:
+                            p = ImgSearchADB(adb_img, os.path.join(IMG_DIR, img_name))
+                            if p:
+                                x, y = p[0]
+                                gui_log(serial, f"Found {img_name} at ({x}, {y})", step=f"Click {img_name}")
+                                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                time.sleep(5)
+                                found = True
+                                break
+                        time.sleep(0.01)
+                    if not found:
+                        gui_log(serial, f"{img_name} timed out.", step="Skipping")
+
+            # 5. FINAL BACKUP LOGIC
+            gui_log(serial, "Starting final backup sequence...", step="Final Backup")
+            backup_dir = "backup"
+            if not os.path.exists(backup_dir): os.makedirs(backup_dir)
+            safe_serial = serial.replace(".", "_").replace(":", "_")
+            temp_local_path = os.path.join(backup_dir, f"temp_uid_{safe_serial}.dat")
+            remote_path = "/data/data/jp.konami.pesam/files/SaveData/AUTH/online_user_id_data.dat"
+            adb_full_path = adb_path
+            
+            file_found = False
+            for _ in range(15):
+                check_device_reset(serial, cycle_start)
+                if device.shell(f"su -c 'find /data/data/jp.konami.pesam/files/SaveData/AUTH/ -name \"online_user_id_data.dat\"'").strip():
+                    file_found = True
+                    break
+                time.sleep(0.01)
+
+            success = backup_uid_file(device, adb_full_path, remote_path, temp_local_path)
+            gui_log(serial, "Closing app for cleanup...", step="Cleanup")
+            device.shell("am force-stop jp.konami.pesam")
+            time.sleep(2)
+            
+            if not success:
+                success = backup_uid_file(device, adb_full_path, remote_path, temp_local_path)
+
+            if success:
+                try:
+                    time.sleep(1)
+                    user_code = "unknown"
+                    with open(temp_local_path, "r", encoding="utf-8") as f:
+                        content = f.read().strip()
+                        start_idx, end_idx = content.find("{"), content.rfind("}")
+                        if start_idx != -1 and end_idx != -1:
+                            data = json.loads(content[start_idx:end_idx+1])
+                            user_code = data.get("user_code", "unknown")
+                    
+                    final_local_path = os.path.join(backup_dir, f"{user_code}.dat")
+                    for i in range(5):
+                        try:
+                            if os.path.exists(final_local_path): os.remove(final_local_path)
+                            shutil.move(temp_local_path, final_local_path)
+                            gui_log(serial, f"COMPLETE: Saved as {user_code}.dat", step="Finished", status="waiting")
+                            break
+                        except: time.sleep(2)
+                except Exception as e:
+                    gui_log(serial, f"Rename error: {e}", status="stuck")
+            
+            gui_log(serial, "Loop finished. Restarting from scratch...", step="Done", status="waiting")
+            time.sleep(3)
+
+        except DeviceResetException:
+            gui_log(serial, "🛑 MANUAL RESET TRIGGERED", step="Resetting", status="stuck")
+            device.shell("am force-stop jp.konami.pesam")
+            time.sleep(2)
+            continue
+        except CycleTimeoutException:
+            elapsed = int(time.time() - cycle_start) if 'cycle_start' in dir() else 0
+            gui_log(serial, f"⏰ TIMEOUT ({elapsed}s)! Restarting cycle...", step="Timeout Reset", status="stuck")
+            device.shell("am force-stop jp.konami.pesam")
+            time.sleep(2)
+            continue
+        except Exception as e:
+            gui_log(serial, f"Error: {e}", status="stuck")
+            time.sleep(5)
+
+def main():
+    if GUI_ENABLED:
+        app = ModernBotGUI()
+        app.mainloop()
+    else:
+        # Fallback to CLI if GUI libs missing
+        if not find_adb_executable():
+            print(f"{Fore.RED}[ERROR] adb.exe not found.{Style.RESET_ALL}")
+            return
+        connect_known_ports()
+        devices = get_connected_devices()
+        if not devices:
+            print(f"{Fore.RED}[ERROR] No devices found.{Style.RESET_ALL}")
+            return
+        client = AdbClient(host="127.0.0.1", port=5037)
+        global bot_running
+        bot_running = True
+        for serial in devices:
+            device = client.device(serial)
+            t = threading.Thread(target=process_device, args=(device,), daemon=True)
+            t.start()
+            time.sleep(2)
+        try:
+            while True: time.sleep(1)
+        except KeyboardInterrupt: pass
+
+if __name__ == "__main__":
+    main()
