@@ -10,6 +10,10 @@ import glob
 from ppadb.client import Client as AdbClient
 from colorama import Fore, Style, init
 
+# เปลี่ยน working directory มาที่โฟลเดอร์ของสคริปต์ (pes) เสมอ
+# เพื่อให้ relative path เช่น 'input-id' หรือ 'img' ชี้ไปถูกที่
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
 try:
     import tkinter as tk
     from tkinter import ttk, messagebox
@@ -46,7 +50,7 @@ bot_running   = False
 gui_instance  = None
 
 # ── โหลด config จาก config.py ──────────────────────────────────────────────
-from config import EVENT_IMG, DO_BOX, DO_GACHA, HERO_LIST, IMG_DIR, INPUT_DIR, LOGIN_SUCCESS_DIR
+from config import EVENT_IMG, DO_BOX, DO_GACHA, HERO_LIST, IMG_DIR, INPUT_DIR, LOGIN_SUCCESS_DIR, FIND_HERO, HERO_IMG_MAP
 
 REMOTE_AUTH_DIR   = "/data/data/jp.konami.pesam/files/SaveData/AUTH"
 REMOTE_DAT_FILE   = f"{REMOTE_AUTH_DIR}/online_user_id_data.dat"
@@ -62,8 +66,10 @@ os.makedirs(INPUT_DIR, exist_ok=True)
 os.makedirs(LOGIN_SUCCESS_DIR, exist_ok=True)
 BACKUP_ID_DIR = "backup-id"
 NO_HERO_DIR   = "no-hero"
+FOUND_HERO_DIR = "found-hero"
 os.makedirs(BACKUP_ID_DIR, exist_ok=True)
 os.makedirs(NO_HERO_DIR, exist_ok=True)
+os.makedirs(FOUND_HERO_DIR, exist_ok=True)
 
 # ── Exceptions ────────────────────────────────────────────────────────────────
 class DeviceResetException(Exception):  pass
@@ -137,6 +143,7 @@ if GUI_ENABLED:
             self.setup_ui()
             self.after(500,  self.connect_adb)
             self.after(2000, self.update_realtime_stats)
+            self.after(10000, self.auto_scan_devices)
             self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         # ── UI build ──────────────────────────────────────────────────────
@@ -172,6 +179,11 @@ if GUI_ENABLED:
                                                font=ctk.CTkFont(size=12, weight="bold"),
                                                text_color="#4caf50")
             self.lbl_succ_count.pack(side="left", padx=8)
+
+            self.lbl_hero_count = ctk.CTkLabel(counter_frame, text="⭐ 0",
+                                               font=ctk.CTkFont(size=12, weight="bold"),
+                                               text_color="#ffc107")
+            self.lbl_hero_count.pack(side="left", padx=8)
 
             self.lbl_fail_count = ctk.CTkLabel(counter_frame, text="❌ 0",
                                                font=ctk.CTkFont(size=12, weight="bold"),
@@ -260,7 +272,7 @@ if GUI_ENABLED:
 
             win = ctk.CTkToplevel(self)
             win.title("⚙️ Config")
-            win.geometry("320x180")
+            win.geometry("340x240")
             win.resizable(False, False)
             win.grab_set()   # modal
 
@@ -294,12 +306,22 @@ if GUI_ENABLED:
             ctk.CTkSwitch(row3, text="", variable=var_gacha,
                           onvalue=1, offvalue=0).pack(side="right")
 
+            # ── FIND_HERO toggle ───────────────────────────
+            row4 = ctk.CTkFrame(win, fg_color="transparent")
+            row4.pack(fill="x", padx=20, pady=4)
+            ctk.CTkLabel(row4, text="Find Hero Mode",
+                         font=ctk.CTkFont(size=12)).pack(side="left")
+            var_find_hero = ctk.IntVar(value=getattr(cfg, 'FIND_HERO', 0))
+            ctk.CTkSwitch(row4, text="", variable=var_find_hero,
+                          onvalue=1, offvalue=0).pack(side="right")
+
             # ── Save button ───────────────────────────────
             def _save():
-                global EVENT_IMG, DO_BOX, DO_GACHA
+                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO
                 new_event = var_event.get()
                 new_box   = var_box.get()
                 new_gacha = var_gacha.get()
+                new_find  = var_find_hero.get()
                 # เขียนลง config.py
                 cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.py")
                 with open(cfg_path, "r", encoding="utf-8") as f:
@@ -311,16 +333,22 @@ if GUI_ENABLED:
                                  content, flags=re.MULTILINE)
                 content = re.sub(r"^DO_GACHA\s*=\s*\d", f"DO_GACHA = {new_gacha}",
                                  content, flags=re.MULTILINE)
+                if re.search(r"^FIND_HERO\s*=\s*\d", content, flags=re.MULTILINE):
+                    content = re.sub(r"^FIND_HERO\s*=\s*\d", f"FIND_HERO = {new_find}",
+                                     content, flags=re.MULTILINE)
+                else:
+                    content += f"\nFIND_HERO = {new_find}\n"
                 with open(cfg_path, "w", encoding="utf-8") as f:
                     f.write(content)
                 # อัปเดต runtime ด้วย
                 EVENT_IMG = new_event
                 DO_BOX    = new_box
                 DO_GACHA  = new_gacha
+                FIND_HERO = new_find
                 importlib.reload(cfg)
                 label_status.configure(text=f"✅ Saved!",
                                        text_color="#4caf50")
-                self.log(f"Config saved: EVENT_IMG={new_event}, DO_BOX={new_box}, DO_GACHA={new_gacha}")
+                self.log(f"Config saved: EVENT_IMG={new_event}, DO_BOX={new_box}, DO_GACHA={new_gacha}, FIND_HERO={new_find}")
 
             ctk.CTkButton(win, text="💾 Save", fg_color="#2cc985",
                           hover_color="#229f69", command=_save).pack(pady=8)
@@ -385,7 +413,7 @@ if GUI_ENABLED:
 
         def connect_missing_devices(self):
             self.log("Scanning for missing emulators...")
-            connect_known_ports()
+            connect_known_ports(quiet=False, kill_server=False)
             for dev in get_connected_devices():
                 if dev not in self.device_monitors:
                     m = DeviceMonitorWidget(self.dev_scroll, dev,
@@ -400,6 +428,27 @@ if GUI_ENABLED:
                             t.start()
                             self.threads.append(t)
                     self.log(f"Connected: {dev}")
+            self.lbl_status.configure(
+                text=f"   ● ONLINE ({len(self.device_monitors)})",
+                text_color="#4caf50")
+
+        def auto_scan_devices(self):
+            def _thread():
+                connect_known_ports(quiet=True, kill_server=False)
+                devices = get_connected_devices()
+                new_devs = [dev for dev in devices if dev not in self.device_monitors]
+                if new_devs:
+                    self.after(0, lambda: self._on_auto_scan_result(new_devs))
+            threading.Thread(target=_thread, daemon=True).start()
+            self.after(10000, self.auto_scan_devices)
+
+        def _on_auto_scan_result(self, new_devs):
+            for dev in new_devs:
+                if dev not in self.device_monitors:
+                    m = DeviceMonitorWidget(self.dev_scroll, dev, len(self.device_monitors) + 1)
+                    m.pack(fill="x", pady=1)
+                    self.device_monitors[dev] = m
+                    self.log(f"Auto-detected: {dev} (Ready)")
             self.lbl_status.configure(
                 text=f"   ● ONLINE ({len(self.device_monitors)})",
                 text_color="#4caf50")
@@ -422,7 +471,7 @@ if GUI_ENABLED:
             devices = list(self.device_monitors.keys())
             if not devices:
                 self.log("No devices loaded yet, connecting ADB...")
-                connect_known_ports()
+                connect_known_ports(quiet=False, kill_server=False)
                 for i, serial in enumerate(get_connected_devices()):
                     if serial not in self.device_monitors:
                         m = DeviceMonitorWidget(self.dev_scroll, serial, i + 1)
@@ -459,10 +508,30 @@ if GUI_ENABLED:
             try:
                 input_count   = len(glob.glob(os.path.join(INPUT_DIR, "*.dat")))
                 success_count = len(glob.glob(os.path.join(LOGIN_SUCCESS_DIR, "*.dat")))
+                
+                found_files   = glob.glob(os.path.join(FOUND_HERO_DIR, "*.dat"))
+                hero_count    = len(found_files)
+                
                 self.lbl_file_count.configure(text=f"📁 {input_count}")
                 self.lbl_succ_count.configure(text=f"✅ {success_count}")
+                if hasattr(self, 'lbl_hero_count'):
+                    self.lbl_hero_count.configure(text=f"⭐ {hero_count}")
+                    
                 if success_count:
                     self.add_stat_row("✅ login สำเร็จ", success_count)
+                
+                # แยกนับรายชื่อฮีโร่
+                hero_counts = {}
+                for fpath in found_files:
+                    fname = os.path.basename(fpath)
+                    parts = fname.split('+')
+                    if len(parts) > 1:
+                        for h in parts[:-1]:
+                            h_key = h.strip()
+                            hero_counts[h_key] = hero_counts.get(h_key, 0) + 1
+                            
+                for h_name, count in hero_counts.items():
+                    self.add_stat_row(f"⭐ {h_name}", count)
                 if self.login_times:
                     avg = sum(self.login_times) / len(self.login_times)
                     self.lbl_avg_time.configure(
@@ -525,15 +594,17 @@ def find_adb_executable():
         return True
     return False
 
-def connect_known_ports():
+def connect_known_ports(quiet=False, kill_server=True):
     try:
-        subprocess.run([adb_path, "kill-server"],  capture_output=True, timeout=5, shell=(os.name == 'nt'))
-        time.sleep(0.8)
-        subprocess.run([adb_path, "start-server"], capture_output=True, timeout=5, shell=(os.name == 'nt'))
-        time.sleep(0.8)
+        if kill_server:
+            subprocess.run([adb_path, "kill-server"],  capture_output=True, timeout=5, shell=(os.name == 'nt'))
+            time.sleep(0.8)
+            subprocess.run([adb_path, "start-server"], capture_output=True, timeout=5, shell=(os.name == 'nt'))
+            time.sleep(0.8)
 
         ports = range(5555, 5756, 2)
-        print(f"{Fore.YELLOW}[ADB] Scanning {len(range(5555,5756,2))} ports...{Style.RESET_ALL}")
+        if not quiet:
+            print(f"{Fore.YELLOW}[ADB] Scanning {len(ports)} ports...{Style.RESET_ALL}")
 
         def _try(port):
             try:
@@ -551,10 +622,11 @@ def connect_known_ports():
         with concurrent.futures.ThreadPoolExecutor(max_workers=50) as ex:
             connected = [r for r in ex.map(_try, ports) if r]
 
-        if connected:
+        if not quiet and connected:
             print(f"{Fore.GREEN}[ADB] Found {len(connected)} device(s){Style.RESET_ALL}")
     except Exception as e:
-        print(f"{Fore.RED}[ADB] Scan error: {e}{Style.RESET_ALL}")
+        if not quiet:
+            print(f"{Fore.RED}[ADB] Scan error: {e}{Style.RESET_ALL}")
 
 def get_connected_devices():
     try:
@@ -715,7 +787,8 @@ def pick_next_file():
         # Snapshot ไฟล์ที่ทำงานสำเร็จ/แยกประเภทไปแล้ว ทั้งหมด
         done_files = (glob.glob(os.path.join(LOGIN_SUCCESS_DIR, "*.dat")) +
                       glob.glob(os.path.join(BACKUP_ID_DIR, "*.dat")) +
-                      glob.glob(os.path.join(NO_HERO_DIR, "*.dat")))
+                      glob.glob(os.path.join(NO_HERO_DIR, "*.dat")) +
+                      glob.glob(os.path.join(FOUND_HERO_DIR, "*.dat")))
         already_done = {os.path.basename(p) for p in done_files}
 
         for f in sorted(glob.glob(os.path.join(INPUT_DIR, "*.dat"))):
@@ -1008,6 +1081,84 @@ def process_device_login(device):
                             time.sleep(4)
                             break
                     time.sleep(1)
+
+            # 7.5 Find Hero Sequence (Optional)
+            if FIND_HERO == 1:
+                gui_log(serial, "Find Hero sequence started...", step="Find Hero", status="working")
+                
+                # fin1 -> fin8
+                for i in range(1, 9):
+                    name = f"fin{i}.bmp"
+                    gui_log(serial, f"Waiting {name}...", step=name)
+                    deadline = time.time() + 10  # timeout 10 seconds per image
+                    while time.time() < deadline:
+                        check_device_reset(serial, cycle_start)
+                        img = get_screen_capture(device)
+                        if img is not None:
+                            thresh = 0.95 if i == 8 else 0.8
+                            pts = img_search(img, os.path.join(IMG_DIR, name), threshold=thresh)
+                            if pts:
+                                x, y = pts[0]
+                                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                time.sleep(2.5)
+                                break
+                        time.sleep(0.5)
+
+                # Delay 8s before scanning
+                gui_log(serial, "Delay 8s before scanning...", step="Delay 8s")
+                time.sleep(8)
+
+                # Scan for heroes simultaneously
+                gui_log(serial, "Scanning for heroes...", step="Scan Hero")
+                found_heroes = []
+                
+                deadline_scan = time.time() + 5
+                while time.time() < deadline_scan and not found_heroes:
+                    check_device_reset(serial, cycle_start)
+                    img = get_screen_capture(device)
+                    if img is not None:
+                        for hero_img, h_name in HERO_IMG_MAP.items():
+                            pts = img_search(img, os.path.join(IMG_DIR, hero_img), threshold=0.8)
+                            if pts:
+                                found_heroes.append(h_name)
+                        
+                        if found_heroes:
+                            break
+                    time.sleep(1)
+
+                device.shell("am force-stop jp.konami.pesam")
+                time.sleep(1)
+
+                if found_heroes:
+                    dest_dir = FOUND_HERO_DIR
+                    hero_prefix = "+".join(found_heroes)
+                    final_name = f"{hero_prefix}+{original_name}"
+                    gui_log(serial, f"⭐ HERO MATCH: {hero_prefix}", step="Match!")
+                else:
+                    dest_dir = NO_HERO_DIR
+                    final_name = original_name
+                    gui_log(serial, "No hero match found.", step="No Match")
+
+                dest = os.path.join(dest_dir, final_name)
+                if os.path.exists(file_path):
+                    time.sleep(2)
+                    try:
+                        if os.path.exists(dest):
+                            os.remove(dest)
+                        shutil.copy2(file_path, dest)
+                        os.remove(file_path)
+                        gui_log(serial, f"✅ Sorted: {original_name} -> {dest_dir}",
+                                step="Sorted", status="working")
+                    except Exception as me:
+                        gui_log(serial, f"⚠️ Sort failed: {me}", step="Sort Error")
+                    
+                    dur = time.time() - cycle_start
+                    dur_s = f"{dur/60:.1f}m" if dur >= 60 else f"{dur:.0f}s"
+                    if gui_instance:
+                        gui_instance.login_times.append(dur)
+
+                release_file(original_name)
+                continue  # วนกลับไป id ใหม่ทันที ตามที่ user ขอ
 
             # 8. Gacha Sequence (Optional)
             gacha_hero_found = None

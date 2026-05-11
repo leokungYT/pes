@@ -11,12 +11,12 @@ EVENT_IMG = 0
 # ── Box Sequence (main-pes.py) ────────────────────
 # 1 = เปิดกล่อง (ทำ play26-play31 และ box1-box4)
 # 0 = ข้ามการเปิดกล่อง (จบที่ play25 แล้วส่งไฟล์เลย)
-DO_BOX = 1
+DO_BOX = 0
 
 # ── Gacha Sequence (login.py) ──────────────────────
 # 1 = สุ่มกาชา (ต่อจากจบ box4)
 # 0 = ไม่สุ่มกาชา (จบงานปกติ)
-DO_GACHA = 1
+DO_GACHA = 0
 
 # รายชื่อนักเตะที่ต้องการเก็บ (Backup-id)
 HERO_LIST = [
@@ -32,3 +32,15 @@ HERO_LIST = [
 IMG_DIR           = "img"
 INPUT_DIR         = "input-id"
 LOGIN_SUCCESS_DIR = "login-success"
+
+# ── Find Hero Sequence ─────────────────────────────
+# 1 = ทำงาน fin1-fin8 และค้นหาฮีโร่ตามภาพ
+# 0 = ข้าม
+FIND_HERO = 1
+
+# แมพไฟล์ภาพฮีโร่เข้ากับชื่อฮีโร่
+HERO_IMG_MAP = {
+    "heroo1.bmp": "sasuke",
+    "heroo2.bmp": "minato",
+    "heroo3.bmp": "naruto"
+}
