@@ -678,6 +678,53 @@ def get_screen_capture(device):
                 x, y = fg_pts[0]
                 device.shell(f"input swipe {x} {y} {x} {y} 100")
 
+            fl_pts = img_search(img, os.path.join(IMG_DIR, "fixloading.bmp"))
+            if fl_pts:
+                gui_log(device.serial, "Floating: fixloading.bmp found! Executing fixload1 -> fixload2", step="Fix Loading")
+                # Wait up to 20 seconds for fixload1 and click it until it disappears
+                deadline1 = time.time() + 20
+                clicked_1 = False
+                while time.time() < deadline1:
+                    raw_tmp1 = device.screencap()
+                    if raw_tmp1:
+                        img_tmp1 = cv2.imdecode(np.frombuffer(raw_tmp1, np.uint8), cv2.IMREAD_GRAYSCALE)
+                        if img_tmp1 is not None:
+                            pts1 = img_search(img_tmp1, os.path.join(IMG_DIR, "fixload1.bmp"))
+                            if pts1:
+                                x, y = pts1[0]
+                                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                gui_log(device.serial, "Clicked fixload1.bmp", step="Fix Loading")
+                                time.sleep(2)
+                                clicked_1 = True
+                                deadline1 = time.time() + 10 # Extend deadline after click
+                                continue
+                            elif clicked_1:
+                                # It was clicked and is no longer found
+                                break
+                    time.sleep(0.5)
+
+                if clicked_1:
+                    # Wait up to 10 seconds for fixload2
+                    deadline2 = time.time() + 10
+                    while time.time() < deadline2:
+                        raw_tmp2 = device.screencap()
+                        if raw_tmp2:
+                            img_tmp2 = cv2.imdecode(np.frombuffer(raw_tmp2, np.uint8), cv2.IMREAD_GRAYSCALE)
+                            if img_tmp2 is not None:
+                                pts2 = img_search(img_tmp2, os.path.join(IMG_DIR, "fixload2.bmp"))
+                                if pts2:
+                                    x, y = pts2[0]
+                                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                    gui_log(device.serial, "Clicked fixload2.bmp", step="Fix Loading")
+                                    time.sleep(2)
+                                    break
+                        time.sleep(0.5)
+
+                # Re-capture the screen after fixing so the caller gets a fresh image
+                raw = device.screencap()
+                if raw:
+                    img = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_GRAYSCALE)
+
         update_gui(device.serial, screenshot=img)
         return img
     except Exception:
