@@ -70,6 +70,8 @@ FOUND_HERO_DIR = "found-hero"
 os.makedirs(BACKUP_ID_DIR, exist_ok=True)
 os.makedirs(NO_HERO_DIR, exist_ok=True)
 os.makedirs(FOUND_HERO_DIR, exist_ok=True)
+FILE_ERROR_DIR = "file-error"
+os.makedirs(FILE_ERROR_DIR, exist_ok=True)
 
 # ── Exceptions ────────────────────────────────────────────────────────────────
 class DeviceResetException(Exception):  pass
@@ -658,12 +660,41 @@ def get_connected_devices():
 # ═════════════════════════════════════════════════════════════════════════════
 # Screen / image
 # ═════════════════════════════════════════════════════════════════════════════
-def get_screen_capture(device):
+def fast_screencap(device):
+    try:
+        conn = device.client.create_connection(timeout=device.client.timeout)
+        conn.send(f"host:transport:{device.serial}")
+        conn.check_status()
+        conn.send("shell:screencap")
+        conn.check_status()
+        raw = conn.read_all()
+        
+        if len(raw) > 16:
+            w = int.from_bytes(raw[0:4], byteorder='little')
+            h = int.from_bytes(raw[4:8], byteorder='little')
+            # 12 bytes header
+            expected_size = w * h * 4
+            if len(raw) >= 12 + expected_size:
+                img_data = raw[12:12+expected_size]
+                img = np.frombuffer(img_data, dtype=np.uint8).reshape((h, w, 4))
+                return cv2.cvtColor(img, cv2.COLOR_RGBA2GRAY)
+    except Exception:
+        pass
+
+    # Fallback
     try:
         raw = device.screencap()
-        if not raw:
+        if raw:
+            return cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_GRAYSCALE)
+    except:
+        pass
+    return None
+
+def get_screen_capture(device):
+    try:
+        img = fast_screencap(device)
+        if img is None:
             return None
-        img = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_GRAYSCALE)
         
         if img is not None:
             dl_pts = img_search(img, os.path.join(IMG_DIR, "download.bmp"))
@@ -678,6 +709,24 @@ def get_screen_capture(device):
                 x, y = fg_pts[0]
                 device.shell(f"input swipe {x} {y} {x} {y} 100")
 
+            fc_pts = img_search(img, os.path.join(IMG_DIR, "fixclear.bmp"))
+            if fc_pts:
+                gui_log(device.serial, "Floating: fixclear.bmp found! Clearing app and moving file to file-error", step="Fix Clear")
+                device.shell("pm clear jp.konami.pesam")
+                
+                original_name = DEVICE_FILE_ASSIGNMENTS.get(device.serial)
+                if original_name:
+                    file_path = os.path.join(INPUT_DIR, original_name)
+                    dest_path = os.path.join(FILE_ERROR_DIR, original_name)
+                    if os.path.exists(file_path):
+                        if os.path.exists(dest_path):
+                            os.remove(dest_path)
+                        shutil.copy2(file_path, dest_path)
+                        os.remove(file_path)
+                        gui_log(device.serial, f"Moved {original_name} to file-error", step="Fix Clear")
+                
+                raise DeviceResetException("fixclear.bmp detected")
+
             fl_pts = img_search(img, os.path.join(IMG_DIR, "fixloading.bmp"))
             if fl_pts:
                 gui_log(device.serial, "Floating: fixloading.bmp found! Executing fixload1 -> fixload2", step="Fix Loading")
@@ -685,10 +734,8 @@ def get_screen_capture(device):
                 deadline1 = time.time() + 20
                 clicked_1 = False
                 while time.time() < deadline1:
-                    raw_tmp1 = device.screencap()
-                    if raw_tmp1:
-                        img_tmp1 = cv2.imdecode(np.frombuffer(raw_tmp1, np.uint8), cv2.IMREAD_GRAYSCALE)
-                        if img_tmp1 is not None:
+                    img_tmp1 = fast_screencap(device)
+                    if img_tmp1 is not None:
                             pts1 = img_search(img_tmp1, os.path.join(IMG_DIR, "fixload1.bmp"))
                             if pts1:
                                 x, y = pts1[0]
@@ -707,10 +754,8 @@ def get_screen_capture(device):
                     # Wait up to 10 seconds for fixload2
                     deadline2 = time.time() + 10
                     while time.time() < deadline2:
-                        raw_tmp2 = device.screencap()
-                        if raw_tmp2:
-                            img_tmp2 = cv2.imdecode(np.frombuffer(raw_tmp2, np.uint8), cv2.IMREAD_GRAYSCALE)
-                            if img_tmp2 is not None:
+                        img_tmp2 = fast_screencap(device)
+                        if img_tmp2 is not None:
                                 pts2 = img_search(img_tmp2, os.path.join(IMG_DIR, "fixload2.bmp"))
                                 if pts2:
                                     x, y = pts2[0]
@@ -721,9 +766,7 @@ def get_screen_capture(device):
                         time.sleep(0.5)
 
                 # Re-capture the screen after fixing so the caller gets a fresh image
-                raw = device.screencap()
-                if raw:
-                    img = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_GRAYSCALE)
+                img = fast_screencap(device)
 
         update_gui(device.serial, screenshot=img)
         return img
