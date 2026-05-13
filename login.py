@@ -1051,6 +1051,15 @@ def process_device_login(device):
                 if img is not None:
                     pts = img_search(img, os.path.join(IMG_DIR, "play8.bmp"))
                     if pts:
+                        # Prioritize fixlg3 if both are present
+                        pts_lg3 = img_search(img, os.path.join(IMG_DIR, "fixlg3.bmp"))
+                        if pts_lg3:
+                            gui_log(serial, "play8 and fixlg3 found! Clicking fixlg3 first", step="play8")
+                            x, y = pts_lg3[0]
+                            device.shell(f"input swipe {x} {y} {x} {y} 100")
+                            time.sleep(2)
+                            continue
+                            
                         x, y = pts[0]
                         device.shell(f"input swipe {x} {y} {x} {y} 100")
                         play8_clicked = True
