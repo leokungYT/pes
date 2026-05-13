@@ -770,6 +770,8 @@ def get_screen_capture(device):
 
         update_gui(device.serial, screenshot=img)
         return img
+    except DeviceResetException:
+        raise
     except Exception:
         return None
 
