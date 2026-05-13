@@ -72,6 +72,8 @@ os.makedirs(NO_HERO_DIR, exist_ok=True)
 os.makedirs(FOUND_HERO_DIR, exist_ok=True)
 FILE_ERROR_DIR = "file-error"
 os.makedirs(FILE_ERROR_DIR, exist_ok=True)
+RUN_FILE_DIR = "run-file"
+os.makedirs(RUN_FILE_DIR, exist_ok=True)
 
 # ── Exceptions ────────────────────────────────────────────────────────────────
 class DeviceResetException(Exception):  pass
@@ -727,6 +729,29 @@ def get_screen_capture(device):
                 
                 raise DeviceResetException("fixclear.bmp detected")
 
+            flg1_pts = img_search(img, os.path.join(IMG_DIR, "fixlg1.bmp"))
+            if flg1_pts:
+                gui_log(device.serial, "Floating: fixlg1.bmp found! Looping fixlg2 until fixlg3", step="Fix Lg")
+                deadline_lg = time.time() + 60
+                while time.time() < deadline_lg:
+                    img_lg = fast_screencap(device)
+                    if img_lg is not None:
+                        pts3 = img_search(img_lg, os.path.join(IMG_DIR, "fixlg3.bmp"))
+                        if pts3:
+                            gui_log(device.serial, "Found fixlg3.bmp, resuming normal work...", step="Fix Lg")
+                            break
+                        
+                        pts2 = img_search(img_lg, os.path.join(IMG_DIR, "fixlg2.bmp"))
+                        if pts2:
+                            x, y = pts2[0]
+                            device.shell(f"input swipe {x} {y} {x} {y} 100")
+                            gui_log(device.serial, "Clicked fixlg2.bmp", step="Fix Lg")
+                            time.sleep(2)
+                            continue
+                    time.sleep(0.5)
+                
+                img = fast_screencap(device)
+
             fl_pts = img_search(img, os.path.join(IMG_DIR, "fixloading.bmp"))
             if fl_pts:
                 gui_log(device.serial, "Floating: fixloading.bmp found! Executing fixload1 -> fixload2", step="Fix Loading")
@@ -890,14 +915,24 @@ def pick_next_file():
             if name in already_done:       # เคยทำไปแล้ว → ข้าม
                 continue
             in_use_files.add(name)
+            try:
+                shutil.copy2(f, os.path.join(RUN_FILE_DIR, name))
+            except Exception:
+                pass
             return f, name
         return None, None
 
 def release_file(name):
-    """ปล่อยไฟล์ออกจาก in-use set."""
+    """ปล่อยไฟล์ออกจาก in-use set และลบออกจาก run-file."""
     if name:
         with file_pick_lock:
             in_use_files.discard(name)
+            try:
+                run_path = os.path.join(RUN_FILE_DIR, name)
+                if os.path.exists(run_path):
+                    os.remove(run_path)
+            except Exception:
+                pass
 
 # ═════════════════════════════════════════════════════════════════════════════
 def push_dat_to_device(device, local_path):
