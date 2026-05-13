@@ -731,14 +731,23 @@ def get_screen_capture(device):
 
             flg1_pts = img_search(img, os.path.join(IMG_DIR, "fixlg1.bmp"))
             if flg1_pts:
-                gui_log(device.serial, "Floating: fixlg1.bmp found! Looping fixlg2 until fixlg3", step="Fix Lg")
+                gui_log(device.serial, "Floating: fixlg1.bmp found! Looping fixlg2 -> fixlg3", step="Fix Lg")
                 deadline_lg = time.time() + 60
+                seen_lg3 = False
                 while time.time() < deadline_lg:
                     img_lg = fast_screencap(device)
                     if img_lg is not None:
                         pts3 = img_search(img_lg, os.path.join(IMG_DIR, "fixlg3.bmp"))
                         if pts3:
-                            gui_log(device.serial, "Found fixlg3.bmp, resuming normal work...", step="Fix Lg")
+                            x, y = pts3[0]
+                            device.shell(f"input swipe {x} {y} {x} {y} 100")
+                            gui_log(device.serial, "Clicked fixlg3.bmp", step="Fix Lg")
+                            time.sleep(2)
+                            seen_lg3 = True
+                            deadline_lg = time.time() + 10  # Extend deadline after click
+                            continue
+                        elif seen_lg3:
+                            gui_log(device.serial, "fixlg3.bmp disappeared, resuming normal work...", step="Fix Lg")
                             break
                         
                         pts2 = img_search(img_lg, os.path.join(IMG_DIR, "fixlg2.bmp"))
