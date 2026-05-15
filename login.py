@@ -1183,9 +1183,9 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
             gui_log(serial, f"[Loop {loop_num}] gachafree1 not found after 10 swipes, skipping loop", step="Skip")
             continue  # ข้ามไป loop ถัดไป (หรือจบถ้า loop 2)
 
-        # 2b. รอ gachafree2.bmp → กดจนกว่าจะหายไป
+        # 2b. รอ gachafree2.bmp → กดจนกว่าจะหายไป (timeout 20s → file-error)
         gui_log(serial, f"[Loop {loop_num}] Waiting gachafree2.bmp...", step="gachafree2")
-        deadline_gf2 = time.time() + 30
+        deadline_gf2 = time.time() + 20
         clicked_gf2 = False
         while time.time() < deadline_gf2:
             check_device_reset(serial, cycle_start)
@@ -1202,6 +1202,24 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                 elif clicked_gf2:
                     break  # เคยกดแล้ว + หายไปแล้ว → ไปต่อ
             time.sleep(1)
+
+        # ถ้าไม่เจอ gachafree2 เลย → file-error แล้วไปไฟล์ใหม่
+        if not clicked_gf2:
+            gui_log(serial, f"[Loop {loop_num}] gachafree2 not found in 20s → file-error", step="Error")
+            device.shell("am force-stop jp.konami.pesam")
+            time.sleep(1)
+            dest = os.path.join(FILE_ERROR_DIR, original_name)
+            if os.path.exists(file_path):
+                try:
+                    if os.path.exists(dest):
+                        os.remove(dest)
+                    shutil.copy2(file_path, dest)
+                    os.remove(file_path)
+                    gui_log(serial, f"Sorted → file-error: {original_name}", step="Sorted")
+                except Exception as e:
+                    gui_log(serial, f"Sort failed: {e}", step="Sort Error")
+            release_file(original_name)
+            return True  # break ออกไปเริ่มไฟล์ใหม่
 
         # 2c. รอ checkpointgacha.bmp → OCR scan
         gui_log(serial, f"[Loop {loop_num}] Waiting checkpointgacha (OCR)...", step="OCR Wait")
