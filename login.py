@@ -1410,6 +1410,21 @@ def process_device_login(device):
                             gui_log(serial, f"cancel.bmp found — clicking ({x},{y})", step="Click Cancel")
                             device.shell(f"input swipe {x} {y} {x} {y} 100")
                             time.sleep(1)
+                            # กดจนกว่าจะหายไป ไม่เจอครบ 5 วิ ค่อยไปต่อ
+                            last_seen = time.time()
+                            while time.time() - last_seen < 5:
+                                check_device_reset(serial, cycle_start)
+                                img2 = get_screen_capture(device)
+                                if img2 is not None:
+                                    pts2 = img_search(img2, os.path.join(IMG_DIR, "cancel.bmp"))
+                                    if pts2:
+                                        x2, y2 = pts2[0]
+                                        device.shell(f"input swipe {x2} {y2} {x2} {y2} 100")
+                                        gui_log(serial, "cancel still visible, clicking again...", step="Cancel")
+                                        time.sleep(1)
+                                        last_seen = time.time()
+                                time.sleep(0.5)
+                            gui_log(serial, "cancel.bmp gone for 5s, moving on", step="Cancel OK")
                             break
 
             # 7. Box Sequence (Optional)
