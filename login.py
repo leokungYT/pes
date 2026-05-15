@@ -50,7 +50,7 @@ bot_running   = False
 gui_instance  = None
 
 # ── โหลด config จาก config.py ──────────────────────────────────────────────
-from config import EVENT_IMG, DO_BOX, DO_GACHA, HERO_LIST, IMG_DIR, INPUT_DIR, LOGIN_SUCCESS_DIR, FIND_HERO, HERO_IMG_MAP
+from config import EVENT_IMG, DO_BOX, DO_GACHA, HERO_LIST, IMG_DIR, INPUT_DIR, LOGIN_SUCCESS_DIR, FIND_HERO, HERO_IMG_MAP, GACHA_FREE, HERO_LIST_FREE
 
 REMOTE_AUTH_DIR   = "/data/data/jp.konami.pesam/files/SaveData/AUTH"
 REMOTE_DAT_FILE   = f"{REMOTE_AUTH_DIR}/online_user_id_data.dat"
@@ -74,6 +74,8 @@ FILE_ERROR_DIR = "file-error"
 os.makedirs(FILE_ERROR_DIR, exist_ok=True)
 RUN_FILE_DIR = "run-file"
 os.makedirs(RUN_FILE_DIR, exist_ok=True)
+RANDOM_FAIL_DIR = "random-fail"
+os.makedirs(RANDOM_FAIL_DIR, exist_ok=True)
 
 # ── Exceptions ────────────────────────────────────────────────────────────────
 class DeviceResetException(Exception):  pass
@@ -276,7 +278,7 @@ if GUI_ENABLED:
 
             win = ctk.CTkToplevel(self)
             win.title("⚙️ Config")
-            win.geometry("340x240")
+            win.geometry("340x290")
             win.resizable(False, False)
             win.grab_set()   # modal
 
@@ -319,13 +321,23 @@ if GUI_ENABLED:
             ctk.CTkSwitch(row4, text="", variable=var_find_hero,
                           onvalue=1, offvalue=0).pack(side="right")
 
+            # ── GACHA_FREE toggle ──────────────────────────
+            row5 = ctk.CTkFrame(win, fg_color="transparent")
+            row5.pack(fill="x", padx=20, pady=4)
+            ctk.CTkLabel(row5, text="Gacha Free Mode",
+                         font=ctk.CTkFont(size=12)).pack(side="left")
+            var_gacha_free = ctk.IntVar(value=getattr(cfg, 'GACHA_FREE', 0))
+            ctk.CTkSwitch(row5, text="", variable=var_gacha_free,
+                          onvalue=1, offvalue=0).pack(side="right")
+
             # ── Save button ───────────────────────────────
             def _save():
-                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO
+                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE
                 new_event = var_event.get()
                 new_box   = var_box.get()
                 new_gacha = var_gacha.get()
                 new_find  = var_find_hero.get()
+                new_gfree = var_gacha_free.get()
                 # เขียนลง config.py
                 cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.py")
                 with open(cfg_path, "r", encoding="utf-8") as f:
@@ -342,17 +354,23 @@ if GUI_ENABLED:
                                      content, flags=re.MULTILINE)
                 else:
                     content += f"\nFIND_HERO = {new_find}\n"
+                if re.search(r"^GACHA_FREE\s*=\s*\d", content, flags=re.MULTILINE):
+                    content = re.sub(r"^GACHA_FREE\s*=\s*\d", f"GACHA_FREE = {new_gfree}",
+                                     content, flags=re.MULTILINE)
+                else:
+                    content += f"\nGACHA_FREE = {new_gfree}\n"
                 with open(cfg_path, "w", encoding="utf-8") as f:
                     f.write(content)
                 # อัปเดต runtime ด้วย
-                EVENT_IMG = new_event
-                DO_BOX    = new_box
-                DO_GACHA  = new_gacha
-                FIND_HERO = new_find
+                EVENT_IMG  = new_event
+                DO_BOX     = new_box
+                DO_GACHA   = new_gacha
+                FIND_HERO  = new_find
+                GACHA_FREE = new_gfree
                 importlib.reload(cfg)
                 label_status.configure(text=f"✅ Saved!",
                                        text_color="#4caf50")
-                self.log(f"Config saved: EVENT_IMG={new_event}, DO_BOX={new_box}, DO_GACHA={new_gacha}, FIND_HERO={new_find}")
+                self.log(f"Config saved: EVENT={new_event}, BOX={new_box}, GACHA={new_gacha}, HERO={new_find}, GFREE={new_gfree}")
 
             ctk.CTkButton(win, text="💾 Save", fg_color="#2cc985",
                           hover_color="#229f69", command=_save).pack(pady=8)
@@ -996,6 +1014,267 @@ def push_dat_to_device(device, local_path):
         if os.path.exists(tmp_local):
             os.remove(tmp_local)
 
+def find_hero_mode(device, cycle_start, serial, original_name, file_path):
+    """
+    Dedicated function to find heroes with robust checking (Triple Check).
+    Checks multiple times to ensure a consistent match and avoid false positives.
+    """
+    gui_log(serial, "Find Hero sequence started...", step="Find Hero", status="working")
+    
+    # 1. fin1 -> fin8 navigation
+    for i in range(1, 9):
+        name = f"fin{i}.bmp"
+        gui_log(serial, f"Waiting {name}...", step=name)
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            check_device_reset(serial, cycle_start)
+            img = get_screen_capture(device)
+            if img is not None:
+                # fin8 is the most critical confirmation, use higher threshold
+                thresh = 0.95 if i == 8 else 0.8
+                pts = img_search(img, os.path.join(IMG_DIR, name), threshold=thresh)
+                if pts:
+                    x, y = pts[0]
+                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                    time.sleep(2.5)
+                    break
+            time.sleep(0.5)
+
+    # 2. Triple Check Scan
+    gui_log(serial, "Delay 8s before scanning...", step="Delay 8s")
+    time.sleep(8)
+
+    gui_log(serial, "Scanning (Triple Check)...", step="Scan Hero")
+    hero_hits = {} # hero_name -> count
+    scans_done = 0
+    max_attempts = 5
+    required_hits = 3
+    
+    while scans_done < max_attempts:
+        check_device_reset(serial, cycle_start)
+        img = get_screen_capture(device)
+        if img is not None:
+            found_this_round = set()
+            for hero_img, h_name in HERO_IMG_MAP.items():
+                pts = img_search(img, os.path.join(IMG_DIR, hero_img), threshold=0.95)
+                if pts:
+                    found_this_round.add(h_name)
+            
+            for h_name in found_this_round:
+                hero_hits[h_name] = hero_hits.get(h_name, 0) + 1
+            
+            scans_done += 1
+            gui_log(serial, f"Scan {scans_done}/{max_attempts} complete", step="Scanning")
+            
+            # If we found any hero enough times, we could potentially stop early,
+            # but for maximum reliability as requested, we'll finish at least 3 scans
+            # or all 5 if some matches are inconsistent.
+            if any(count >= required_hits for count in hero_hits.values()) and scans_done >= 3:
+                break
+        time.sleep(1.2)
+
+    found_heroes = [h for h, count in hero_hits.items() if count >= required_hits]
+
+    # 3. Shutdown and Move
+    device.shell("am force-stop jp.konami.pesam")
+    time.sleep(1)
+
+    if found_heroes:
+        dest_dir = FOUND_HERO_DIR
+        hero_prefix = "+".join(found_heroes)
+        final_name = f"{hero_prefix}+{original_name}"
+        gui_log(serial, f"⭐ MATCH: {hero_prefix}", step="Match!")
+    else:
+        dest_dir = NO_HERO_DIR
+        final_name = original_name
+        gui_log(serial, "No hero match found.", step="No Match")
+
+    dest = os.path.join(dest_dir, final_name)
+    if os.path.exists(file_path):
+        time.sleep(2)
+        try:
+            if os.path.exists(dest):
+                os.remove(dest)
+            shutil.copy2(file_path, dest)
+            os.remove(file_path)
+            gui_log(serial, f"✅ Sorted: {dest_dir}", step="Sorted", status="working")
+        except Exception as me:
+            gui_log(serial, f"⚠️ Sort failed: {me}", step="Sort Error")
+        
+        dur = time.time() - cycle_start
+        if gui_instance:
+            gui_instance.login_times.append(dur)
+
+    release_file(original_name)
+    return True
+
+def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
+    """
+    Gacha Free mode (2 loops):
+    Each loop: swipe to find gachafree1 → click → gachafree2 → click → checkpointgacha → OCR
+    Accumulates hero names from both loops.
+    - Found heroes → backup-id with hero1+hero2+original.dat
+    - No heroes → random-fail with original.dat
+    """
+    gui_log(serial, "Gacha Free sequence started...", step="GachaFree", status="working")
+
+    # 1. gacha1 → gacha2 (ทำแค่ครั้งเดียวตอนเริ่ม)
+    for i in range(1, 3):
+        name = f"gacha{i}.bmp"
+        gui_log(serial, f"Waiting {name}...", step=name)
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            check_device_reset(serial, cycle_start)
+            img = get_screen_capture(device)
+            if img is not None:
+                pts = img_search(img, os.path.join(IMG_DIR, name))
+                if pts:
+                    x, y = pts[0]
+                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                    time.sleep(4)
+                    break
+            time.sleep(1)
+
+    # 2. ทำ 2 loops
+    found_heroes = []  # เก็บชื่อฮีโร่ที่เจอจากทุก loop
+
+    for loop_num in range(1, 3):
+        gui_log(serial, f"=== Gacha Free Loop {loop_num}/2 ===", step=f"Loop {loop_num}")
+
+        # 2a. เลื่อนหา gachafree1.bmp (เช็คก่อน → ไม่เจอ → เลื่อน, ครบ 10 รอบ = ข้าม loop นี้)
+        gui_log(serial, f"[Loop {loop_num}] Looking for gachafree1.bmp...", step="Swipe Free")
+        found_free = False
+        miss_count = 0
+        max_miss = 10
+
+        while miss_count < max_miss:
+            check_device_reset(serial, cycle_start)
+            img = get_screen_capture(device)
+            if img is not None:
+                pts = img_search(img, os.path.join(IMG_DIR, "gachafree1.bmp"), threshold=0.95)
+                if pts:
+                    x, y = pts[0]
+                    gui_log(serial, f"[Loop {loop_num}] gachafree1 found! Clicking ({x},{y})", step="Free Found")
+                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                    time.sleep(2)
+                    found_free = True
+                    # กดจนกว่าจะหายไป
+                    while True:
+                        check_device_reset(serial, cycle_start)
+                        img2 = get_screen_capture(device)
+                        if img2 is not None:
+                            pts2 = img_search(img2, os.path.join(IMG_DIR, "gachafree1.bmp"), threshold=0.95)
+                            if pts2:
+                                x2, y2 = pts2[0]
+                                device.shell(f"input swipe {x2} {y2} {x2} {y2} 100")
+                                time.sleep(2)
+                            else:
+                                break
+                        else:
+                            break
+                    time.sleep(2)
+                    break
+            miss_count += 1
+            gui_log(serial, f"[Loop {loop_num}] gachafree1 not here, swiping... ({miss_count}/{max_miss})", step="Swipe")
+            device.shell("input swipe 618 308 54 306 3000")
+            time.sleep(2)
+
+        if not found_free:
+            gui_log(serial, f"[Loop {loop_num}] gachafree1 not found after 10 swipes, skipping loop", step="Skip")
+            continue  # ข้ามไป loop ถัดไป (หรือจบถ้า loop 2)
+
+        # 2b. รอ gachafree2.bmp → กดจนกว่าจะหายไป
+        gui_log(serial, f"[Loop {loop_num}] Waiting gachafree2.bmp...", step="gachafree2")
+        deadline_gf2 = time.time() + 30
+        clicked_gf2 = False
+        while time.time() < deadline_gf2:
+            check_device_reset(serial, cycle_start)
+            img = get_screen_capture(device)
+            if img is not None:
+                pts = img_search(img, os.path.join(IMG_DIR, "gachafree2.bmp"), threshold=0.95)
+                if pts:
+                    x, y = pts[0]
+                    gui_log(serial, f"[Loop {loop_num}] gachafree2 found! Clicking ({x},{y})", step="Free2 Found")
+                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                    time.sleep(2)
+                    clicked_gf2 = True
+                    deadline_gf2 = time.time() + 10  # ต่อเวลารอหายไป
+                elif clicked_gf2:
+                    break  # เคยกดแล้ว + หายไปแล้ว → ไปต่อ
+            time.sleep(1)
+
+        # 2c. รอ checkpointgacha.bmp → OCR scan
+        gui_log(serial, f"[Loop {loop_num}] Waiting checkpointgacha (OCR)...", step="OCR Wait")
+        deadline_cp = time.time() + 30
+        while time.time() < deadline_cp:
+            check_device_reset(serial, cycle_start)
+            img = get_screen_capture(device)
+            if img is not None:
+                pts = img_search(img, os.path.join(IMG_DIR, "checkpointgacha.bmp"))
+                if pts:
+                    gacha_region = Region(381, 301, 202, 37)
+                    ocr_text = read_screen_text(img, region=gacha_region)
+                    display_text = ocr_text if ocr_text else "<EMPTY>"
+                    gui_log(serial, f"[Loop {loop_num}] OCR Result: {display_text}", step="OCR Done")
+                    print(f"[{serial}] GachaFree Loop{loop_num} OCR: {display_text}")
+
+                    for h in HERO_LIST_FREE:
+                        if h and h.strip().lower() in ocr_text.lower():
+                            found_heroes.append(h.strip())
+                            gui_log(serial, f"[Loop {loop_num}] ⭐ Match: {h.strip()}", step="Match!")
+                            break
+                    break
+            time.sleep(1)
+
+        # 2d. รอ next.bmp → click (จบ loop นี้แล้วค่อยไป loop ถัดไป)
+        gui_log(serial, f"[Loop {loop_num}] Waiting next.bmp...", step="Next")
+        deadline_next = time.time() + 15
+        while time.time() < deadline_next:
+            check_device_reset(serial, cycle_start)
+            img = get_screen_capture(device)
+            if img is not None:
+                pts = img_search(img, os.path.join(IMG_DIR, "next.bmp"))
+                if pts:
+                    x, y = pts[0]
+                    gui_log(serial, f"[Loop {loop_num}] next.bmp found! Clicking ({x},{y})", step="Next OK")
+                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                    time.sleep(3)
+                    break
+            time.sleep(1)
+
+    # 3. จบ 2 loops → Sort file
+    device.shell("am force-stop jp.konami.pesam")
+    time.sleep(1)
+
+    if found_heroes:
+        dest_dir = BACKUP_ID_DIR
+        hero_prefix = "+".join(found_heroes)
+        final_name = f"{hero_prefix}+{original_name}"
+        gui_log(serial, f"⭐ GACHA FREE RESULT: {hero_prefix}", step="Match!")
+    else:
+        dest_dir = RANDOM_FAIL_DIR
+        final_name = original_name
+        gui_log(serial, "No match in both loops → random-fail", step="No Match")
+
+    dest = os.path.join(dest_dir, final_name)
+    if os.path.exists(file_path):
+        time.sleep(2)
+        try:
+            if os.path.exists(dest):
+                os.remove(dest)
+            shutil.copy2(file_path, dest)
+            os.remove(file_path)
+            gui_log(serial, f"✅ Sorted: {final_name} → {dest_dir}", step="Sorted", status="working")
+        except Exception as e:
+            gui_log(serial, f"⚠️ Sort failed: {e}", step="Sort Error")
+
+        dur = time.time() - cycle_start
+        if gui_instance:
+            gui_instance.login_times.append(dur)
+
+    release_file(original_name)
+    return True
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Main bot loop
@@ -1193,25 +1472,23 @@ def process_device_login(device):
                                 break
                         time.sleep(0.8)
                 
-                # box3 (เช็คซ้ำ 5 รอบ พร้อม Timeout กันค้าง)
-                for i in range(1, 6):
-                    gui_log(serial, f"Waiting box3.bmp ({i}/5)...", step=f"box3-{i}")
-                    deadline_box3 = time.time() + 10
-                    found_this_round = False
-                    while time.time() < deadline_box3:
-                        check_device_reset(serial, cycle_start)
-                        img = get_screen_capture(device)
-                        if img is not None:
-                            pts = img_search(img, os.path.join(IMG_DIR, "box3.bmp"))
-                            if pts:
-                                x, y = pts[0]
-                                device.shell(f"input swipe {x} {y} {x} {y} 100")
-                                time.sleep(4)
-                                found_this_round = True
-                                break
-                        time.sleep(1)
-                    if not found_this_round:
-                        gui_log(serial, f"box3 ({i}/5) timeout, moving next", step="box3-next")
+                # box3 (กดเรื่อยๆ จนไม่เจอครบ 10s ค่อยไป box4)
+                gui_log(serial, "Waiting box3.bmp...", step="box3")
+                last_seen = time.time()
+                while time.time() - last_seen < 10:
+                    check_device_reset(serial, cycle_start)
+                    img = get_screen_capture(device)
+                    if img is not None:
+                        pts = img_search(img, os.path.join(IMG_DIR, "box3.bmp"))
+                        if pts:
+                            x, y = pts[0]
+                            device.shell(f"input swipe {x} {y} {x} {y} 100")
+                            gui_log(serial, "box3.bmp clicked!", step="box3")
+                            time.sleep(4)
+                            last_seen = time.time()  # รีเซ็ตนับใหม่
+                            continue
+                    time.sleep(1)
+                gui_log(serial, "box3 not seen for 10s, moving to box4", step="box3-done")
 
                 # box4
                 gui_log(serial, "Waiting box4.bmp...", step="box4")
@@ -1229,81 +1506,13 @@ def process_device_login(device):
 
             # 7.5 Find Hero Sequence (Optional)
             if FIND_HERO == 1:
-                gui_log(serial, "Find Hero sequence started...", step="Find Hero", status="working")
-                
-                # fin1 -> fin8
-                for i in range(1, 9):
-                    name = f"fin{i}.bmp"
-                    gui_log(serial, f"Waiting {name}...", step=name)
-                    deadline = time.time() + 10  # timeout 10 seconds per image
-                    while time.time() < deadline:
-                        check_device_reset(serial, cycle_start)
-                        img = get_screen_capture(device)
-                        if img is not None:
-                            thresh = 0.95 if i == 8 else 0.8
-                            pts = img_search(img, os.path.join(IMG_DIR, name), threshold=thresh)
-                            if pts:
-                                x, y = pts[0]
-                                device.shell(f"input swipe {x} {y} {x} {y} 100")
-                                time.sleep(2.5)
-                                break
-                        time.sleep(0.5)
+                if find_hero_mode(device, cycle_start, serial, original_name, file_path):
+                    continue  # Start next file immediately
 
-                # Delay 8s before scanning
-                gui_log(serial, "Delay 8s before scanning...", step="Delay 8s")
-                time.sleep(8)
-
-                # Scan for heroes simultaneously
-                gui_log(serial, "Scanning for heroes...", step="Scan Hero")
-                found_heroes = []
-                
-                deadline_scan = time.time() + 5
-                while time.time() < deadline_scan and not found_heroes:
-                    check_device_reset(serial, cycle_start)
-                    img = get_screen_capture(device)
-                    if img is not None:
-                        for hero_img, h_name in HERO_IMG_MAP.items():
-                            pts = img_search(img, os.path.join(IMG_DIR, hero_img), threshold=0.8)
-                            if pts:
-                                found_heroes.append(h_name)
-                        
-                        if found_heroes:
-                            break
-                    time.sleep(1)
-
-                device.shell("am force-stop jp.konami.pesam")
-                time.sleep(1)
-
-                if found_heroes:
-                    dest_dir = FOUND_HERO_DIR
-                    hero_prefix = "+".join(found_heroes)
-                    final_name = f"{hero_prefix}+{original_name}"
-                    gui_log(serial, f"⭐ HERO MATCH: {hero_prefix}", step="Match!")
-                else:
-                    dest_dir = NO_HERO_DIR
-                    final_name = original_name
-                    gui_log(serial, "No hero match found.", step="No Match")
-
-                dest = os.path.join(dest_dir, final_name)
-                if os.path.exists(file_path):
-                    time.sleep(2)
-                    try:
-                        if os.path.exists(dest):
-                            os.remove(dest)
-                        shutil.copy2(file_path, dest)
-                        os.remove(file_path)
-                        gui_log(serial, f"✅ Sorted: {original_name} -> {dest_dir}",
-                                step="Sorted", status="working")
-                    except Exception as me:
-                        gui_log(serial, f"⚠️ Sort failed: {me}", step="Sort Error")
-                    
-                    dur = time.time() - cycle_start
-                    dur_s = f"{dur/60:.1f}m" if dur >= 60 else f"{dur:.0f}s"
-                    if gui_instance:
-                        gui_instance.login_times.append(dur)
-
-                release_file(original_name)
-                continue  # วนกลับไป id ใหม่ทันที ตามที่ user ขอ
+            # 7.6 Gacha Free Sequence (Optional)
+            if GACHA_FREE == 1:
+                if gacha_free_mode(device, cycle_start, serial, original_name, file_path):
+                    continue  # Start next file immediately
 
             # 8. Gacha Sequence (Optional)
             gacha_hero_found = None
