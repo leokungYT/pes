@@ -1158,8 +1158,9 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                     device.shell(f"input swipe {x} {y} {x} {y} 100")
                     time.sleep(2)
                     found_free = True
-                    # กดจนกว่าจะหายไป
-                    while True:
+                    # กดจนกว่าจะหายไป (timeout 15s กันค้าง)
+                    deadline_gone = time.time() + 15
+                    while time.time() < deadline_gone:
                         check_device_reset(serial, cycle_start)
                         img2 = get_screen_capture(device)
                         if img2 is not None:
