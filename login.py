@@ -1260,12 +1260,13 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
             return True  # break ออกไปเริ่มไฟล์ใหม่
 
         # 2c. รอ checkpointgacha.bmp → กด (478,320) → รอ checkpointgacha1 → OCR scan
-        gui_log(serial, f"[Loop {loop_num}] Waiting checkpointgacha...", step="CP Wait")
-        deadline_cp = time.time() + 30
+        gui_log(serial, f"[Loop {loop_num}] Waiting checkpointgacha or fixcheckpointgacha...", step="CP Wait")
+        deadline_cp = time.time() + 45
         while time.time() < deadline_cp:
             check_device_reset(serial, cycle_start)
             img = get_screen_capture(device)
             if img is not None:
+                # 1. เช็ค checkpointgacha ปกติ
                 pts = img_search(img, os.path.join(IMG_DIR, "checkpointgacha.bmp"))
                 if pts:
                     gui_log(serial, f"[Loop {loop_num}] checkpointgacha found! Clicking (478,320) x12...", step="Click x12")
@@ -1273,23 +1274,27 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                         device.shell("input swipe 478 320 478 320 100")
                         time.sleep(0.4)
                     time.sleep(1)
-
-                    # แวะหา fixlocked 5s
-                    gui_log(serial, f"[Loop {loop_num}] Checking for fixlocked (5s)...", step="Fix Locked")
-                    deadline_fl = time.time() + 5
-                    while time.time() < deadline_fl:
-                        check_device_reset(serial, cycle_start)
-                        img_fl = get_screen_capture(device)
-                        if img_fl is not None:
-                            pts_fl = img_search(img_fl, os.path.join(IMG_DIR, "fixlocked.bmp"))
-                            if pts_fl:
-                                x_fl, y_fl = pts_fl[0]
-                                gui_log(serial, f"[Loop {loop_num}] fixlocked found! Clicking...", step="Fix Locked")
-                                device.shell(f"input swipe {x_fl} {y_fl} {x_fl} {y_fl} 100")
-                                time.sleep(1)
-                                deadline_fl = time.time() + 5 # Reset timer if found
-                                continue
-                        time.sleep(0.5)
+                    
+                    # แถม: เช็ค fixlocked สั้นๆ หลังกด
+                    img_fl = get_screen_capture(device)
+                    if img_fl is not None:
+                        pts_fl = img_search(img_fl, os.path.join(IMG_DIR, "fixlocked.bmp"))
+                        if pts_fl:
+                            x_fl, y_fl = pts_fl[0]
+                            device.shell(f"input swipe {x_fl} {y_fl} {x_fl} {y_fl} 100")
+                            time.sleep(1)
+                    break
+                
+                # 2. เช็ค fixcheckpointgacha (ถ้าเจอให้กด fixlocked แล้วไปต่อ)
+                pts_fix = img_search(img, os.path.join(IMG_DIR, "fixcheckpointgacha.bmp"))
+                if pts_fix:
+                    gui_log(serial, f"[Loop {loop_num}] fixcheckpointgacha detected! Searching fixlocked...", step="Fix CP")
+                    pts_fl = img_search(img, os.path.join(IMG_DIR, "fixlocked.bmp"))
+                    if pts_fl:
+                        x_fl, y_fl = pts_fl[0]
+                        device.shell(f"input swipe {x_fl} {y_fl} {x_fl} {y_fl} 100")
+                        gui_log(serial, "Clicked fixlocked via fix-cp path", step="Fix Done")
+                        time.sleep(2)
                     break
             time.sleep(1)
 
@@ -1745,31 +1750,15 @@ def process_device_login(device):
                         time.sleep(1)
                 # checkpointgacha -> OCR (ข้ามถ้าไม่เจอ gacha4)
                 if found_g4:
-                    gui_log(serial, "Waiting checkpointgacha (OCR)...", step="OCR Wait")
+                    gui_log(serial, "Waiting checkpointgacha or fixcheckpointgacha (OCR)...", step="OCR Wait")
                     while True:
                         check_device_reset(serial, cycle_start)
                         img = get_screen_capture(device)
                         if img is not None:
+                            # 1. เช็ค checkpointgacha ปกติ
                             pts = img_search(img, os.path.join(IMG_DIR, "checkpointgacha.bmp"))
                             if pts:
-                                # แวะหา fixlocked 5s
-                                gui_log(serial, "Checking for fixlocked (5s)...", step="Fix Locked")
-                                deadline_fl = time.time() + 5
-                                while time.time() < deadline_fl:
-                                    check_device_reset(serial, cycle_start)
-                                    img_fl = get_screen_capture(device)
-                                    if img_fl is not None:
-                                        pts_fl = img_search(img_fl, os.path.join(IMG_DIR, "fixlocked.bmp"))
-                                        if pts_fl:
-                                            x_fl, y_fl = pts_fl[0]
-                                            gui_log(serial, "fixlocked found! Clicking...", step="Fix Locked")
-                                            device.shell(f"input swipe {x_fl} {y_fl} {x_fl} {y_fl} 100")
-                                            time.sleep(1)
-                                            deadline_fl = time.time() + 5 # Reset timer if found
-                                            continue
-                                    time.sleep(0.5)
-
-                                # ใช้พิกัด Region(98, 20, 329, 47) ตามตัวอย่าง
+                                # ใช้พิกัด Region(68, 28, 579, 57) ตามตัวอย่าง
                                 gacha_region = Region(68, 28, 579, 57)
                                 ocr_text = read_screen_text(img, region=gacha_region, serial=serial)
                                 display_text = ocr_text if ocr_text else "<EMPTY>"
@@ -1781,6 +1770,18 @@ def process_device_login(device):
                                         gacha_hero_found = h.strip()
                                         break
                                 break
+                            
+                            # 2. เช็ค fixcheckpointgacha
+                            pts_fix = img_search(img, os.path.join(IMG_DIR, "fixcheckpointgacha.bmp"))
+                            if pts_fix:
+                                gui_log(serial, "fixcheckpointgacha detected! Searching fixlocked...", step="Fix CP")
+                                pts_fl = img_search(img, os.path.join(IMG_DIR, "fixlocked.bmp"))
+                                if pts_fl:
+                                    x_fl, y_fl = pts_fl[0]
+                                    device.shell(f"input swipe {x_fl} {y_fl} {x_fl} {y_fl} 100")
+                                    time.sleep(2)
+                                break
+                        time.sleep(1)
                             
                             # เช็ค nocions.bmp ด้วย (กรณีเพชรไม่พอในจังหวะนี้)
                             pts_no = img_search(img, os.path.join(IMG_DIR, "nocions.bmp"))
