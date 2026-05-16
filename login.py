@@ -1273,6 +1273,23 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                         device.shell("input swipe 478 320 478 320 100")
                         time.sleep(0.4)
                     time.sleep(1)
+
+                    # แวะหา fixlocked 5s
+                    gui_log(serial, f"[Loop {loop_num}] Checking for fixlocked (5s)...", step="Fix Locked")
+                    deadline_fl = time.time() + 5
+                    while time.time() < deadline_fl:
+                        check_device_reset(serial, cycle_start)
+                        img_fl = get_screen_capture(device)
+                        if img_fl is not None:
+                            pts_fl = img_search(img_fl, os.path.join(IMG_DIR, "fixlocked.bmp"))
+                            if pts_fl:
+                                x_fl, y_fl = pts_fl[0]
+                                gui_log(serial, f"[Loop {loop_num}] fixlocked found! Clicking...", step="Fix Locked")
+                                device.shell(f"input swipe {x_fl} {y_fl} {x_fl} {y_fl} 100")
+                                time.sleep(1)
+                                deadline_fl = time.time() + 5 # Reset timer if found
+                                continue
+                        time.sleep(0.5)
                     break
             time.sleep(1)
 
@@ -1735,6 +1752,23 @@ def process_device_login(device):
                         if img is not None:
                             pts = img_search(img, os.path.join(IMG_DIR, "checkpointgacha.bmp"))
                             if pts:
+                                # แวะหา fixlocked 5s
+                                gui_log(serial, "Checking for fixlocked (5s)...", step="Fix Locked")
+                                deadline_fl = time.time() + 5
+                                while time.time() < deadline_fl:
+                                    check_device_reset(serial, cycle_start)
+                                    img_fl = get_screen_capture(device)
+                                    if img_fl is not None:
+                                        pts_fl = img_search(img_fl, os.path.join(IMG_DIR, "fixlocked.bmp"))
+                                        if pts_fl:
+                                            x_fl, y_fl = pts_fl[0]
+                                            gui_log(serial, "fixlocked found! Clicking...", step="Fix Locked")
+                                            device.shell(f"input swipe {x_fl} {y_fl} {x_fl} {y_fl} 100")
+                                            time.sleep(1)
+                                            deadline_fl = time.time() + 5 # Reset timer if found
+                                            continue
+                                    time.sleep(0.5)
+
                                 # ใช้พิกัด Region(98, 20, 329, 47) ตามตัวอย่าง
                                 gacha_region = Region(68, 28, 579, 57)
                                 ocr_text = read_screen_text(img, region=gacha_region, serial=serial)
