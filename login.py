@@ -1270,10 +1270,10 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
             if img is not None:
                 pts = img_search(img, os.path.join(IMG_DIR, "checkpointgacha.bmp"))
                 if pts:
-                    gui_log(serial, f"[Loop {loop_num}] checkpointgacha found! Clicking (478,320) x4...", step="Click x4")
-                    for _ in range(4):
+                    gui_log(serial, f"[Loop {loop_num}] checkpointgacha found! Clicking (478,320) x12...", step="Click x12")
+                    for _ in range(12):
                         device.shell("input swipe 478 320 478 320 100")
-                        time.sleep(0.5)
+                        time.sleep(0.4)
                     time.sleep(1)
                     break
             time.sleep(1)
