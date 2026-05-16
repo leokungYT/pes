@@ -581,8 +581,6 @@ def check_device_reset(serial, cycle_start=None):
     if DEVICE_RESET_FLAGS.get(serial):
         DEVICE_RESET_FLAGS[serial] = False
         raise DeviceResetException(serial)
-    if cycle_start and time.time() - cycle_start > 360:
-        raise CycleTimeoutException(serial)
 
 def update_gui(serial, **kwargs):
     if gui_instance:
@@ -1813,11 +1811,7 @@ def process_device_login(device):
             device.shell("am force-stop jp.konami.pesam")
             time.sleep(1)
 
-        except CycleTimeoutException:
-            release_file(original_name)
-            gui_log(serial, "⏳ 6-min timeout", step="Timeout", status="stuck")
-            device.shell("am force-stop jp.konami.pesam")
-            time.sleep(1)
+
 
         except Exception as e:
             release_file(original_name)
