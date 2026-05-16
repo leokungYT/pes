@@ -50,7 +50,7 @@ bot_running   = False
 gui_instance  = None
 
 # ── โหลด config จาก config.py ──────────────────────────────────────────────
-from config import EVENT_IMG, DO_BOX, DO_GACHA, HERO_LIST, IMG_DIR, INPUT_DIR, LOGIN_SUCCESS_DIR, FIND_HERO, HERO_IMG_MAP, GACHA_FREE, HERO_LIST_FREE
+from config import EVENT_IMG, DO_BOX, DO_GACHA, HERO_LIST, IMG_DIR, INPUT_DIR, LOGIN_SUCCESS_DIR, FIND_HERO, HERO_IMG_MAP, GACHA_FREE, HERO_LIST_FREE, DEBUG_OCR
 
 REMOTE_AUTH_DIR   = "/data/data/jp.konami.pesam/files/SaveData/AUTH"
 REMOTE_DAT_FILE   = f"{REMOTE_AUTH_DIR}/online_user_id_data.dat"
@@ -855,21 +855,23 @@ def img_search(gray_img, find_path, threshold=0.8):
 # ═════════════════════════════════════════════════════════════════════════════
 _reader = None
 
-def read_screen_text(img, region=None):
-    """OCR Logic using EasyOCR (priority) or Pytesseract"""
+def read_screen_text(img, region=None, serial="unknown"):
+    """OCR Logic using EasyOCR (priority) or Pytesseract — Enhanced for max accuracy"""
     if img is None: return ""
     
     # Crop region if provided
     if region:
         img = img[region.y : region.y + region.h, region.x : region.x + region.w]
-        
-        # ตัดขอบซ้าย-ขวาออกอีก 15% เพื่อหลบพวกขอบกรอบ UI (แก้ปัญหาอ่านติด (Bb หรือตัวประหลาด)
-        h_tmp, w_tmp = img.shape[:2]
-        margin = int(w_tmp * 0.15)
-        img = img[:, margin : w_tmp - margin]
-        
-        # บันทึกภาพที่สแกนล่าสุดออกมาดูเพื่อ debug (ช่วยเรื่องพิกัด)
-        cv2.imwrite("debug_ocr_crop.png", img)
+    
+    # ── Debug: บันทึกภาพที่สแกนเมื่อ DEBUG_OCR=1 ──
+    if DEBUG_OCR == 1:
+        debug_dir = "debug-ocr"
+        os.makedirs(debug_dir, exist_ok=True)
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        safe_serial = serial.replace(":", "-").replace(".", "_")
+        debug_name = f"{safe_serial}_{ts}"
+        # บันทึกภาพ crop ดิบ
+        cv2.imwrite(os.path.join(debug_dir, f"{debug_name}_raw.png"), img)
     
     # 1. Try EasyOCR
     if easyocr is not None:
@@ -887,31 +889,68 @@ def read_screen_text(img, region=None):
             print(f"[OCR] EasyOCR Error: {e}")
             pass
 
-    # 2. Fallback to Pytesseract
+    # 2. Fallback to Pytesseract — Enhanced multi-pass
     if pytesseract is not None:
         try:
-            print(f"[OCR] Attempting Pytesseract...")
-            # ตรวจสอบว่าภาพเป็นสีก่อนค่อยเปลี่ยนเป็นเทา
+            print(f"[OCR] Attempting Pytesseract (Enhanced)...")
+            # แปลงเป็นเทา
             if len(img.shape) == 3:
                 img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             else:
                 img_gray = img
                 
-            # ขยายภาพ 3 เท่าเพื่อให้ตัวหนังสือใหญ่ขึ้น
-            img_resized = cv2.resize(img_gray, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
-            # ลบนอยซ์และแสงเรืองๆ ด้วย Gaussian Blur
-            img_blur = cv2.GaussianBlur(img_resized, (3, 3), 0)
-            # ใช้ Threshold ค่าสูงหน่อย (200) เพื่อตัดแสงเรืองรอบๆ ตัวหนังสือออก
-            _, img_bin = cv2.threshold(img_blur, 200, 255, cv2.THRESH_BINARY)
+            # ขยายภาพ 4 เท่าเพื่อให้ตัวหนังสือใหญ่ขึ้น (4x ดีกว่า 3x สำหรับตัวเล็ก)
+            img_resized = cv2.resize(img_gray, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
             
-            # ใช้ PSM 7 (Treat the image as a single text line)
-            text = pytesseract.image_to_string(img_bin, lang="eng", config="--psm 7")
-            res = text.strip()
-            if res:
-                print(f"[OCR] Pytesseract Result: '{res}'")
+            # ── Method A: Adaptive Threshold (จัดการแสงไม่เท่ากันได้ดี) ──
+            img_blur_a = cv2.GaussianBlur(img_resized, (3, 3), 0)
+            img_adapt = cv2.adaptiveThreshold(
+                img_blur_a, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                cv2.THRESH_BINARY, 15, 4
+            )
+            # Morphological cleanup (ลบจุดเล็กๆ / noise)
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+            img_clean_a = cv2.morphologyEx(img_adapt, cv2.MORPH_CLOSE, kernel)
+            
+            # ── Method B: OTSU Threshold (ดีกับพื้นหลังสม่ำเสมอ) ──
+            img_blur_b = cv2.GaussianBlur(img_resized, (5, 5), 0)
+            _, img_otsu = cv2.threshold(img_blur_b, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            
+            # ── Method C: Fixed high threshold (เหมือนเดิม แต่ปรับค่า) ──
+            img_blur_c = cv2.GaussianBlur(img_resized, (3, 3), 0)
+            _, img_fixed = cv2.threshold(img_blur_c, 180, 255, cv2.THRESH_BINARY)
+            
+            # ── Debug: บันทึกภาพ preprocessed ทุก method ──
+            if DEBUG_OCR == 1:
+                cv2.imwrite(os.path.join(debug_dir, f"{debug_name}_methodA.png"), img_clean_a)
+                cv2.imwrite(os.path.join(debug_dir, f"{debug_name}_methodB.png"), img_otsu)
+                cv2.imwrite(os.path.join(debug_dir, f"{debug_name}_methodC.png"), img_fixed)
+            
+            # ── ลองสแกนทุก method + ทุก PSM mode → เอาผลที่ยาวที่สุด (น่าจะถูกที่สุด) ──
+            best_result = ""
+            configs = [
+                (img_clean_a, "--psm 7", "A-psm7"),   # single line + adaptive
+                (img_clean_a, "--psm 6", "A-psm6"),   # block + adaptive
+                (img_otsu,    "--psm 7", "B-psm7"),   # single line + otsu
+                (img_fixed,   "--psm 7", "C-psm7"),   # single line + fixed
+            ]
+            
+            for proc_img, psm, label in configs:
+                text = pytesseract.image_to_string(
+                    proc_img, lang="eng",
+                    config=f"{psm}"
+                )
+                res = text.strip()
+                if res:
+                    print(f"[OCR] {label}: '{res}'")
+                    if len(res) > len(best_result):
+                        best_result = res
+            
+            if best_result:
+                print(f"[OCR] ★ Best Result: '{best_result}'")
             else:
-                print(f"[OCR] Pytesseract returned EMPTY string")
-            return res
+                print(f"[OCR] Pytesseract returned EMPTY string (all methods)")
+            return best_result
         except Exception as e:
             print(f"[OCR] Pytesseract Error: {e}")
             pass
@@ -1135,11 +1174,11 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                     break
             time.sleep(1)
 
-    # 2. ทำ 2 loops
+    # 2. ทำ 3 loops
     found_heroes = []  # เก็บชื่อฮีโร่ที่เจอจากทุก loop
 
-    for loop_num in range(1, 3):
-        gui_log(serial, f"=== Gacha Free Loop {loop_num}/2 ===", step=f"Loop {loop_num}")
+    for loop_num in range(1, 4):
+        gui_log(serial, f"=== Gacha Free Loop {loop_num}/3 ===", step=f"Loop {loop_num}")
 
         # 2a. เลื่อนหา gachafree1.bmp (เช็คก่อน → ไม่เจอ → เลื่อน, ครบ 10 รอบ = ข้าม loop นี้)
         gui_log(serial, f"[Loop {loop_num}] Looking for gachafree1.bmp...", step="Swipe Free")
@@ -1184,9 +1223,9 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
             gui_log(serial, f"[Loop {loop_num}] gachafree1 not found after 10 swipes, skipping loop", step="Skip")
             continue  # ข้ามไป loop ถัดไป (หรือจบถ้า loop 2)
 
-        # 2b. รอ gachafree2.bmp → กดจนกว่าจะหายไป (timeout 20s → file-error)
+        # 2b. รอ gachafree2.bmp → กดจนกว่าจะหายไป (timeout 15s → file-error)
         gui_log(serial, f"[Loop {loop_num}] Waiting gachafree2.bmp...", step="gachafree2")
-        deadline_gf2 = time.time() + 20
+        deadline_gf2 = time.time() + 15
         clicked_gf2 = False
         while time.time() < deadline_gf2:
             check_device_reset(serial, cycle_start)
@@ -1206,7 +1245,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
 
         # ถ้าไม่เจอ gachafree2 เลย → file-error แล้วไปไฟล์ใหม่
         if not clicked_gf2:
-            gui_log(serial, f"[Loop {loop_num}] gachafree2 not found in 20s → file-error", step="Error")
+            gui_log(serial, f"[Loop {loop_num}] gachafree2 not found in 15s → file-error", step="Error")
             device.shell("am force-stop jp.konami.pesam")
             time.sleep(1)
             dest = os.path.join(FILE_ERROR_DIR, original_name)
@@ -1222,8 +1261,8 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
             release_file(original_name)
             return True  # break ออกไปเริ่มไฟล์ใหม่
 
-        # 2c. รอ checkpointgacha.bmp → OCR scan
-        gui_log(serial, f"[Loop {loop_num}] Waiting checkpointgacha (OCR)...", step="OCR Wait")
+        # 2c. รอ checkpointgacha.bmp → กด (478,320) → รอ checkpointgacha1 → OCR scan
+        gui_log(serial, f"[Loop {loop_num}] Waiting checkpointgacha...", step="CP Wait")
         deadline_cp = time.time() + 30
         while time.time() < deadline_cp:
             check_device_reset(serial, cycle_start)
@@ -1231,8 +1270,25 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
             if img is not None:
                 pts = img_search(img, os.path.join(IMG_DIR, "checkpointgacha.bmp"))
                 if pts:
-                    gacha_region = Region(381, 301, 202, 37)
-                    ocr_text = read_screen_text(img, region=gacha_region)
+                    gui_log(serial, f"[Loop {loop_num}] checkpointgacha found! Clicking (478,320) x4...", step="Click x4")
+                    for _ in range(4):
+                        device.shell("input swipe 478 320 478 320 100")
+                        time.sleep(0.5)
+                    time.sleep(1)
+                    break
+            time.sleep(1)
+
+        # 2c2. รอ checkpointgacha1.bmp → แล้วค่อย OCR scan จริงๆ
+        gui_log(serial, f"[Loop {loop_num}] Waiting checkpointgacha1 (OCR)...", step="CP1 Wait")
+        deadline_cp1 = time.time() + 30
+        while time.time() < deadline_cp1:
+            check_device_reset(serial, cycle_start)
+            img = get_screen_capture(device)
+            if img is not None:
+                pts = img_search(img, os.path.join(IMG_DIR, "checkpointgacha1.bmp"))
+                if pts:
+                    gacha_region = Region(68, 28, 579, 57)
+                    ocr_text = read_screen_text(img, region=gacha_region, serial=serial)
                     display_text = ocr_text if ocr_text else "<EMPTY>"
                     gui_log(serial, f"[Loop {loop_num}] OCR Result: {display_text}", step="OCR Done")
                     print(f"[{serial}] GachaFree Loop{loop_num} OCR: {display_text}")
@@ -1245,7 +1301,23 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                     break
             time.sleep(1)
 
-        # 2d. รอ next.bmp → click (จบ loop นี้แล้วค่อยไป loop ถัดไป)
+        # 2d. รอ scanout.bmp → click
+        gui_log(serial, f"[Loop {loop_num}] Waiting scanout.bmp...", step="Scanout")
+        deadline_so = time.time() + 15
+        while time.time() < deadline_so:
+            check_device_reset(serial, cycle_start)
+            img = get_screen_capture(device)
+            if img is not None:
+                pts = img_search(img, os.path.join(IMG_DIR, "scanout.bmp"))
+                if pts:
+                    x, y = pts[0]
+                    gui_log(serial, f"[Loop {loop_num}] scanout.bmp found! Clicking ({x},{y})", step="Scanout OK")
+                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                    time.sleep(3)
+                    break
+            time.sleep(1)
+
+        # 2e. รอ next.bmp → click (จบ loop นี้แล้วค่อยไป loop ถัดไป)
         gui_log(serial, f"[Loop {loop_num}] Waiting next.bmp...", step="Next")
         deadline_next = time.time() + 15
         while time.time() < deadline_next:
@@ -1273,7 +1345,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
     else:
         dest_dir = RANDOM_FAIL_DIR
         final_name = original_name
-        gui_log(serial, "No match in both loops → random-fail", step="No Match")
+        gui_log(serial, "No match in all 3 loops → random-fail", step="No Match")
 
     dest = os.path.join(dest_dir, final_name)
     if os.path.exists(file_path):
@@ -1625,8 +1697,8 @@ def process_device_login(device):
                     gui_log(serial, "nocions.bmp detected! Scanning screen...", step="No-Coins")
                     img = get_screen_capture(device)
                     if img is not None:
-                        gacha_region = Region(381, 301, 202, 37)
-                        ocr_text = read_screen_text(img, region=gacha_region)
+                        gacha_region = Region(68, 28, 579, 57)
+                        ocr_text = read_screen_text(img, region=gacha_region, serial=serial)
                         gui_log(serial, f"OCR Result (at No-Coins): {ocr_text}", step="OCR Done")
                         for h in HERO_LIST:
                             if h and h.strip().lower() in ocr_text.lower():
@@ -1665,9 +1737,9 @@ def process_device_login(device):
                         if img is not None:
                             pts = img_search(img, os.path.join(IMG_DIR, "checkpointgacha.bmp"))
                             if pts:
-                                # ใช้พิกัด Region(381, 301, 202, 37) ตามตัวอย่าง
-                                gacha_region = Region(381, 301, 202, 37)
-                                ocr_text = read_screen_text(img, region=gacha_region)
+                                # ใช้พิกัด Region(98, 20, 329, 47) ตามตัวอย่าง
+                                gacha_region = Region(68, 28, 579, 57)
+                                ocr_text = read_screen_text(img, region=gacha_region, serial=serial)
                                 display_text = ocr_text if ocr_text else "<EMPTY>"
                                 gui_log(serial, f"OCR Result: {display_text}", step="OCR Done")
                                 print(f"[{serial}] Gacha OCR: {display_text}")
@@ -1682,8 +1754,8 @@ def process_device_login(device):
                             pts_no = img_search(img, os.path.join(IMG_DIR, "nocions.bmp"))
                             if pts_no:
                                 gui_log(serial, "nocions.bmp detected! Scanning current screen...", step="No-Coins")
-                                gacha_region = Region(381, 301, 202, 37)
-                                ocr_text = read_screen_text(img, region=gacha_region)
+                                gacha_region = Region(68, 28, 579, 57)
+                                ocr_text = read_screen_text(img, region=gacha_region, serial=serial)
                                 display_text = ocr_text if ocr_text else "<EMPTY>"
                                 gui_log(serial, f"OCR Result (at No-Coins): {display_text}", step="OCR Done")
                                 print(f"[{serial}] No-Coins OCR: {display_text}")

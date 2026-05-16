@@ -56,6 +56,12 @@ HERO_LIST_FREE = [
     "Paolo Maldini",
     "Daniele De Rossi",
     "Didier Drogba",
-    "",
+    "Mohamed Salah",
     ""
 ]
+
+# ── Debug OCR ─────────────────────────────────────
+# 1 = บันทึกภาพที่สแกน OCR ทุกครั้งไว้ในโฟลเดอร์ debug-ocr/
+#     (ดูได้ว่ามันสแกนอะไร ตรงไหน)
+# 0 = ไม่บันทึก
+DEBUG_OCR = 0
