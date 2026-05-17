@@ -1269,8 +1269,8 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                 # 1. เช็ค checkpointgacha ปกติ
                 pts = img_search(img, os.path.join(IMG_DIR, "checkpointgacha.bmp"))
                 if pts:
-                    gui_log(serial, f"[Loop {loop_num}] checkpointgacha found! Clicking (478,320) x12...", step="Click x12")
-                    for _ in range(12):
+                    gui_log(serial, f"[Loop {loop_num}] checkpointgacha found! Clicking (478,320) x30...", step="Click x30")
+                    for _ in range(30):
                         device.shell("input swipe 478 320 478 320 100")
                         time.sleep(0.4)
                     time.sleep(1)
@@ -1384,6 +1384,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
             gui_instance.login_times.append(dur)
 
     release_file(original_name)
+    gui_log(serial, f"Cycle finished for {original_name}", step="Done")
     return True
 
 
@@ -1395,11 +1396,14 @@ def process_device_login(device):
     gui_log(serial, "Bot started", step="Init", status="working")
 
     while bot_running:
-        file_path     = None   # ← init ก่อน try เสมอ (แก้ bug scope)
+        import random
+        time.sleep(random.uniform(0.5, 2.0)) # Jitter ป้องกัน ADB ค้าง
+        file_path     = None
         original_name = None
 
         try:
             check_device_reset(serial)
+            gui_log(serial, "--- Starting New Cycle ---", step="New Cycle", status="working")
 
             # 0. Force-stop
             gui_log(serial, "Force closing app...", step="Cleanup", status="working")
@@ -1751,7 +1755,8 @@ def process_device_login(device):
                 # checkpointgacha -> OCR (ข้ามถ้าไม่เจอ gacha4)
                 if found_g4:
                     gui_log(serial, "Waiting checkpointgacha or fixcheckpointgacha (OCR)...", step="OCR Wait")
-                    while True:
+                    deadline_ocr = time.time() + 60
+                    while time.time() < deadline_ocr:
                         check_device_reset(serial, cycle_start)
                         img = get_screen_capture(device)
                         if img is not None:
@@ -1781,23 +1786,11 @@ def process_device_login(device):
                                     device.shell(f"input swipe {x_fl} {y_fl} {x_fl} {y_fl} 100")
                                     time.sleep(2)
                                 break
-                        time.sleep(1)
-                            
-                            # เช็ค nocions.bmp ด้วย (กรณีเพชรไม่พอในจังหวะนี้)
+
+                            # 3. เช็ค nocions.bmp ด้วย
                             pts_no = img_search(img, os.path.join(IMG_DIR, "nocions.bmp"))
                             if pts_no:
-                                gui_log(serial, "nocions.bmp detected! Scanning current screen...", step="No-Coins")
-                                gacha_region = Region(68, 28, 579, 57)
-                                ocr_text = read_screen_text(img, region=gacha_region, serial=serial)
-                                display_text = ocr_text if ocr_text else "<EMPTY>"
-                                gui_log(serial, f"OCR Result (at No-Coins): {display_text}", step="OCR Done")
-                                print(f"[{serial}] No-Coins OCR: {display_text}")
-                                
-                                for h in HERO_LIST:
-                                    if h and h.strip().lower() in ocr_text.lower():
-                                        gacha_hero_found = h.strip()
-                                        gui_log(serial, f"Found match even at No-Coins: {gacha_hero_found}", step="Match!")
-                                        break
+                                gui_log(serial, "nocions.bmp detected!", step="No-Coins")
                                 break
                         time.sleep(1)
 

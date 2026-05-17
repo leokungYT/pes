@@ -1,1 +1,6 @@
+@echo off
+echo Starting Auto Updater...
+py auto_update.py
+echo Starting PES Bot...
 py login.py
+pause
