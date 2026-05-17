@@ -5,8 +5,9 @@ import zipfile
 import shutil
 import io
 import sys
+import subprocess
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import font as tkfont
 
 # ชื่อ Repository ของคุณบน GitHub
 REPO = "leokungYT/pes"
@@ -20,7 +21,7 @@ def get_latest_release():
             data = json.loads(response.read().decode())
             return data.get('tag_name'), data.get('zipball_url')
     except Exception as e:
-        print(f"[Updater] ไม่สามารถเช็คอัปเดตได้: {e}")
+        print(f"[Updater] Failed to check for updates: {e}")
         return None, None
 
 def get_local_version():
@@ -29,26 +30,154 @@ def get_local_version():
             return f.read().strip()
     return None
 
-def ask_user_for_update(new_version):
-    """สร้าง Popup ถามผู้ใช้ว่าต้องการอัปเดตหรือไม่"""
-    root = tk.Tk()
-    root.withdraw()  # ซ่อนหน้าต่างหลักของ tkinter
-    root.attributes("-topmost", True)  # เอาหน้าต่าง Popup ขึ้นมาหน้าสุด
+def ask_custom_update_ui(new_version):
+    """สร้างหน้าต่าง UI ตักเตือนและถามอัปเดตขนาดใหญ่แบบพรีเมียม (ภาษาไทยสมบูรณ์)"""
+    result = {"update": False}
     
-    ans = messagebox.askyesno(
-        "พบเวอร์ชันใหม่ 🚀",
-        f"มีบอทเวอร์ชันใหม่ ({new_version}) อยู่บน GitHub!\n\nคุณต้องการทำการอัปเดตตอนนี้เลยหรือไม่?"
-    )
-    root.destroy()
-    return ans
-
-def show_info_popup(title, message):
-    """สร้าง Popup แจ้งเตือนข้อความทั่วไป"""
     root = tk.Tk()
-    root.withdraw()
+    root.title("⚠️ แจ้งเตือน: ตรวจพบเวอร์ชันใหม่ (New Update Found)")
+    root.geometry("640x350")
+    root.resizable(False, False)
+    root.configure(bg="#FDFEFE")
+    
+    # นำหน้าต่างขึ้นมาบนสุดเสมอ
     root.attributes("-topmost", True)
-    messagebox.showinfo(title, message)
-    root.destroy()
+    
+    # ปรับตำแหน่งหน้าต่างให้อยู่กึ่งกลางหน้าจอ
+    root.update_idletasks()
+    width = root.winfo_width()
+    height = root.winfo_height()
+    x = (root.winfo_screenwidth() // 2) - (width // 2)
+    y = (root.winfo_screenheight() // 2) - (height // 2)
+    root.geometry(f"+{x}+{y}")
+
+    # ตั้งค่าฟอนต์อักษรให้มีขนาดใหญ่ชัดเจน
+    title_font = tkfont.Font(family="Segoe UI", size=15, weight="bold")
+    body_font = tkfont.Font(family="Segoe UI", size=11, weight="normal")
+    warning_font = tkfont.Font(family="Segoe UI", size=11, weight="bold")
+    btn_font = tkfont.Font(family="Segoe UI", size=11, weight="bold")
+
+    # ส่วนหัวแถบเตือนสีแดงอ่อนสุดพรีเมียม
+    header_frame = tk.Frame(root, bg="#FADBD8", height=65)
+    header_frame.pack(fill="x")
+    
+    lbl_title = tk.Label(
+        header_frame, 
+        text="⚠️ ตรวจพบเวอร์ชันใหม่ (New Version Detected: " + new_version + ")", 
+        font=title_font, 
+        fg="#C0392B", 
+        bg="#FADBD8",
+        pady=15
+    )
+    lbl_title.pack()
+
+    # ส่วนเนื้อหาข่าวสารเตือน
+    content_frame = tk.Frame(root, bg="#FDFEFE", padx=30, pady=20)
+    content_frame.pack(fill="both", expand=True)
+
+    msg1 = "การอัปเดตอัตโนมัติ (Auto Update) จะดาวน์โหลดโค้ดเวอร์ชันล่าสุดเขียนทับระบบบอททั้งหมด"
+    msg2 = "🔴 คำเตือนสำคัญ:\nเพื่อให้มั่นใจว่าข้อมูลของคุณจะไม่สูญหาย กรุณาตรวจสอบให้แน่ใจว่า\nได้ทำการย้ายไฟล์สำคัญออกจากโฟลเดอร์ input-id หรือ backup-id เรียบร้อยแล้ว!"
+    msg3 = "คุณต้องการอัปเดตตอนนี้เลย หรือต้องการกดยกเลิกเพื่อไปย้ายไฟล์ออกก่อน?"
+
+    tk.Label(content_frame, text=msg1, font=body_font, bg="#FDFEFE", fg="#2C3E50", justify="left").pack(anchor="w", pady=2)
+    
+    lbl_warning = tk.Label(content_frame, text=msg2, font=warning_font, bg="#FDFEFE", fg="#C0392B", justify="left")
+    lbl_warning.pack(anchor="w", pady=8)
+    
+    tk.Label(content_frame, text=msg3, font=body_font, bg="#FDFEFE", fg="#2C3E50", justify="left").pack(anchor="w", pady=5)
+
+    # ส่วนปุ่มกดขนาดใหญ่
+    btn_frame = tk.Frame(content_frame, bg="#FDFEFE", pady=20)
+    btn_frame.pack(fill="x")
+
+    def on_yes():
+        result["update"] = True
+        root.destroy()
+
+    def on_no():
+        result["update"] = False
+        root.destroy()
+
+    # ปุ่มอัปเดตสีเขียวสวยสะดุดตา
+    btn_yes = tk.Button(
+        btn_frame, 
+        text="อัปเดตทันที (Update Now)", 
+        font=btn_font, 
+        fg="white", 
+        bg="#27AE60", 
+        activebackground="#2ECC71",
+        activeforeground="white",
+        relief="flat",
+        padx=20,
+        pady=8,
+        cursor="hand2",
+        command=on_yes
+    )
+    btn_yes.pack(side="left", padx=10)
+
+    # ปุ่มยกเลิกสีเทาเรียบหรูดูแพง
+    btn_no = tk.Button(
+        btn_frame, 
+        text="กดยกเลิก เพื่อไปย้ายไฟล์ก่อน (Cancel)", 
+        font=btn_font, 
+        fg="white", 
+        bg="#7F8C8D", 
+        activebackground="#95A5A6",
+        activeforeground="white",
+        relief="flat",
+        padx=20,
+        pady=8,
+        cursor="hand2",
+        command=on_no
+    )
+    btn_no.pack(side="right", padx=10)
+
+    root.mainloop()
+    return result["update"]
+
+def show_custom_info_popup(title, message):
+    """หน้าต่างป๊อปอัปแจ้งเตือนอัปเดตเสร็จสิ้นแบบพรีเมียม"""
+    root = tk.Tk()
+    root.title(title)
+    root.geometry("500x200")
+    root.resizable(False, False)
+    root.configure(bg="#FDFEFE")
+    root.attributes("-topmost", True)
+    
+    root.update_idletasks()
+    width = root.winfo_width()
+    height = root.winfo_height()
+    x = (root.winfo_screenwidth() // 2) - (width // 2)
+    y = (root.winfo_screenheight() // 2) - (height // 2)
+    root.geometry(f"+{x}+{y}")
+    
+    title_font = tkfont.Font(family="Segoe UI", size=14, weight="bold")
+    body_font = tkfont.Font(family="Segoe UI", size=10, weight="normal")
+    btn_font = tkfont.Font(family="Segoe UI", size=11, weight="bold")
+    
+    tk.Label(root, text=title, font=title_font, fg="#27AE60", bg="#FDFEFE", pady=15).pack()
+    tk.Label(root, text=message, font=body_font, fg="#2C3E50", bg="#FDFEFE", justify="center").pack(pady=5)
+    
+    def on_ok():
+        root.destroy()
+
+    btn_confirm = tk.Button(
+        root, 
+        text="เข้าใจแล้ว (OK)", 
+        font=btn_font, 
+        fg="white", 
+        bg="#2980B9", 
+        activebackground="#3498DB",
+        activeforeground="white",
+        relief="flat",
+        padx=30,
+        pady=6,
+        cursor="hand2",
+        command=on_ok
+    )
+    btn_confirm.pack(pady=15)
+    
+    root.mainloop()
 
 def update():
     print("[Updater] Checking for latest release on GitHub...")
@@ -65,11 +194,18 @@ def update():
         
     print(f"[Updater] New version found: {latest_version}.")
     
-    # 🌟 ถามผู้ใช้ด้วย Popup ก่อนอัปเดต
-    if not ask_user_for_update(latest_version):
-        print("[Updater] User skipped the update.")
+    # 🌟 เรียกใช้หน้าจอเตือนอัปเดตขนาดใหญ่
+    if not ask_custom_update_ui(latest_version):
+        print("[Updater] User skipped the update to move files.")
         sys.exit(0)
         
+    # 🌟 Kill adb.exe ก่อนเพื่อคลายการล็อกไฟล์ในโฟลเดอร์ adb/ (แก้ Permission Denied บน Windows)
+    print("[Updater] Terminating active ADB server to unlock dll files...")
+    try:
+        subprocess.run(["taskkill", "/f", "/im", "adb.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=0x08000000)
+    except Exception as e:
+        print(f"[Updater] Failed to kill ADB: {e}")
+
     print(f"[Updater] Downloading update {latest_version}...")
     
     try:
@@ -107,10 +243,10 @@ def update():
             
         print(f"[Updater] Successfully updated to {latest_version}!")
         
-        # 🌟 แจ้งเตือนเมื่ออัปเดตเสร็จ
-        show_info_popup(
+        # 🌟 แจ้งเตือนเมื่ออัปเดตเสร็จแบบ Custom UI (ใช้ภาษาไทยสมบูรณ์แบบไม่ติดบั๊กเพราะเรนเดอร์โดย Windows GUI)
+        show_custom_info_popup(
             "อัปเดตเสร็จสมบูรณ์! ✅",
-            f"บอทได้รับการอัปเดตเป็นเวอร์ชัน {latest_version} เรียบร้อยแล้ว!\n\nโปรแกรมจะปิดตัวลง กรุณากดรัน login.bat อีกครั้งเพื่อใช้งาน"
+            f"บอทได้รับการอัปเดตเป็นเวอร์ชัน {latest_version} เรียบร้อยแล้ว!\nกรุณากดเปิด login.bat ใหม่อีกครั้งเพื่อเริ่มทำงาน"
         )
         
         # ส่ง Exit Code 10 เพื่อบอกให้ batch ไฟล์หยุดการรันบอท (ให้ผู้ใช้เปิดใหม่เอง)
@@ -118,7 +254,7 @@ def update():
         
     except Exception as e:
         print(f"[Updater] Update failed: {e}")
-        show_info_popup("อัปเดตล้มเหลว ❌", f"เกิดข้อผิดพลาดในการอัปเดต: {e}")
+        show_custom_info_popup("อัปเดตล้มเหลว ❌", f"เกิดข้อผิดพลาดในการอัปเดต: {e}")
         sys.exit(0)
 
 if __name__ == "__main__":
