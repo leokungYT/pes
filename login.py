@@ -818,6 +818,34 @@ def get_screen_capture(device):
                 # Re-capture the screen after fixing so the caller gets a fresh image
                 img = fast_screencap(device)
 
+            # fixevent.bmp floating check
+            fe_pts = img_search(img, os.path.join(IMG_DIR, "fixevent.bmp"))
+            if fe_pts:
+                gui_log(device.serial, "Floating: fixevent.bmp found! Checking if it persists for 8s...", step="Fix Event")
+                persisted = True
+                for _ in range(8):
+                    time.sleep(1)
+                    img_check = fast_screencap(device)
+                    if img_check is None:
+                        persisted = False
+                        break
+                    pts_check = img_search(img_check, os.path.join(IMG_DIR, "fixevent.bmp"))
+                    if not pts_check:
+                        persisted = False
+                        break
+                
+                if persisted:
+                    gui_log(device.serial, "fixevent.bmp persisted for 8s! Clicking...", step="Fix Event")
+                    img_click = fast_screencap(device)
+                    if img_click is not None:
+                        pts_click = img_search(img_click, os.path.join(IMG_DIR, "fixevent.bmp"))
+                        if pts_click:
+                            x, y = pts_click[0]
+                            device.shell(f"input swipe {x} {y} {x} {y} 100")
+                            gui_log(device.serial, f"Clicked fixevent.bmp at ({x}, {y})", step="Fix Event")
+                            time.sleep(2)
+                    img = fast_screencap(device)
+
         update_gui(device.serial, screenshot=img)
         return img
     except DeviceResetException:
