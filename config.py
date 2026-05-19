@@ -48,7 +48,7 @@ HERO_IMG_MAP = {
 # ── Gacha Free Sequence ───────────────────────────
 # 1 = ทำ gacha free หลังจบ box (gacha1 → gacha2 → เลื่อนหา gachafree1)
 # 0 = ข้าม
-GACHA_FREE = 1
+GACHA_FREE = 0
 
 # รายชื่อนักเตะที่ต้องการเก็บ (Gacha Free → backup-id)
 HERO_LIST_FREE = [
@@ -65,3 +65,8 @@ HERO_LIST_FREE = [
 #     (ดูได้ว่ามันสแกนอะไร ตรงไหน)
 # 0 = ไม่บันทึก
 DEBUG_OCR = 0
+
+# ── Check Coin Sequence ───────────────────────────
+# 1 = ทำงานสแกนเหรียญ (หา checkpointcoin.bmp → OCR สแกนหาเลขเหรียญที่ Region(52, 10, 106, 41) → บันทึกลง check-coin)
+# 0 = ข้าม
+CHECK_COIN = 1

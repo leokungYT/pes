@@ -36,7 +36,7 @@ def ask_custom_update_ui(new_version):
     
     root = tk.Tk()
     root.title("⚠️ แจ้งเตือน: ตรวจพบเวอร์ชันใหม่ (New Update Found)")
-    root.geometry("640x350")
+    root.geometry("720x370")
     root.resizable(False, False)
     root.configure(bg="#FDFEFE")
     
@@ -55,7 +55,7 @@ def ask_custom_update_ui(new_version):
     title_font = tkfont.Font(family="Segoe UI", size=15, weight="bold")
     body_font = tkfont.Font(family="Segoe UI", size=11, weight="normal")
     warning_font = tkfont.Font(family="Segoe UI", size=11, weight="bold")
-    btn_font = tkfont.Font(family="Segoe UI", size=11, weight="bold")
+    btn_font = tkfont.Font(family="Segoe UI", size=10, weight="bold")
 
     # ส่วนหัวแถบเตือนสีแดงอ่อนสุดพรีเมียม
     header_frame = tk.Frame(root, bg="#FADBD8", height=65)
@@ -76,8 +76,8 @@ def ask_custom_update_ui(new_version):
     content_frame.pack(fill="both", expand=True)
 
     msg1 = "การอัปเดตอัตโนมัติ (Auto Update) จะดาวน์โหลดโค้ดเวอร์ชันล่าสุดเขียนทับระบบบอททั้งหมด"
-    msg2 = "🔴 คำเตือนสำคัญ:\nเพื่อให้มั่นใจว่าข้อมูลของคุณจะไม่สูญหาย กรุณาตรวจสอบให้แน่ใจว่า\nได้ทำการย้ายไฟล์สำคัญออกจากโฟลเดอร์ input-id หรือ backup-id เรียบร้อยแล้ว!"
-    msg3 = "คุณต้องการอัปเดตตอนนี้เลย หรือต้องการกดยกเลิกเพื่อไปย้ายไฟล์ออกก่อน?"
+    msg2 = "🔴 คำเตือนเกี่ยวกับการล้างไฟล์:\nหากเลือกแบบ 'ล้างข้อมูลทั้งหมด' ระบบจะลบไฟล์ใน input-id, backup-id และพบฮีโร่ออกทั้งหมด!\nหากต้องการรักษารหัสและข้อมูลเดิมไว้ กรุณาเลือก 'ไม่ลบไฟล์เดิม'"
+    msg3 = "กรุณาเลือกโหมดการอัปเดตที่ท่านต้องการ:"
 
     tk.Label(content_frame, text=msg1, font=body_font, bg="#FDFEFE", fg="#2C3E50", justify="left").pack(anchor="w", pady=2)
     
@@ -90,47 +90,68 @@ def ask_custom_update_ui(new_version):
     btn_frame = tk.Frame(content_frame, bg="#FDFEFE", pady=20)
     btn_frame.pack(fill="x")
 
-    def on_yes():
-        result["update"] = True
+    def on_keep():
+        result["update"] = "keep"
+        root.destroy()
+
+    def on_clean():
+        result["update"] = "clean"
         root.destroy()
 
     def on_no():
         result["update"] = False
         root.destroy()
 
-    # ปุ่มอัปเดตสีเขียวสวยสะดุดตา
-    btn_yes = tk.Button(
+    # ปุ่มอัปเดตแบบไม่ลบไฟล์
+    btn_keep = tk.Button(
         btn_frame, 
-        text="อัปเดตทันที (Update Now)", 
+        text="อัปเดตแบบไม่ลบไฟล์เดิม (Keep Files)", 
         font=btn_font, 
         fg="white", 
         bg="#27AE60", 
         activebackground="#2ECC71",
         activeforeground="white",
         relief="flat",
-        padx=20,
+        padx=10,
         pady=8,
         cursor="hand2",
-        command=on_yes
+        command=on_keep
     )
-    btn_yes.pack(side="left", padx=10)
+    btn_keep.pack(side="left", padx=5)
 
-    # ปุ่มยกเลิกสีเทาเรียบหรูดูแพง
+    # ปุ่มอัปเดตแบบล้างข้อมูลทั้งหมด
+    btn_clean = tk.Button(
+        btn_frame, 
+        text="อัปเดตแบบล้างข้อมูลทั้งหมด (Clean)", 
+        font=btn_font, 
+        fg="white", 
+        bg="#C0392B", 
+        activebackground="#E74C3C",
+        activeforeground="white",
+        relief="flat",
+        padx=10,
+        pady=8,
+        cursor="hand2",
+        command=on_clean
+    )
+    btn_clean.pack(side="left", padx=5)
+
+    # ปุ่มยกเลิก
     btn_no = tk.Button(
         btn_frame, 
-        text="กดยกเลิก เพื่อไปย้ายไฟล์ก่อน (Cancel)", 
+        text="ยกเลิก (Cancel)", 
         font=btn_font, 
         fg="white", 
         bg="#7F8C8D", 
         activebackground="#95A5A6",
         activeforeground="white",
         relief="flat",
-        padx=20,
+        padx=15,
         pady=8,
         cursor="hand2",
         command=on_no
     )
-    btn_no.pack(side="right", padx=10)
+    btn_no.pack(side="right", padx=5)
 
     root.mainloop()
     return result["update"]
@@ -195,8 +216,9 @@ def update():
     print(f"[Updater] New version found: {latest_version}.")
     
     # 🌟 เรียกใช้หน้าจอเตือนอัปเดตขนาดใหญ่
-    if not ask_custom_update_ui(latest_version):
-        print("[Updater] User skipped the update to move files.")
+    mode = ask_custom_update_ui(latest_version)
+    if not mode:
+        print("[Updater] User skipped the update.")
         sys.exit(0)
         
     # 🌟 Kill adb.exe ก่อนเพื่อคลายการล็อกไฟล์ในโฟลเดอร์ adb/ (แก้ Permission Denied บน Windows)
@@ -242,11 +264,40 @@ def update():
             f.write(latest_version)
             
         print(f"[Updater] Successfully updated to {latest_version}!")
-        
-        # 🌟 แจ้งเตือนเมื่ออัปเดตเสร็จแบบ Custom UI (ใช้ภาษาไทยสมบูรณ์แบบไม่ติดบั๊กเพราะเรนเดอร์โดย Windows GUI)
+
+        # จัดการโฟลเดอร์ข้อมูลตามโหมดที่ผู้ใช้เลือก
+        if mode == "clean":
+            print("[Updater] Resetting folders (Clean Update)...")
+            folders_to_delete = [
+                "backup-id", "backup", "file-error", "found-hero",
+                "input-id", "login-success", "random-fail", "run-file", "no-hero"
+            ]
+            for folder in folders_to_delete:
+                if os.path.exists(folder):
+                    try:
+                        shutil.rmtree(folder)
+                        print(f"[Updater] Deleted folder: {folder}")
+                    except Exception as e:
+                        print(f"[Updater] Failed to delete {folder}: {e}")
+            
+            # สร้างใหม่เฉพาะโฟลเดอร์ที่จำเป็น
+            os.makedirs("input-id", exist_ok=True)
+            os.makedirs("backup", exist_ok=True)
+            print("[Updater] Created: input-id, backup")
+        else:
+            print("[Updater] Keeping all old folders (Data Preserved)...")
+            folders_to_ensure = [
+                "input-id", "backup", "backup-id", "file-error",
+                "found-hero", "login-success", "random-fail", "run-file", "no-hero"
+            ]
+            for folder in folders_to_ensure:
+                os.makedirs(folder, exist_ok=True)
+
+        # 🌟 แจ้งเตือนเมื่ออัปเดตเสร็จแบบ Custom UI
+        detail_msg = "บอทได้รับการอัปเดตและเก็บรักษาข้อมูลเดิมเรียบร้อยแล้ว!" if mode == "keep" else "บอทได้รับการอัปเดตและล้างข้อมูลเก่าทั้งหมดเรียบร้อยแล้ว!"
         show_custom_info_popup(
             "อัปเดตเสร็จสมบูรณ์! ✅",
-            f"บอทได้รับการอัปเดตเป็นเวอร์ชัน {latest_version} เรียบร้อยแล้ว!\nกรุณากดเปิด login.bat ใหม่อีกครั้งเพื่อเริ่มทำงาน"
+            f"บอทได้รับการอัปเดตเป็นเวอร์ชัน {latest_version} เรียบร้อยแล้ว!\n{detail_msg}\nกรุณากดเปิด login.bat ใหม่อีกครั้งเพื่อเริ่มทำงาน"
         )
         
         # ส่ง Exit Code 10 เพื่อบอกให้ batch ไฟล์หยุดการรันบอท (ให้ผู้ใช้เปิดใหม่เอง)

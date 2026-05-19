@@ -50,7 +50,7 @@ bot_running   = False
 gui_instance  = None
 
 # ── โหลด config จาก config.py ──────────────────────────────────────────────
-from config import EVENT_IMG, DO_BOX, DO_GACHA, HERO_LIST, IMG_DIR, INPUT_DIR, LOGIN_SUCCESS_DIR, FIND_HERO, HERO_IMG_MAP, GACHA_FREE, HERO_LIST_FREE, DEBUG_OCR
+from config import EVENT_IMG, DO_BOX, DO_GACHA, HERO_LIST, IMG_DIR, INPUT_DIR, LOGIN_SUCCESS_DIR, FIND_HERO, HERO_IMG_MAP, GACHA_FREE, HERO_LIST_FREE, DEBUG_OCR, CHECK_COIN
 
 REMOTE_AUTH_DIR   = "/data/data/jp.konami.pesam/files/SaveData/AUTH"
 REMOTE_DAT_FILE   = f"{REMOTE_AUTH_DIR}/online_user_id_data.dat"
@@ -278,7 +278,7 @@ if GUI_ENABLED:
 
             win = ctk.CTkToplevel(self)
             win.title("⚙️ Config")
-            win.geometry("340x290")
+            win.geometry("340x330")
             win.resizable(False, False)
             win.grab_set()   # modal
 
@@ -330,14 +330,24 @@ if GUI_ENABLED:
             ctk.CTkSwitch(row5, text="", variable=var_gacha_free,
                           onvalue=1, offvalue=0).pack(side="right")
 
+            # ── CHECK_COIN toggle ──────────────────────────
+            row6 = ctk.CTkFrame(win, fg_color="transparent")
+            row6.pack(fill="x", padx=20, pady=4)
+            ctk.CTkLabel(row6, text="Check Coin Mode",
+                         font=ctk.CTkFont(size=12)).pack(side="left")
+            var_check_coin = ctk.IntVar(value=getattr(cfg, 'CHECK_COIN', 0))
+            ctk.CTkSwitch(row6, text="", variable=var_check_coin,
+                          onvalue=1, offvalue=0).pack(side="right")
+
             # ── Save button ───────────────────────────────
             def _save():
-                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE
+                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN
                 new_event = var_event.get()
                 new_box   = var_box.get()
                 new_gacha = var_gacha.get()
                 new_find  = var_find_hero.get()
                 new_gfree = var_gacha_free.get()
+                new_ccoin = var_check_coin.get()
                 # เขียนลง config.py
                 cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.py")
                 with open(cfg_path, "r", encoding="utf-8") as f:
@@ -359,6 +369,11 @@ if GUI_ENABLED:
                                      content, flags=re.MULTILINE)
                 else:
                     content += f"\nGACHA_FREE = {new_gfree}\n"
+                if re.search(r"^CHECK_COIN\s*=\s*\d", content, flags=re.MULTILINE):
+                    content = re.sub(r"^CHECK_COIN\s*=\s*\d", f"CHECK_COIN = {new_ccoin}",
+                                     content, flags=re.MULTILINE)
+                else:
+                    content += f"\nCHECK_COIN = {new_ccoin}\n"
                 with open(cfg_path, "w", encoding="utf-8") as f:
                     f.write(content)
                 # อัปเดต runtime ด้วย
@@ -367,10 +382,11 @@ if GUI_ENABLED:
                 DO_GACHA   = new_gacha
                 FIND_HERO  = new_find
                 GACHA_FREE = new_gfree
+                CHECK_COIN = new_ccoin
                 importlib.reload(cfg)
                 label_status.configure(text=f"✅ Saved!",
                                        text_color="#4caf50")
-                self.log(f"Config saved: EVENT={new_event}, BOX={new_box}, GACHA={new_gacha}, HERO={new_find}, GFREE={new_gfree}")
+                self.log(f"Config saved: EVENT={new_event}, BOX={new_box}, GACHA={new_gacha}, HERO={new_find}, GFREE={new_gfree}, COIN={new_ccoin}")
 
             ctk.CTkButton(win, text="💾 Save", fg_color="#2cc985",
                           hover_color="#229f69", command=_save).pack(pady=8)
@@ -1297,20 +1313,29 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                 # 1. เช็ค checkpointgacha ปกติ
                 pts = img_search(img, os.path.join(IMG_DIR, "checkpointgacha.bmp"))
                 if pts:
-                    gui_log(serial, f"[Loop {loop_num}] checkpointgacha found! Clicking (478,320) x30...", step="Click x30")
-                    for _ in range(30):
+                    gui_log(serial, f"[Loop {loop_num}] checkpointgacha found! Clicking (478,320) continuously...", step="Click Loop")
+                    click_count = 0
+                    while True:
+                        check_device_reset(serial, cycle_start)
                         device.shell("input swipe 478 320 478 320 100")
-                        time.sleep(0.4)
-                    time.sleep(1)
-                    
-                    # แถม: เช็ค fixlocked สั้นๆ หลังกด
-                    img_fl = get_screen_capture(device)
-                    if img_fl is not None:
-                        pts_fl = img_search(img_fl, os.path.join(IMG_DIR, "fixlocked.bmp"))
-                        if pts_fl:
-                            x_fl, y_fl = pts_fl[0]
-                            device.shell(f"input swipe {x_fl} {y_fl} {x_fl} {y_fl} 100")
-                            time.sleep(1)
+                        click_count += 1
+                        time.sleep(0.3)
+                        
+                        # แถม: เช็ค fixlocked สั้นๆ หลังกด
+                        img_check = get_screen_capture(device)
+                        if img_check is not None:
+                            pts_fl = img_search(img_check, os.path.join(IMG_DIR, "fixlocked.bmp"))
+                            if pts_fl:
+                                x_fl, y_fl = pts_fl[0]
+                                device.shell(f"input swipe {x_fl} {y_fl} {x_fl} {y_fl} 100")
+                                time.sleep(1)
+                                continue
+                                
+                            # เช็คว่าเจอ checkpointgacha1.bmp หรือยัง
+                            pts_cp1 = img_search(img_check, os.path.join(IMG_DIR, "checkpointgacha1.bmp"))
+                            if pts_cp1:
+                                gui_log(serial, f"[Loop {loop_num}] checkpointgacha1.bmp found after {click_count} clicks!", step="CP1 Found")
+                                break
                     break
                 
                 # 2. เช็ค fixcheckpointgacha (ถ้าเจอให้กด fixlocked แล้วไปต่อ)
@@ -1404,6 +1429,108 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
             shutil.copy2(file_path, dest)
             os.remove(file_path)
             gui_log(serial, f"✅ Sorted: {final_name} → {dest_dir}", step="Sorted", status="working")
+        except Exception as e:
+            gui_log(serial, f"⚠️ Sort failed: {e}", step="Sort Error")
+
+        dur = time.time() - cycle_start
+        if gui_instance:
+            gui_instance.login_times.append(dur)
+
+    release_file(original_name)
+    gui_log(serial, f"Cycle finished for {original_name}", step="Done")
+    return True
+
+
+def check_coin_mode(device, cycle_start, serial, original_name, file_path):
+    """
+    Check Coin sequence:
+    1. Wait for checkpointcoin.bmp
+    2. OCR at Region(52, 10, 106, 41) to extract the number (digits only)
+    3. Rename file: [digits]+original_name (stripping any old [digits]+ from original name to avoid nesting)
+    4. Move file to 'check-coin' directory
+    5. Force-stop game and return True
+    """
+    import re
+    gui_log(serial, "Waiting checkpointcoin...", step="Coin Wait", status="working")
+    
+    # 1. Wait for checkpointcoin.bmp
+    deadline = time.time() + 60
+    found_cp = False
+    while time.time() < deadline:
+        check_device_reset(serial, cycle_start)
+        img = get_screen_capture(device)
+        if img is not None:
+            pts = img_search(img, os.path.join(IMG_DIR, "checkpointcoin.bmp"))
+            if pts:
+                found_cp = True
+                break
+        time.sleep(1)
+        
+    if not found_cp:
+        gui_log(serial, "checkpointcoin.bmp not found! Moving to random-fail.", step="Coin Timeout")
+        device.shell("am force-stop jp.konami.pesam")
+        time.sleep(1)
+        dest_dir = RANDOM_FAIL_DIR
+        final_name = original_name
+        dest = os.path.join(dest_dir, final_name)
+        if os.path.exists(file_path):
+            time.sleep(2)
+            try:
+                if os.path.exists(dest):
+                    os.remove(dest)
+                shutil.copy2(file_path, dest)
+                os.remove(file_path)
+            except Exception as e:
+                print(f"[{serial}] Failed to move file to random-fail: {e}")
+        release_file(original_name)
+        return True
+
+    # 2. OCR at Region(52, 10, 106, 41)
+    gui_log(serial, "checkpointcoin detected! Scanning coins...", step="Scanning Coin")
+    coin_number = None
+    for attempt in range(3):
+        check_device_reset(serial, cycle_start)
+        img = get_screen_capture(device)
+        if img is not None:
+            coin_region = Region(52, 10, 106, 41)
+            ocr_text = read_screen_text(img, region=coin_region, serial=serial)
+            digits = "".join(re.findall(r"\d+", ocr_text))
+            if digits:
+                coin_number = digits
+                break
+        time.sleep(1)
+
+    if not coin_number:
+        gui_log(serial, "Could not read coins via OCR! Using '0'", step="OCR Fail")
+        coin_number = "0"
+
+    # 3. Rename file and strip old [digits]+ prefix
+    match = re.match(r"^\[\d+\]\+(.+)$", original_name)
+    if match:
+        base_name = match.group(1)
+    else:
+        base_name = original_name
+
+    final_name = f"[{coin_number}]+{base_name}"
+    gui_log(serial, f"🪙 Coins: {coin_number} -> {final_name}", step="Coin Match")
+    print(f"[{serial}] Coin Scan Result: {coin_number} -> file: {final_name}")
+
+    # 4. Move file to 'check-coin' directory
+    CHECK_COIN_DIR = "check-coin"
+    os.makedirs(CHECK_COIN_DIR, exist_ok=True)
+    
+    device.shell("am force-stop jp.konami.pesam")
+    time.sleep(1)
+
+    dest = os.path.join(CHECK_COIN_DIR, final_name)
+    if os.path.exists(file_path):
+        time.sleep(2)
+        try:
+            if os.path.exists(dest):
+                os.remove(dest)
+            shutil.copy2(file_path, dest)
+            os.remove(file_path)
+            gui_log(serial, f"✅ Sorted: {final_name} -> {CHECK_COIN_DIR}", step="Sorted", status="working")
         except Exception as e:
             gui_log(serial, f"⚠️ Sort failed: {e}", step="Sort Error")
 
@@ -1661,6 +1788,11 @@ def process_device_login(device):
                             time.sleep(4)
                             break
                     time.sleep(1)
+
+            # 7.4 Check Coin Sequence (Optional)
+            if CHECK_COIN == 1:
+                if check_coin_mode(device, cycle_start, serial, original_name, file_path):
+                    continue  # Start next file immediately
 
             # 7.5 Find Hero Sequence (Optional)
             if FIND_HERO == 1:
