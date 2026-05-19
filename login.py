@@ -50,7 +50,7 @@ bot_running   = False
 gui_instance  = None
 
 # ── โหลด config จาก config.py ──────────────────────────────────────────────
-from config import EVENT_IMG, DO_BOX, DO_GACHA, HERO_LIST, IMG_DIR, INPUT_DIR, LOGIN_SUCCESS_DIR, FIND_HERO, HERO_IMG_MAP, GACHA_FREE, HERO_LIST_FREE, DEBUG_OCR, CHECK_COIN
+from config import EVENT_IMG, DO_BOX, DO_GACHA, HERO_LIST, IMG_DIR, INPUT_DIR, LOGIN_SUCCESS_DIR, FIND_HERO, HERO_IMG_MAP, GACHA_FREE, HERO_LIST_FREE, DEBUG_OCR, CHECK_COIN, GACHA_FREE_LOOPS
 
 REMOTE_AUTH_DIR   = "/data/data/jp.konami.pesam/files/SaveData/AUTH"
 REMOTE_DAT_FILE   = f"{REMOTE_AUTH_DIR}/online_user_id_data.dat"
@@ -278,7 +278,7 @@ if GUI_ENABLED:
 
             win = ctk.CTkToplevel(self)
             win.title("⚙️ Config")
-            win.geometry("340x330")
+            win.geometry("340x370")
             win.resizable(False, False)
             win.grab_set()   # modal
 
@@ -330,6 +330,15 @@ if GUI_ENABLED:
             ctk.CTkSwitch(row5, text="", variable=var_gacha_free,
                           onvalue=1, offvalue=0).pack(side="right")
 
+            # ── GACHA_FREE_LOOPS entry ─────────────────────
+            row5_loops = ctk.CTkFrame(win, fg_color="transparent")
+            row5_loops.pack(fill="x", padx=20, pady=4)
+            ctk.CTkLabel(row5_loops, text="  └─ Loops count",
+                         font=ctk.CTkFont(size=11, slant="italic")).pack(side="left", padx=(10, 0))
+            entry_gfree_loops = ctk.CTkEntry(row5_loops, width=50, height=20, justify="center")
+            entry_gfree_loops.insert(0, str(getattr(cfg, 'GACHA_FREE_LOOPS', 2)))
+            entry_gfree_loops.pack(side="right")
+
             # ── CHECK_COIN toggle ──────────────────────────
             row6 = ctk.CTkFrame(win, fg_color="transparent")
             row6.pack(fill="x", padx=20, pady=4)
@@ -341,13 +350,18 @@ if GUI_ENABLED:
 
             # ── Save button ───────────────────────────────
             def _save():
-                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN
+                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS
                 new_event = var_event.get()
                 new_box   = var_box.get()
                 new_gacha = var_gacha.get()
                 new_find  = var_find_hero.get()
                 new_gfree = var_gacha_free.get()
                 new_ccoin = var_check_coin.get()
+                try:
+                    new_gfree_loops = int(entry_gfree_loops.get())
+                except ValueError:
+                    new_gfree_loops = 2
+
                 # เขียนลง config.py
                 cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.py")
                 with open(cfg_path, "r", encoding="utf-8") as f:
@@ -369,6 +383,11 @@ if GUI_ENABLED:
                                      content, flags=re.MULTILINE)
                 else:
                     content += f"\nGACHA_FREE = {new_gfree}\n"
+                if re.search(r"^GACHA_FREE_LOOPS\s*=\s*\d+", content, flags=re.MULTILINE):
+                    content = re.sub(r"^GACHA_FREE_LOOPS\s*=\s*\d+", f"GACHA_FREE_LOOPS = {new_gfree_loops}",
+                                     content, flags=re.MULTILINE)
+                else:
+                    content += f"\nGACHA_FREE_LOOPS = {new_gfree_loops}\n"
                 if re.search(r"^CHECK_COIN\s*=\s*\d", content, flags=re.MULTILINE):
                     content = re.sub(r"^CHECK_COIN\s*=\s*\d", f"CHECK_COIN = {new_ccoin}",
                                      content, flags=re.MULTILINE)
@@ -382,11 +401,12 @@ if GUI_ENABLED:
                 DO_GACHA   = new_gacha
                 FIND_HERO  = new_find
                 GACHA_FREE = new_gfree
+                GACHA_FREE_LOOPS = new_gfree_loops
                 CHECK_COIN = new_ccoin
                 importlib.reload(cfg)
                 label_status.configure(text=f"✅ Saved!",
                                        text_color="#4caf50")
-                self.log(f"Config saved: EVENT={new_event}, BOX={new_box}, GACHA={new_gacha}, HERO={new_find}, GFREE={new_gfree}, COIN={new_ccoin}")
+                self.log(f"Config saved: EVENT={new_event}, BOX={new_box}, GACHA={new_gacha}, HERO={new_find}, GFREE={new_gfree}({new_gfree_loops} loops), COIN={new_ccoin}")
 
             ctk.CTkButton(win, text="💾 Save", fg_color="#2cc985",
                           hover_color="#229f69", command=_save).pack(pady=8)
@@ -1216,11 +1236,11 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                     break
             time.sleep(1)
 
-    # 2. ทำ 3 loops
+    # 2. ทำลูปสุ่มกาชาฟรีตามจำนวนที่กำหนดใน config
     found_heroes = []  # เก็บชื่อฮีโร่ที่เจอจากทุก loop
 
-    for loop_num in range(1, 4):
-        gui_log(serial, f"=== Gacha Free Loop {loop_num}/3 ===", step=f"Loop {loop_num}")
+    for loop_num in range(1, GACHA_FREE_LOOPS + 1):
+        gui_log(serial, f"=== Gacha Free Loop {loop_num}/{GACHA_FREE_LOOPS} ===", step=f"Loop {loop_num}")
 
         # 2a. เลื่อนหา gachafree1.bmp (เช็คก่อน → ไม่เจอ → เลื่อน, ครบ 10 รอบ = ข้าม loop นี้)
         gui_log(serial, f"[Loop {loop_num}] Looking for gachafree1.bmp...", step="Swipe Free")
@@ -1406,7 +1426,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                     break
             time.sleep(1)
 
-    # 3. จบ 2 loops → Sort file
+    # 3. จบตามลูปที่ตั้งค่า → Sort file
     device.shell("am force-stop jp.konami.pesam")
     time.sleep(1)
 
@@ -1418,7 +1438,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
     else:
         dest_dir = RANDOM_FAIL_DIR
         final_name = original_name
-        gui_log(serial, "No match in all 3 loops → random-fail", step="No Match")
+        gui_log(serial, f"No match in all {GACHA_FREE_LOOPS} loops → random-fail", step="No Match")
 
     dest = os.path.join(dest_dir, final_name)
     if os.path.exists(file_path):
