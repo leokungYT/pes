@@ -58,6 +58,7 @@ REMOTE_DAT_FILE   = f"{REMOTE_AUTH_DIR}/online_user_id_data.dat"
 IMAGE_CACHE          = {}
 DEVICE_RESET_FLAGS   = {}
 DEVICE_FILE_ASSIGNMENTS = {}
+DEVICE_DISABLE_FIXEVENT = {}
 
 file_pick_lock = threading.Lock()
 in_use_files   = set()   # filenames currently being processed
@@ -855,32 +856,33 @@ def get_screen_capture(device):
                 img = fast_screencap(device)
 
             # fixevent.bmp floating check
-            fe_pts = img_search(img, os.path.join(IMG_DIR, "fixevent.bmp"))
-            if fe_pts:
-                gui_log(device.serial, "Floating: fixevent.bmp found! Checking if it persists for 8s...", step="Fix Event")
-                persisted = True
-                for _ in range(8):
-                    time.sleep(1)
-                    img_check = fast_screencap(device)
-                    if img_check is None:
-                        persisted = False
-                        break
-                    pts_check = img_search(img_check, os.path.join(IMG_DIR, "fixevent.bmp"))
-                    if not pts_check:
-                        persisted = False
-                        break
-                
-                if persisted:
-                    gui_log(device.serial, "fixevent.bmp persisted for 8s! Clicking...", step="Fix Event")
-                    img_click = fast_screencap(device)
-                    if img_click is not None:
-                        pts_click = img_search(img_click, os.path.join(IMG_DIR, "fixevent.bmp"))
-                        if pts_click:
-                            x, y = pts_click[0]
-                            device.shell(f"input swipe {x} {y} {x} {y} 100")
-                            gui_log(device.serial, f"Clicked fixevent.bmp at ({x}, {y})", step="Fix Event")
-                            time.sleep(2)
-                    img = fast_screencap(device)
+            if not DEVICE_DISABLE_FIXEVENT.get(device.serial, False):
+                fe_pts = img_search(img, os.path.join(IMG_DIR, "fixevent.bmp"))
+                if fe_pts:
+                    gui_log(device.serial, "Floating: fixevent.bmp found! Checking if it persists for 8s...", step="Fix Event")
+                    persisted = True
+                    for _ in range(8):
+                        time.sleep(1)
+                        img_check = fast_screencap(device)
+                        if img_check is None:
+                            persisted = False
+                            break
+                        pts_check = img_search(img_check, os.path.join(IMG_DIR, "fixevent.bmp"))
+                        if not pts_check:
+                            persisted = False
+                            break
+                    
+                    if persisted:
+                        gui_log(device.serial, "fixevent.bmp persisted for 8s! Clicking...", step="Fix Event")
+                        img_click = fast_screencap(device)
+                        if img_click is not None:
+                            pts_click = img_search(img_click, os.path.join(IMG_DIR, "fixevent.bmp"))
+                            if pts_click:
+                                x, y = pts_click[0]
+                                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                gui_log(device.serial, f"Clicked fixevent.bmp at ({x}, {y})", step="Fix Event")
+                                time.sleep(2)
+                        img = fast_screencap(device)
 
         update_gui(device.serial, screenshot=img)
         return img
@@ -1577,6 +1579,7 @@ def process_device_login(device):
         original_name = None
 
         try:
+            DEVICE_DISABLE_FIXEVENT[serial] = False
             check_device_reset(serial)
             gui_log(serial, "--- Starting New Cycle ---", step="New Cycle", status="working")
 
@@ -1810,6 +1813,7 @@ def process_device_login(device):
                     time.sleep(1)
 
             # 7.4 Check Coin Sequence (Optional)
+            DEVICE_DISABLE_FIXEVENT[serial] = True
             if CHECK_COIN == 1:
                 if check_coin_mode(device, cycle_start, serial, original_name, file_path):
                     continue  # Start next file immediately
