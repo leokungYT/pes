@@ -1124,8 +1124,67 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
     """
     gui_log(serial, "Find Hero sequence started...", step="Find Hero", status="working")
     
-    # 1. fin1 -> fin8 navigation
-    for i in range(1, 9):
+    # 1. fin1 -> fin4 navigation
+    for i in range(1, 5):
+        name = f"fin{i}.bmp"
+        gui_log(serial, f"Waiting {name}...", step=name)
+        deadline = time.time() + 15
+        found = False
+        while time.time() < deadline:
+            check_device_reset(serial, cycle_start)
+            img = get_screen_capture(device)
+            if img is not None:
+                pts = img_search(img, os.path.join(IMG_DIR, name))
+                if pts:
+                    x, y = pts[0]
+                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                    time.sleep(2.5)
+                    found = True
+                    break
+            time.sleep(0.5)
+        if not found:
+            gui_log(serial, f"{name} not found, proceeding anyway...", step=name)
+
+    # 2. Swipe down for fin5
+    gui_log(serial, "Swiping down for fin5...", step="Swipe fin5")
+    found_fin5 = False
+    for swipe_count in range(20):
+        check_device_reset(serial, cycle_start)
+        img = get_screen_capture(device)
+        if img is not None:
+            pts = img_search(img, os.path.join(IMG_DIR, "fin5.bmp"))
+            if pts:
+                x, y = pts[0]
+                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                gui_log(serial, "Found fin5.bmp!", step="fin5")
+                time.sleep(2.5)
+                found_fin5 = True
+                break
+        device.shell("input swipe 91 306 91 131 4000")
+        time.sleep(2)
+    if not found_fin5:
+        gui_log(serial, "fin5.bmp not found after 20 swipes", step="fin5 error")
+
+    # 3. Wait for fin6 and click continuously until not found for 5s
+    gui_log(serial, "Waiting for and clicking fin6...", step="fin6")
+    last_seen = time.time()
+    while time.time() - last_seen < 5:
+        check_device_reset(serial, cycle_start)
+        img = get_screen_capture(device)
+        if img is not None:
+            pts = img_search(img, os.path.join(IMG_DIR, "fin6.bmp"))
+            if pts:
+                x, y = pts[0]
+                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                gui_log(serial, "Clicked fin6.bmp", step="fin6")
+                time.sleep(1.5)
+                last_seen = time.time()
+                continue
+        time.sleep(0.5)
+    gui_log(serial, "fin6 not found for 5s, proceeding...", step="fin6-done")
+
+    # 4. Wait and click fin7 -> fin8
+    for i in [7, 8]:
         name = f"fin{i}.bmp"
         gui_log(serial, f"Waiting {name}...", step=name)
         deadline = time.time() + 15
@@ -1133,7 +1192,6 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
             check_device_reset(serial, cycle_start)
             img = get_screen_capture(device)
             if img is not None:
-                # fin8 is the most critical confirmation, use higher threshold
                 thresh = 0.95 if i == 8 else 0.8
                 pts = img_search(img, os.path.join(IMG_DIR, name), threshold=thresh)
                 if pts:
@@ -1143,42 +1201,62 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
                     break
             time.sleep(0.5)
 
-    # 2. Triple Check Scan
-    gui_log(serial, "Delay 8s before scanning...", step="Delay 8s")
-    time.sleep(8)
-
-    gui_log(serial, "Scanning (Triple Check)...", step="Scan Hero")
-    hero_hits = {} # hero_name -> count
-    scans_done = 0
-    max_attempts = 5
-    required_hits = 3
-    
-    while scans_done < max_attempts:
+    # 5. Wait for checkpointfind
+    gui_log(serial, "Waiting checkpointfind.bmp...", step="checkpointfind")
+    deadline_cp = time.time() + 45
+    found_cp = False
+    while time.time() < deadline_cp:
         check_device_reset(serial, cycle_start)
         img = get_screen_capture(device)
         if img is not None:
-            found_this_round = set()
-            for hero_img, h_name in HERO_IMG_MAP.items():
-                pts = img_search(img, os.path.join(IMG_DIR, hero_img), threshold=0.95)
-                if pts:
-                    found_this_round.add(h_name)
-            
-            for h_name in found_this_round:
-                hero_hits[h_name] = hero_hits.get(h_name, 0) + 1
-            
-            scans_done += 1
-            gui_log(serial, f"Scan {scans_done}/{max_attempts} complete", step="Scanning")
-            
-            # If we found any hero enough times, we could potentially stop early,
-            # but for maximum reliability as requested, we'll finish at least 3 scans
-            # or all 5 if some matches are inconsistent.
-            if any(count >= required_hits for count in hero_hits.values()) and scans_done >= 3:
+            pts = img_search(img, os.path.join(IMG_DIR, "checkpointfind.bmp"))
+            if pts:
+                gui_log(serial, "checkpointfind.bmp found!", step="Find Hero CP")
+                found_cp = True
                 break
-        time.sleep(1.2)
+        time.sleep(1)
+    
+    if not found_cp:
+        gui_log(serial, "checkpointfind.bmp not found! Proceeding with scan anyway.", step="CP Fail")
+    
+    time.sleep(3) # Let screen settle
 
-    found_heroes = [h for h, count in hero_hits.items() if count >= required_hits]
+    # 6. OCR Scanning
+    found_heroes = []
+    target_heroes = [h.strip() for h in HERO_LIST if h and h.strip()]
 
-    # 3. Shutdown and Move
+    # Lock 1 Scanning
+    gui_log(serial, "Scanning Lock 1...", step="Scan Lock 1")
+    img1 = get_screen_capture(device)
+    if img1 is not None:
+        lock1_region = Region(58, 122, 351, 343)
+        lock1_text = read_screen_text(img1, region=lock1_region, serial=serial)
+        gui_log(serial, f"Lock 1 OCR: {lock1_text if lock1_text else '<EMPTY>'}", step="Scan Lock 1")
+        
+        for h in target_heroes:
+            if h.lower() in lock1_text.lower():
+                found_heroes.append(h)
+                gui_log(serial, f"Lock 1 Match: {h}", step="Match!")
+                break
+
+    # Delay to let Lock 2 fully load/animate
+    time.sleep(2.5)
+
+    # Lock 2 Scanning
+    gui_log(serial, "Scanning Lock 2...", step="Scan Lock 2")
+    img2 = get_screen_capture(device)
+    if img2 is not None:
+        lock2_region = Region(503, 116, 341, 338)
+        lock2_text = read_screen_text(img2, region=lock2_region, serial=serial)
+        gui_log(serial, f"Lock 2 OCR: {lock2_text if lock2_text else '<EMPTY>'}", step="Scan Lock 2")
+        
+        for h in target_heroes:
+            if h.lower() in lock2_text.lower():
+                found_heroes.append(h)
+                gui_log(serial, f"Lock 2 Match: {h}", step="Match!")
+                break
+
+    # 7. Shutdown and Move
     device.shell("am force-stop jp.konami.pesam")
     time.sleep(1)
 
