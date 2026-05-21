@@ -884,6 +884,44 @@ def get_screen_capture(device):
                                 time.sleep(2)
                         img = fast_screencap(device)
 
+            # fixalert1.bmp floating check
+            fa_pts = img_search(img, os.path.join(IMG_DIR, "fixalert1.bmp"))
+            if fa_pts:
+                gui_log(device.serial, "Floating: fixalert1.bmp found! Executing fixalert2 -> fixalert3", step="Fix Alert")
+                # Wait up to 15 seconds for fixalert2 and click it
+                deadline_fa2 = time.time() + 15
+                clicked_fa2 = False
+                while time.time() < deadline_fa2:
+                    img_fa2 = fast_screencap(device)
+                    if img_fa2 is not None:
+                        pts_fa2 = img_search(img_fa2, os.path.join(IMG_DIR, "fixalert2.bmp"))
+                        if pts_fa2:
+                            x, y = pts_fa2[0]
+                            device.shell(f"input swipe {x} {y} {x} {y} 100")
+                            gui_log(device.serial, "Clicked fixalert2.bmp", step="Fix Alert")
+                            time.sleep(2)
+                            clicked_fa2 = True
+                            break
+                    time.sleep(0.5)
+
+                if clicked_fa2:
+                    # Wait up to 15 seconds for fixalert3 and click it
+                    deadline_fa3 = time.time() + 15
+                    while time.time() < deadline_fa3:
+                        img_fa3 = fast_screencap(device)
+                        if img_fa3 is not None:
+                            pts_fa3 = img_search(img_fa3, os.path.join(IMG_DIR, "fixalert3.bmp"))
+                            if pts_fa3:
+                                x, y = pts_fa3[0]
+                                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                gui_log(device.serial, "Clicked fixalert3.bmp", step="Fix Alert")
+                                time.sleep(2)
+                                break
+                        time.sleep(0.5)
+
+                # Re-capture after fixing
+                img = fast_screencap(device)
+
         update_gui(device.serial, screenshot=img)
         return img
     except DeviceResetException:
