@@ -69,8 +69,8 @@ HERO_LIST_FREE = [
     "Ramedhan Saifullah",
     "Chrigor",
     "Lamine Yamal",
-    "Kylian Mbapp",
-    "Joan Garc",
+    "Kylian Mbappe",
+    "Joan Garcia",
     "Martin Odegaard",
     "Atep"
 ]
