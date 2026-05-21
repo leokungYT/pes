@@ -1409,12 +1409,44 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
         found_free = False
         miss_count = 0
         max_miss = 10
+        next_first_seen = None  # ติดตาม next.bmp ค้าง
 
         while miss_count < max_miss:
             check_device_reset(serial, cycle_start)
             _check_fixcoin()  # priority #1
             img = get_screen_capture(device)
             if img is not None:
+                # === Priority: เช็ค next.bmp ค้าง ===
+                pts_next = img_search(img, os.path.join(IMG_DIR, "next.bmp"))
+                if pts_next:
+                    if next_first_seen is None:
+                        next_first_seen = time.time()
+                        gui_log(serial, f"[Loop {loop_num}] next.bmp detected, watching...", step="Next Watch")
+                    elif time.time() - next_first_seen >= 10:
+                        # ค้างครบ 10 วิ → กดจนหาย
+                        gui_log(serial, f"[Loop {loop_num}] next.bmp stuck for 10s! Clicking until gone...", step="Next Stuck")
+                        while True:
+                            check_device_reset(serial, cycle_start)
+                            img_n = get_screen_capture(device)
+                            if img_n is not None:
+                                pts_n = img_search(img_n, os.path.join(IMG_DIR, "next.bmp"))
+                                if pts_n:
+                                    x_n, y_n = pts_n[0]
+                                    device.shell(f"input swipe {x_n} {y_n} {x_n} {y_n} 100")
+                                    time.sleep(1)
+                                else:
+                                    break  # หายแล้ว
+                            else:
+                                break
+                        gui_log(serial, f"[Loop {loop_num}] next.bmp gone! Resetting swipe search to 1/{max_miss}", step="Next Reset")
+                        next_first_seen = None
+                        miss_count = 0  # reset เริ่มเลื่อนใหม่
+                        time.sleep(2)
+                        continue
+                else:
+                    next_first_seen = None  # ไม่เจอ next → reset timer
+
+                # === หา gachafree1 ===
                 pts = img_search(img, os.path.join(IMG_DIR, "gachafree1.bmp"), threshold=0.95)
                 if pts:
                     x, y = pts[0]
@@ -1447,7 +1479,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
             _check_fixcoin()
 
         if not found_free:
-            gui_log(serial, f"[Loop {loop_num}] gachafree1 not found after 10 swipes, skipping loop", step="Skip")
+            gui_log(serial, f"[Loop {loop_num}] gachafree1 not found after {max_miss} swipes, skipping loop", step="Skip")
             continue  # ข้ามไป loop ถัดไป (หรือจบถ้า loop 2)
 
         # 2b. รอ gachafree2.bmp → กดจนกว่าจะหายไป (timeout 15s → file-error)
