@@ -59,6 +59,7 @@ IMAGE_CACHE          = {}
 DEVICE_RESET_FLAGS   = {}
 DEVICE_FILE_ASSIGNMENTS = {}
 DEVICE_DISABLE_FIXEVENT = {}
+DEVICE_LAST_GAME_CHECK  = {}  # throttle: เช็คเกมออนทุก 30 วิ
 
 file_pick_lock = threading.Lock()
 ocr_lock       = threading.Lock()   # ป้องกัน OCR หลาย device พร้อมกัน (ลด CPU spike)
@@ -764,8 +765,34 @@ def fast_screencap(device):
         pass
     return None
 
+def is_game_running(device):
+    """Check if jp.konami.pesam is running on the device (throttled every 30s)."""
+    serial = device.serial
+    now = time.time()
+    last_check = DEVICE_LAST_GAME_CHECK.get(serial, 0)
+    if now - last_check < 30:
+        return True  # ยังไม่ถึงเวลาเช็ค ถือว่าออนอยู่
+    DEVICE_LAST_GAME_CHECK[serial] = now
+    try:
+        kwargs = {'creationflags': 0x08000000} if os.name == 'nt' else {}
+        result = subprocess.run(
+            [adb_path, "-s", serial, "shell", "pidof jp.konami.pesam"],
+            capture_output=True, text=True, timeout=5, **kwargs
+        )
+        pid = result.stdout.strip()
+        return bool(pid)  # มี PID = เกมออนอยู่
+    except Exception:
+        return True  # ADB error ถือว่าออนอยู่ (ไม่ relaunch มั่ว)
+
 def get_screen_capture(device):
     try:
+        # เช็คเกมออนอยู่หรือไม่ (ทุก 30 วิ)
+        if not is_game_running(device):
+            gui_log(device.serial, "⚠️ Game not running! Relaunching...", step="Relaunch")
+            device.shell("monkey -p jp.konami.pesam -c android.intent.category.LAUNCHER 1")
+            time.sleep(14)
+            DEVICE_LAST_GAME_CHECK[device.serial] = time.time()
+
         img = fast_screencap(device)
         if img is None:
             return None
@@ -1368,16 +1395,22 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
     """
     gui_log(serial, "Gacha Free sequence started...", step="GachaFree", status="working")
 
-    # Helper: เช็ค fixcoin.bmp (priority #1) — ถ้าเจอกด Back ทันที
+    # Helper: เช็ค fixcoin.bmp (priority #1) — ถ้าเจอกด Back แค่ 1 ครั้ง
+    fixcoin_handled = False
     def _check_fixcoin():
+        nonlocal fixcoin_handled
         img_fc = get_screen_capture(device)
         if img_fc is not None:
             pts_fc = img_search(img_fc, os.path.join(IMG_DIR, "fixcoin.bmp"), threshold=0.95)
             if pts_fc:
-                gui_log(serial, "fixcoin.bmp detected! Pressing Back...", step="Fix Coin")
-                device.shell("input keyevent 4")  # KEYCODE_BACK
-                time.sleep(2)
+                if not fixcoin_handled:
+                    gui_log(serial, "fixcoin.bmp detected! Pressing Back (once)...", step="Fix Coin")
+                    device.shell("input keyevent 4")  # KEYCODE_BACK
+                    time.sleep(2)
+                    fixcoin_handled = True
                 return True
+            else:
+                fixcoin_handled = False  # fixcoin หายแล้ว → reset flag
         return False
 
     # 1. gacha1 → gacha2 (ทำแค่ครั้งเดียวตอนเริ่ม)
