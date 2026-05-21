@@ -61,7 +61,11 @@ DEVICE_FILE_ASSIGNMENTS = {}
 DEVICE_DISABLE_FIXEVENT = {}
 
 file_pick_lock = threading.Lock()
+ocr_lock       = threading.Lock()   # ป้องกัน OCR หลาย device พร้อมกัน (ลด CPU spike)
 in_use_files   = set()   # filenames currently being processed
+
+LOG_DIR = "logs"
+os.makedirs(LOG_DIR, exist_ok=True)
 
 os.makedirs(INPUT_DIR, exist_ok=True)
 os.makedirs(LOGIN_SUCCESS_DIR, exist_ok=True)
@@ -267,6 +271,11 @@ if GUI_ENABLED:
                           font=ctk.CTkFont(size=10), fg_color="#1565c0",
                           hover_color="#0d47a1",
                           command=self.open_config_dialog
+                          ).pack(side="left", padx=3, pady=4)
+            ctk.CTkButton(bottom_bar, text="📋 Logs", width=60, height=22,
+                          font=ctk.CTkFont(size=10), fg_color="#555555",
+                          command=lambda: subprocess.Popen(
+                              f'explorer "{os.path.join(base_path, LOG_DIR)}"')
                           ).pack(side="left", padx=3, pady=4)
             ctk.CTkLabel(bottom_bar, text="v1.0",
                          font=ctk.CTkFont(size=10), text_color="#888888"
@@ -626,6 +635,16 @@ def update_gui(serial, **kwargs):
 def gui_log(serial, msg, step=None, status=None):
     print(f"{Fore.CYAN}[{serial}] {msg}{Style.RESET_ALL}")
     update_gui(serial, log=msg, step=step, status=status)
+    # บันทึก log ลงไฟล์แยกตาม device
+    try:
+        safe_name = serial.replace(".", "_").replace(":", "_")
+        log_file = os.path.join(LOG_DIR, f"{safe_name}.txt")
+        ts = time.strftime("%Y-%m-%d %H:%M:%S")
+        with open(log_file, "a", encoding="utf-8") as f:
+            step_str = f" [{step}]" if step else ""
+            f.write(f"[{ts}]{step_str} {msg}\n")
+    except Exception:
+        pass
 
 # ═════════════════════════════════════════════════════════════════════════════
 # ADB helpers
@@ -961,9 +980,17 @@ def read_screen_text(img, region=None, serial="unknown"):
     """OCR Logic using EasyOCR (priority) or Pytesseract — Enhanced for max accuracy"""
     if img is None: return ""
     
-    # Crop region if provided
+    # Crop region ก่อน lock (เบา)
     if region:
         img = img[region.y : region.y + region.h, region.x : region.x + region.w]
+    
+    # Lock ป้องกันหลาย thread สแกน OCR พร้อมกัน (ลด CPU spike)
+    with ocr_lock:
+        return _read_screen_text_locked(img, serial)
+
+def _read_screen_text_locked(img, serial):
+    """Internal OCR — เรียกผ่าน read_screen_text เท่านั้น (มี lock แล้ว)"""
+    if img is None: return ""
     
     # ── Debug: บันทึกภาพที่สแกนเมื่อ DEBUG_OCR=1 ──
     if DEBUG_OCR == 1:
@@ -1047,6 +1074,10 @@ def read_screen_text(img, region=None, serial="unknown"):
                     print(f"[OCR] {label}: '{res}'")
                     if len(res) > len(best_result):
                         best_result = res
+                    # Early exit: ได้ผลยาวพอแล้ว ไม่ต้องลอง method ถัดไป (ประหยัด CPU)
+                    if len(best_result) >= 3:
+                        print(f"[OCR] ★ Early exit with: '{best_result}'")
+                        return best_result
             
             if best_result:
                 print(f"[OCR] ★ Best Result: '{best_result}'")
@@ -1410,7 +1441,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                     break
             miss_count += 1
             gui_log(serial, f"[Loop {loop_num}] gachafree1 not here, swiping... ({miss_count}/{max_miss})", step="Swipe")
-            device.shell("input swipe 618 308 54 306 4000")
+            device.shell("input swipe 618 308 54 306 5000")
             time.sleep(2)
             # เช็ค fixcoin หลังเลื่อน (เลื่อนไปโดนตู้ fixcoin ขึ้น)
             _check_fixcoin()
