@@ -1409,21 +1409,6 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                     time.sleep(2)
                     break
             miss_count += 1
-            # แวะเช็ค fixswap.bmp 3 วิ ก่อนเลื่อน
-            gui_log(serial, f"[Loop {loop_num}] Checking fixswap before swiping...", step="Fix Swap")
-            deadline_fs = time.time() + 3
-            while time.time() < deadline_fs:
-                check_device_reset(serial, cycle_start)
-                img_fs = get_screen_capture(device)
-                if img_fs is not None:
-                    pts_fs = img_search(img_fs, os.path.join(IMG_DIR, "fixswap.bmp"))
-                    if pts_fs:
-                        x_fs, y_fs = pts_fs[0]
-                        device.shell(f"input swipe {x_fs} {y_fs} {x_fs} {y_fs} 100")
-                        gui_log(serial, f"[Loop {loop_num}] fixswap.bmp found & clicked!", step="Fix Swap")
-                        time.sleep(2)
-                        break
-                time.sleep(0.5)
             gui_log(serial, f"[Loop {loop_num}] gachafree1 not here, swiping... ({miss_count}/{max_miss})", step="Swipe")
             device.shell("input swipe 618 308 54 306 4000")
             time.sleep(2)
