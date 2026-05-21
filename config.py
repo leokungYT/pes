@@ -71,9 +71,8 @@ HERO_LIST_FREE = [
     "Lamine Yamal",
     "Kylian Mbapp",
     "Joan Garc",
-    "Martin ",
-    "Atep",
-    "Kylian Mbapp"
+    "Martin Odegaard",
+    "Atep"
 ]
 
 # ── Debug OCR ─────────────────────────────────────
