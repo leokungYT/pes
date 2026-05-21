@@ -1337,6 +1337,18 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
     """
     gui_log(serial, "Gacha Free sequence started...", step="GachaFree", status="working")
 
+    # Helper: เช็ค fixcoin.bmp (priority #1) — ถ้าเจอกด Back ทันที
+    def _check_fixcoin():
+        img_fc = get_screen_capture(device)
+        if img_fc is not None:
+            pts_fc = img_search(img_fc, os.path.join(IMG_DIR, "fixcoin.bmp"), threshold=0.95)
+            if pts_fc:
+                gui_log(serial, "fixcoin.bmp detected! Pressing Back...", step="Fix Coin")
+                device.shell("input keyevent 4")  # KEYCODE_BACK
+                time.sleep(2)
+                return True
+        return False
+
     # 1. gacha1 → gacha2 (ทำแค่ครั้งเดียวตอนเริ่ม)
     for i in range(1, 3):
         name = f"gacha{i}.bmp"
@@ -1344,6 +1356,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
         deadline = time.time() + 30
         while time.time() < deadline:
             check_device_reset(serial, cycle_start)
+            _check_fixcoin()  # priority #1
             img = get_screen_capture(device)
             if img is not None:
                 pts = img_search(img, os.path.join(IMG_DIR, name))
@@ -1368,6 +1381,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
 
         while miss_count < max_miss:
             check_device_reset(serial, cycle_start)
+            _check_fixcoin()  # priority #1
             img = get_screen_capture(device)
             if img is not None:
                 pts = img_search(img, os.path.join(IMG_DIR, "gachafree1.bmp"), threshold=0.95)
@@ -1413,6 +1427,8 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
             gui_log(serial, f"[Loop {loop_num}] gachafree1 not here, swiping... ({miss_count}/{max_miss})", step="Swipe")
             device.shell("input swipe 618 308 54 306 4000")
             time.sleep(2)
+            # เช็ค fixcoin หลังเลื่อน (เลื่อนไปโดนตู้ fixcoin ขึ้น)
+            _check_fixcoin()
 
         if not found_free:
             gui_log(serial, f"[Loop {loop_num}] gachafree1 not found after 10 swipes, skipping loop", step="Skip")
@@ -1424,6 +1440,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
         clicked_gf2 = False
         while time.time() < deadline_gf2:
             check_device_reset(serial, cycle_start)
+            _check_fixcoin()  # priority #1
             img = get_screen_capture(device)
             if img is not None:
                 pts = img_search(img, os.path.join(IMG_DIR, "gachafree2.bmp"), threshold=0.95)
@@ -1461,6 +1478,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
         deadline_cp = time.time() + 45
         while time.time() < deadline_cp:
             check_device_reset(serial, cycle_start)
+            _check_fixcoin()  # priority #1
             img = get_screen_capture(device)
             if img is not None:
                 # 1. เช็ค checkpointgacha ปกติ
@@ -1470,6 +1488,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                     click_count = 0
                     while True:
                         check_device_reset(serial, cycle_start)
+                        _check_fixcoin()  # priority #1
                         device.shell("input swipe 478 320 478 320 100")
                         click_count += 1
                         time.sleep(0.3)
@@ -1509,6 +1528,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
         deadline_cp1 = time.time() + 30
         while time.time() < deadline_cp1:
             check_device_reset(serial, cycle_start)
+            _check_fixcoin()  # priority #1
             img = get_screen_capture(device)
             if img is not None:
                 pts = img_search(img, os.path.join(IMG_DIR, "checkpointgacha1.bmp"))
@@ -1532,6 +1552,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
         deadline_so = time.time() + 15
         while time.time() < deadline_so:
             check_device_reset(serial, cycle_start)
+            _check_fixcoin()  # priority #1
             img = get_screen_capture(device)
             if img is not None:
                 pts = img_search(img, os.path.join(IMG_DIR, "scanout.bmp"))
@@ -1548,6 +1569,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
         deadline_next = time.time() + 15
         while time.time() < deadline_next:
             check_device_reset(serial, cycle_start)
+            _check_fixcoin()  # priority #1
             img = get_screen_capture(device)
             if img is not None:
                 pts = img_search(img, os.path.join(IMG_DIR, "next.bmp"))
