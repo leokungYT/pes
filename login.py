@@ -951,7 +951,7 @@ def get_screen_capture(device):
                     time.sleep(0.5)
 
                 if clicked_fa2:
-                    # Wait up to 15 seconds for fixalert3 and click it
+                    # Wait up to 15 seconds for fixalert3 and click until gone
                     deadline_fa3 = time.time() + 15
                     while time.time() < deadline_fa3:
                         img_fa3 = fast_screencap(device)
@@ -962,7 +962,9 @@ def get_screen_capture(device):
                                 device.shell(f"input swipe {x} {y} {x} {y} 100")
                                 gui_log(device.serial, "Clicked fixalert3.bmp", step="Fix Alert")
                                 time.sleep(2)
-                                break
+                                deadline_fa3 = time.time() + 10  # ต่อเวลารอหายไป
+                            else:
+                                break  # หายแล้ว → ไปต่อ
                         time.sleep(0.5)
 
                 # Re-capture after fixing
