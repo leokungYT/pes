@@ -1,4 +1,17 @@
 import os
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
+try:
+    import torch
+    torch.set_num_threads(1)
+    torch.set_num_interop_threads(1)
+except ImportError:
+    pass
+
 import cv2
 import numpy as np
 import time
@@ -126,7 +139,7 @@ if GUI_ENABLED:
 
             self.lbl_file = ctk.CTkLabel(self, text="",
                                          font=ctk.CTkFont(size=9),
-                                         text_color="#aaa", width=120)
+                                         text_color="#aaa", width=180)
             self.lbl_file.pack(side="right", padx=4)
 
             ctk.CTkButton(self, text="↺", width=22, height=20,
@@ -142,7 +155,7 @@ if GUI_ENABLED:
                 self.lbl_status.configure(text=status.upper(),
                                           text_color=colors.get(status.lower(), "#888"))
             if step:
-                self.lbl_file.configure(text=step[:20])
+                self.lbl_file.configure(text=step[:35])
 
     # ─────────────────────────────────────────────────────────────────────────
     class LoginBotGUI(ctk.CTk):
@@ -582,11 +595,18 @@ if GUI_ENABLED:
 
         def update_realtime_stats(self):
             try:
+                # เคลียร์ Widget สถิติเก่าทั้งหมดเพื่ออัปเดตแบบเรียลไทม์เมื่อมีการลบ/ขยับไฟล์
+                for widget in self.result_scroll.winfo_children():
+                    widget.destroy()
+                self.stat_rows.clear()
+                self.stat_labels.clear()
+
                 input_count   = len(glob.glob(os.path.join(INPUT_DIR, "*.dat")))
                 success_count = len(glob.glob(os.path.join(LOGIN_SUCCESS_DIR, "*.dat")))
                 
-                found_files   = glob.glob(os.path.join(FOUND_HERO_DIR, "*.dat"))
-                hero_count    = len(found_files)
+                found_files = (glob.glob(os.path.join(FOUND_HERO_DIR, "**", "*.dat"), recursive=True) +
+                               glob.glob(os.path.join(BACKUP_ID_DIR, "**", "*.dat"), recursive=True))
+                hero_count  = len(found_files)
                 
                 self.lbl_file_count.configure(text=f"📁 {input_count}")
                 self.lbl_succ_count.configure(text=f"✅ {success_count}")
@@ -596,14 +616,14 @@ if GUI_ENABLED:
                 if success_count:
                     self.add_stat_row("✅ login สำเร็จ", success_count)
                 
-                # แยกนับรายชื่อฮีโร่
+                # แยกนับรายชื่อฮีโร่ (รวมกลุ่มคู่นักเตะตามชื่อไฟล์จริง)
                 hero_counts = {}
                 for fpath in found_files:
                     fname = os.path.basename(fpath)
                     parts = fname.split('+')
                     if len(parts) > 1:
-                        for h in parts[:-1]:
-                            h_key = h.strip()
+                        h_key = "+".join(parts[:-1]).strip()
+                        if h_key:
                             hero_counts[h_key] = hero_counts.get(h_key, 0) + 1
                             
                 for h_name, count in hero_counts.items():
@@ -1161,6 +1181,12 @@ def is_hero_match(hero_name, ocr_text):
     cleaned_hero = clean_str(hero_name)
     cleaned_ocr = clean_str(ocr_text)
     
+    # OCR Typos / Aliases mapping
+    if "aubamevang" in cleaned_ocr:
+        cleaned_ocr = cleaned_ocr.replace("aubamevang", "aubameyang")
+    if "aubamevang" in cleaned_hero:
+        cleaned_hero = cleaned_hero.replace("aubamevang", "aubameyang")
+        
     if not cleaned_hero or not cleaned_ocr:
         return False
         
@@ -1182,6 +1208,22 @@ def is_hero_match(hero_name, ocr_text):
         if len(w) >= 5 and w in cleaned_ocr:
             return True
             
+    # Fuzzy sequence similarity matching (90% spelling match ratio)
+    import difflib
+    len_hero = len(cleaned_hero)
+    len_ocr = len(cleaned_ocr)
+    if len_hero >= 5:
+        # Check windows of size len_hero - 1, len_hero, len_hero + 1
+        for w_size in [len_hero - 1, len_hero, len_hero + 1]:
+            if w_size < 4 or w_size > len_ocr:
+                continue
+            for start in range(len_ocr - w_size + 1):
+                sub = cleaned_ocr[start:start + w_size]
+                matcher = difflib.SequenceMatcher(None, cleaned_hero, sub)
+                if matcher.quick_ratio() >= 0.85:
+                    if matcher.ratio() >= 0.88: # ~90% similarity
+                        return True
+            
     return False
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1196,9 +1238,9 @@ def pick_next_file():
     with file_pick_lock:
         # Snapshot ไฟล์ที่ทำงานสำเร็จ/แยกประเภทไปแล้ว ทั้งหมด
         done_files = (glob.glob(os.path.join(LOGIN_SUCCESS_DIR, "*.dat")) +
-                      glob.glob(os.path.join(BACKUP_ID_DIR, "*.dat")) +
+                      glob.glob(os.path.join(BACKUP_ID_DIR, "**", "*.dat"), recursive=True) +
                       glob.glob(os.path.join(NO_HERO_DIR, "*.dat")) +
-                      glob.glob(os.path.join(FOUND_HERO_DIR, "*.dat")))
+                      glob.glob(os.path.join(FOUND_HERO_DIR, "**", "*.dat"), recursive=True))
         already_done = {os.path.basename(p) for p in done_files}
 
         for f in sorted(glob.glob(os.path.join(INPUT_DIR, "*.dat"))):
@@ -1287,26 +1329,46 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
     """
     gui_log(serial, "Find Hero sequence started...", step="Find Hero", status="working")
     
-    # 1. fin1 -> fin4 navigation
-    for i in range(1, 5):
-        name = f"fin{i}.bmp"
-        gui_log(serial, f"Waiting {name}...", step=name)
-        deadline = time.time() + 15
-        found = False
+    # 1. fin1 -> fin3 navigation (Click and wait 3s, retry if still visible until next fin is found)
+    for i in [1, 2, 3]:
+        name_curr = f"fin{i}.bmp"
+        name_next = f"fin{i+1}.bmp"
+        gui_log(serial, f"Waiting for {name_curr}...", step=f"{name_curr} Waiting")
+        deadline = time.time() + 30
         while time.time() < deadline:
             check_device_reset(serial, cycle_start)
             img = get_screen_capture(device)
             if img is not None:
-                pts = img_search(img, os.path.join(IMG_DIR, name))
+                # Check if the next button is already visible (meaning transition succeeded)
+                if img_search(img, os.path.join(IMG_DIR, name_next)):
+                    gui_log(serial, f"{name_next} detected! Proceeding to next step.", step=f"{name_next} Seen")
+                    break
+                
+                # If next button is not visible, look for the current button to click
+                pts = img_search(img, os.path.join(IMG_DIR, name_curr))
                 if pts:
                     x, y = pts[0]
                     device.shell(f"input swipe {x} {y} {x} {y} 100")
-                    time.sleep(2.5)
-                    found = True
-                    break
+                    gui_log(serial, f"Clicked {name_curr}", step=f"{name_curr} Click")
+                    time.sleep(3.0)  # หน่วงเวลา 3 วินาทีเพื่อให้จอนิ่งและเปลี่ยนเสร็จ
+                    continue
             time.sleep(0.5)
-        if not found:
-            gui_log(serial, f"{name} not found, proceeding anyway...", step=name)
+
+    # 1c. Wait and click fin4.bmp once
+    gui_log(serial, "Waiting fin4.bmp...", step="fin4")
+    deadline_fin4 = time.time() + 15
+    while time.time() < deadline_fin4:
+        check_device_reset(serial, cycle_start)
+        img = get_screen_capture(device)
+        if img is not None:
+            pts4 = img_search(img, os.path.join(IMG_DIR, "fin4.bmp"))
+            if pts4:
+                x, y = pts4[0]
+                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                gui_log(serial, "Clicked fin4.bmp", step="fin4 Click")
+                time.sleep(2.5)
+                break
+        time.sleep(0.5)
 
     # 2. Swipe down for fin5
     gui_log(serial, "Swiping down for fin5...", step="Swipe fin5")
@@ -1324,9 +1386,7 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
                 found_fin5 = True
                 break
         device.shell("input swipe 91 306 91 131 4000")
-        time.sleep(2)
-    if not found_fin5:
-        gui_log(serial, "fin5.bmp not found after 20 swipes", step="fin5 error")
+        time.sleep(2.0)
 
     # 3. Wait for fin6 and click continuously until not found for 5s
     gui_log(serial, "Waiting for and clicking fin6...", step="fin6")
@@ -1384,41 +1444,53 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
     
     time.sleep(3) # Let screen settle
 
-    # 6. OCR Scanning
+    # 6. OCR Scanning (Lock 1 & Lock 2 with Robust Two-Pass Double Check)
     found_heroes = []
     target_list = list_find_hero if (list_find_hero and any(list_find_hero)) else HERO_LIST
     target_heroes = [h.strip() for h in target_list if h and h.strip()]
 
-    # Lock 1 Scanning
-    gui_log(serial, "Scanning Lock 1...", step="Scan Lock 1")
-    img1 = get_screen_capture(device)
-    if img1 is not None:
-        lock1_region = Region(58, 122, 351, 343)
-        lock1_text = read_screen_text(img1, region=lock1_region, serial=serial)
-        gui_log(serial, f"Lock 1 OCR: {lock1_text if lock1_text else '<EMPTY>'}", step="Scan Lock 1")
+    for pass_num in range(1, 3):
+        found_heroes.clear()
         
-        for h in target_heroes:
-            if is_hero_match(h, lock1_text):
-                found_heroes.append(h)
-                gui_log(serial, f"Lock 1 Match: {h}", step="Match!")
-                break
+        # Lock 1 Scanning
+        gui_log(serial, f"Scanning Lock 1 (Pass {pass_num})...", step="Scan Lock 1")
+        img1 = get_screen_capture(device)
+        if img1 is not None:
+            lock1_region = Region(58, 122, 351, 343)
+            lock1_text = read_screen_text(img1, region=lock1_region, serial=serial)
+            gui_log(serial, f"Lock 1 OCR: {lock1_text if lock1_text else '<EMPTY>'}", step="Scan Lock 1")
+            
+            for h in target_heroes:
+                if is_hero_match(h, lock1_text):
+                    if h not in found_heroes:
+                        found_heroes.append(h)
+                        gui_log(serial, f"Lock 1 Match: {h}", step=f"⭐ {h}")
 
-    # Delay to let Lock 2 fully load/animate
-    time.sleep(2.5)
+        # Delay to let Lock 2 fully load/animate
+        time.sleep(2.5)
 
-    # Lock 2 Scanning
-    gui_log(serial, "Scanning Lock 2...", step="Scan Lock 2")
-    img2 = get_screen_capture(device)
-    if img2 is not None:
-        lock2_region = Region(503, 116, 341, 338)
-        lock2_text = read_screen_text(img2, region=lock2_region, serial=serial)
-        gui_log(serial, f"Lock 2 OCR: {lock2_text if lock2_text else '<EMPTY>'}", step="Scan Lock 2")
+        # Lock 2 Scanning
+        gui_log(serial, f"Scanning Lock 2 (Pass {pass_num})...", step="Scan Lock 2")
+        img2 = get_screen_capture(device)
+        if img2 is not None:
+            lock2_region = Region(503, 116, 341, 338)
+            lock2_text = read_screen_text(img2, region=lock2_region, serial=serial)
+            gui_log(serial, f"Lock 2 OCR: {lock2_text if lock2_text else '<EMPTY>'}", step="Scan Lock 2")
+            
+            for h in target_heroes:
+                if is_hero_match(h, lock2_text):
+                    if h not in found_heroes:
+                        found_heroes.append(h)
+                        gui_log(serial, f"Lock 2 Match: {h}", step=f"⭐ {h}")
         
-        for h in target_heroes:
-            if is_hero_match(h, lock2_text):
-                found_heroes.append(h)
-                gui_log(serial, f"Lock 2 Match: {h}", step="Match!")
-                break
+        # If at least one hero matched, exit scanning successfully!
+        if found_heroes:
+            break
+            
+        # If we failed to find any hero in Pass 1, wait 2s and scan one more time!
+        if pass_num == 1:
+            gui_log(serial, "No hero found on Pass 1. Retrying in 2s for screen to settle...", step="OCR Retry")
+            time.sleep(2.0)
 
     # 7. Shutdown and Move
     device.shell("am force-stop jp.konami.pesam")
@@ -1429,10 +1501,19 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
     elif "-" in clean_orig: clean_orig = clean_orig.split("-")[-1]
 
     if found_heroes:
-        dest_dir = FOUND_HERO_DIR
+        num_heroes = len(found_heroes)
+        if num_heroes >= 3:
+            subfolder = "hero3"
+        elif num_heroes == 2:
+            subfolder = "hero2"
+        else:
+            subfolder = "hero1"
+        dest_dir = os.path.join(FOUND_HERO_DIR, subfolder)
+        os.makedirs(dest_dir, exist_ok=True)
+
         hero_prefix = "+".join(found_heroes)
         final_name = f"{hero_prefix}+{clean_orig}"
-        gui_log(serial, f"⭐ MATCH: {hero_prefix}", step="Match!")
+        gui_log(serial, f"⭐ MATCH: {hero_prefix}", step=f"⭐ {hero_prefix}")
     else:
         dest_dir = NO_HERO_DIR
         final_name = clean_orig
@@ -1686,6 +1767,8 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
             if img is not None:
                 pts = img_search(img, os.path.join(IMG_DIR, "checkpointgacha1.bmp"))
                 if pts:
+                    time.sleep(1.2)  # ให้หน้าจอและตัวหนังสือเฟดอินจนเสร็จเรียบร้อย ป้องกันภาพเบลอ
+                    img = get_screen_capture(device)
                     gacha_region = Region(68, 28, 579, 57)
                     ocr_text = read_screen_text(img, region=gacha_region, serial=serial)
                     display_text = ocr_text if ocr_text else "<EMPTY>"
@@ -1694,9 +1777,10 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
 
                     for h in HERO_LIST_FREE:
                         if is_hero_match(h, ocr_text):
-                            found_heroes.append(h.strip())
-                            gui_log(serial, f"[Loop {loop_num}] ⭐ Match: {h.strip()}", step="Match!")
-                            break
+                            h_clean = h.strip()
+                            if h_clean not in found_heroes:
+                                found_heroes.append(h_clean)
+                                gui_log(serial, f"[Loop {loop_num}] ⭐ Match: {h_clean}", step=f"⭐ {h_clean}")
                     break
             time.sleep(1)
 
@@ -1743,10 +1827,19 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
     elif "-" in clean_orig: clean_orig = clean_orig.split("-")[-1]
 
     if found_heroes:
-        dest_dir = BACKUP_ID_DIR
+        num_heroes = len(found_heroes)
+        if num_heroes >= 3:
+            subfolder = "hero3"
+        elif num_heroes == 2:
+            subfolder = "hero2"
+        else:
+            subfolder = "hero1"
+        dest_dir = os.path.join(BACKUP_ID_DIR, subfolder)
+        os.makedirs(dest_dir, exist_ok=True)
+
         hero_prefix = "+".join(found_heroes)
         final_name = f"{hero_prefix}+{clean_orig}"
-        gui_log(serial, f"⭐ GACHA FREE RESULT: {hero_prefix}", step="Match!")
+        gui_log(serial, f"⭐ GACHA FREE RESULT: {hero_prefix}", step=f"⭐ {hero_prefix}")
     else:
         dest_dir = RANDOM_FAIL_DIR
         final_name = clean_orig
@@ -1902,7 +1995,7 @@ def process_device_login(device):
             file_path, original_name = pick_next_file()
             if file_path is None:
                 gui_log(serial, "No files left — waiting...", step="No Files", status="idle")
-                time.sleep(10)
+                time.sleep(3)
                 continue
 
             gui_log(serial, f"File: {original_name}", step="File OK", status="working")
@@ -1919,10 +2012,48 @@ def process_device_login(device):
 
 
 
-            # 3. Launch
+            # 3. Launch with Black Screen Check (30s check, threshold > 85% dark -> force-stop & relaunch)
             gui_log(serial, "Launching PES...", step="Launch", status="working")
-            device.shell("monkey -p jp.konami.pesam -c android.intent.category.LAUNCHER 1")
-            time.sleep(14)
+            
+            for black_attempt in range(3):
+                device.shell("monkey -p jp.konami.pesam -c android.intent.category.LAUNCHER 1")
+                black_start = time.time()
+                is_stuck = False
+                while time.time() - black_start < 30:
+                    check_device_reset(serial, cycle_start)
+                    img = get_screen_capture(device)
+                    if img is not None:
+                        try:
+                            # Convert to grayscale for thresholding
+                            if len(img.shape) == 3:
+                                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                            else:
+                                gray = img
+                            _, thresh = cv2.threshold(gray, 50, 255, cv2.THRESH_BINARY_INV)
+                            num_black = cv2.countNonZero(thresh)
+                            total = gray.shape[0] * gray.shape[1]
+                            black_ratio = num_black / total
+                            if black_ratio < 0.85:
+                                # จอสว่างแล้ว (>15% pixels not black)
+                                gui_log(serial, "Screen OK! (app loaded)", step="Launch OK")
+                                is_stuck = False
+                                break
+                            else:
+                                is_stuck = True
+                        except Exception:
+                            is_stuck = True
+                    else:
+                        is_stuck = True
+                    time.sleep(1)
+                
+                if is_stuck:
+                    gui_log(serial, f"[BLACK] Dark screen detected! (attempt {black_attempt+1}/3) Restarting app...", step="Black Stuck")
+                    device.shell("am force-stop jp.konami.pesam")
+                    time.sleep(2)
+                else:
+                    break
+            
+            time.sleep(8)
 
             # 4. Wait for play8 — คลิกซ้ำจนหาย
             gui_log(serial, "Waiting play8...", step="play8")
@@ -1948,7 +2079,7 @@ def process_device_login(device):
                         time.sleep(5)
                     elif play8_clicked:
                         break
-                time.sleep(0.8)
+                time.sleep(1.5)
 
             # 5. Wait checkpointlogin
             gui_log(serial, "Waiting checkpointlogin...", step="Checkpoint")
@@ -1962,7 +2093,7 @@ def process_device_login(device):
                         device.shell(f"input swipe {x} {y} {x} {y} 100")
                         time.sleep(4)
                         break
-                time.sleep(0.8)
+                time.sleep(1.5)
 
             # 6. Event sequence — พฤติกรรมขึ้นกับ EVENT_IMG
             if EVENT_IMG == 1:
@@ -2068,7 +2199,7 @@ def process_device_login(device):
                                 time.sleep(4)
                                 box1_found = True
                                 break
-                        time.sleep(0.8)
+                        time.sleep(1.2)
                     
                     if not box1_found:
                         gui_log(serial, "box1.bmp not found, retrying sequence", step="Retry")
@@ -2088,7 +2219,7 @@ def process_device_login(device):
                                 time.sleep(4)
                                 box2_found = True
                                 break
-                        time.sleep(0.8)
+                        time.sleep(1.2)
                 
                 # box3 (กดเรื่อยๆ จนไม่เจอครบ 10s ค่อยไป box4)
                 gui_log(serial, "Waiting box3.bmp...", step="box3")
@@ -2257,6 +2388,8 @@ def process_device_login(device):
                             # 1. เช็ค checkpointgacha ปกติ
                             pts = img_search(img, os.path.join(IMG_DIR, "checkpointgacha.bmp"))
                             if pts:
+                                time.sleep(1.2)  # ให้หน้าจอและตัวหนังสือเฟดอินจนเสร็จเรียบร้อย ป้องกันภาพเบลอ
+                                img = get_screen_capture(device)
                                 # ใช้พิกัด Region(68, 28, 579, 57) ตามตัวอย่าง
                                 gacha_region = Region(68, 28, 579, 57)
                                 ocr_text = read_screen_text(img, region=gacha_region, serial=serial)
@@ -2298,9 +2431,10 @@ def process_device_login(device):
 
             if DO_GACHA == 1:
                 if gacha_hero_found:
-                    dest_dir = BACKUP_ID_DIR
+                    dest_dir = os.path.join(BACKUP_ID_DIR, "hero1")
+                    os.makedirs(dest_dir, exist_ok=True)
                     final_name = f"{gacha_hero_found}-{clean_orig}"
-                    gui_log(serial, f"⭐ HERO MATCH: {gacha_hero_found}", step="Match!")
+                    gui_log(serial, f"⭐ HERO MATCH: {gacha_hero_found}", step=f"⭐ {gacha_hero_found}")
                 else:
                     dest_dir = NO_HERO_DIR
                     final_name = clean_orig
