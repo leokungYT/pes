@@ -594,20 +594,40 @@ if GUI_ENABLED:
                 self.device_monitors[serial].update_state(**kwargs)
 
         def update_realtime_stats(self):
+            def _bg_scan():
+                try:
+                    input_count   = len(glob.glob(os.path.join(INPUT_DIR, "*.dat")))
+                    success_count = len(glob.glob(os.path.join(LOGIN_SUCCESS_DIR, "*.dat")))
+                    
+                    found_files = (glob.glob(os.path.join(FOUND_HERO_DIR, "**", "*.dat"), recursive=True) +
+                                   glob.glob(os.path.join(BACKUP_ID_DIR, "**", "*.dat"), recursive=True))
+                    hero_count  = len(found_files)
+                    
+                    hero_counts = {}
+                    for fpath in found_files:
+                        fname = os.path.basename(fpath)
+                        parts = fname.split('+')
+                        if len(parts) > 1:
+                            h_key = "+".join(parts[:-1]).strip()
+                            if h_key:
+                                hero_counts[h_key] = hero_counts.get(h_key, 0) + 1
+                    
+                    self.after(0, lambda: self._apply_stats_ui(input_count, success_count, hero_count, hero_counts))
+                except Exception:
+                    pass
+
+            t = threading.Thread(target=_bg_scan, daemon=True)
+            t.start()
+            self.after(10000, self.update_realtime_stats)
+
+        def _apply_stats_ui(self, input_count, success_count, hero_count, hero_counts):
             try:
-                # เคลียร์ Widget สถิติเก่าทั้งหมดเพื่ออัปเดตแบบเรียลไทม์เมื่อมีการลบ/ขยับไฟล์
+                # เคลียร์ Widget สถิติเก่าทั้งหมดเพื่ออัปเดตแบบเรียลไทม์
                 for widget in self.result_scroll.winfo_children():
                     widget.destroy()
                 self.stat_rows.clear()
                 self.stat_labels.clear()
 
-                input_count   = len(glob.glob(os.path.join(INPUT_DIR, "*.dat")))
-                success_count = len(glob.glob(os.path.join(LOGIN_SUCCESS_DIR, "*.dat")))
-                
-                found_files = (glob.glob(os.path.join(FOUND_HERO_DIR, "**", "*.dat"), recursive=True) +
-                               glob.glob(os.path.join(BACKUP_ID_DIR, "**", "*.dat"), recursive=True))
-                hero_count  = len(found_files)
-                
                 self.lbl_file_count.configure(text=f"📁 {input_count}")
                 self.lbl_succ_count.configure(text=f"✅ {success_count}")
                 if hasattr(self, 'lbl_hero_count'):
@@ -616,25 +636,15 @@ if GUI_ENABLED:
                 if success_count:
                     self.add_stat_row("✅ login สำเร็จ", success_count)
                 
-                # แยกนับรายชื่อฮีโร่ (รวมกลุ่มคู่นักเตะตามชื่อไฟล์จริง)
-                hero_counts = {}
-                for fpath in found_files:
-                    fname = os.path.basename(fpath)
-                    parts = fname.split('+')
-                    if len(parts) > 1:
-                        h_key = "+".join(parts[:-1]).strip()
-                        if h_key:
-                            hero_counts[h_key] = hero_counts.get(h_key, 0) + 1
-                            
                 for h_name, count in hero_counts.items():
                     self.add_stat_row(f"⭐ {h_name}", count)
+                    
                 if self.login_times:
                     avg = sum(self.login_times) / len(self.login_times)
                     self.lbl_avg_time.configure(
                         text=f"⏱ Avg: {avg/60:.1f}m" if avg >= 60 else f"⏱ Avg: {avg:.0f}s")
             except Exception:
                 pass
-            self.after(2000, self.update_realtime_stats)
 
         def on_closing(self):
             from tkinter import messagebox
@@ -1446,6 +1456,8 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
 
     # 6. OCR Scanning (Lock 1 & Lock 2 with Robust Two-Pass Double Check)
     found_heroes = []
+    last_lock1_text = ""
+    last_lock2_text = ""
     target_list = list_find_hero if (list_find_hero and any(list_find_hero)) else HERO_LIST
     target_heroes = [h.strip() for h in target_list if h and h.strip()]
 
@@ -1458,6 +1470,7 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
         if img1 is not None:
             lock1_region = Region(58, 122, 351, 343)
             lock1_text = read_screen_text(img1, region=lock1_region, serial=serial)
+            last_lock1_text = lock1_text if lock1_text else ""
             gui_log(serial, f"Lock 1 OCR: {lock1_text if lock1_text else '<EMPTY>'}", step="Scan Lock 1")
             
             for h in target_heroes:
@@ -1475,6 +1488,7 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
         if img2 is not None:
             lock2_region = Region(503, 116, 341, 338)
             lock2_text = read_screen_text(img2, region=lock2_region, serial=serial)
+            last_lock2_text = lock2_text if lock2_text else ""
             gui_log(serial, f"Lock 2 OCR: {lock2_text if lock2_text else '<EMPTY>'}", step="Scan Lock 2")
             
             for h in target_heroes:
@@ -1515,9 +1529,28 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
         final_name = f"{hero_prefix}+{clean_orig}"
         gui_log(serial, f"⭐ MATCH: {hero_prefix}", step=f"⭐ {hero_prefix}")
     else:
-        dest_dir = NO_HERO_DIR
-        final_name = clean_orig
-        gui_log(serial, "No hero match found.", step="No Match")
+        l1_lower = last_lock1_text.lower()
+        l2_lower = last_lock2_text.lower()
+        
+        is_empty_state = (
+            "n 'chang trv" in l1_lower or 
+            "found ter conditions" in l2_lower or
+            "no matching" in l1_lower or
+            "no matching" in l2_lower or
+            "filter conditions" in l1_lower or
+            "filter conditions" in l2_lower or
+            "conditions" in l1_lower or
+            "conditions" in l2_lower
+        )
+        
+        if is_empty_state:
+            dest_dir = NO_HERO_DIR
+            final_name = clean_orig
+            gui_log(serial, "No hero match found (Verified empty state).", step="No Match")
+        else:
+            dest_dir = FILE_ERROR_DIR
+            final_name = clean_orig
+            gui_log(serial, "Scan did not show verified empty state. Sending to file-error for safety.", step="Scan Safety")
 
     dest = os.path.join(dest_dir, final_name)
     if os.path.exists(file_path):
@@ -1599,6 +1632,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
         miss_count = 0
         max_miss = 10
         next_first_seen = None  # ติดตาม next.bmp ค้าง
+        endswip_first_seen = None  # ติดตาม endswip.bmp ค้าง
 
         while miss_count < max_miss:
             check_device_reset(serial, cycle_start)
@@ -1608,10 +1642,16 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                 # === Priority: เช็ค endswip.bmp ===
                 pts_es = img_search(img, os.path.join(IMG_DIR, "endswip.bmp"))
                 if pts_es:
-                    gui_log(serial, "🛑 endswip.bmp found! Ending Gacha Free cycle.", step="End Swipe")
-                    gui_log(serial, f"=== Gacha Free Loop {GACHA_FREE_LOOPS}/{GACHA_FREE_LOOPS} ===", step=f"Loop {GACHA_FREE_LOOPS}")
-                    end_swip_detected = True
-                    break
+                    if endswip_first_seen is None:
+                        endswip_first_seen = time.time()
+                        gui_log(serial, "endswip.bmp detected, watching for 5s...", step="End Watch")
+                    elif time.time() - endswip_first_seen >= 5:
+                        gui_log(serial, "🛑 endswip.bmp stuck for 5s! Ending Gacha Free cycle.", step="End Swipe")
+                        gui_log(serial, f"=== Gacha Free Loop {GACHA_FREE_LOOPS}/{GACHA_FREE_LOOPS} ===", step=f"Loop {GACHA_FREE_LOOPS}")
+                        end_swip_detected = True
+                        break
+                else:
+                    endswip_first_seen = None
 
                 # === Priority: เช็ค next.bmp ค้าง ===
                 pts_next = img_search(img, os.path.join(IMG_DIR, "next.bmp"))
@@ -1622,8 +1662,11 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                     elif time.time() - next_first_seen >= 10:
                         # ค้างครบ 10 วิ → กดจนหาย
                         gui_log(serial, f"[Loop {loop_num}] next.bmp stuck for 10s! Clicking until gone...", step="Next Stuck")
+                        next_click_start = time.time()
                         while True:
                             check_device_reset(serial, cycle_start)
+                            if time.time() - next_click_start > 15:
+                                break
                             img_n = get_screen_capture(device)
                             if img_n is not None:
                                 pts_n = img_search(img_n, os.path.join(IMG_DIR, "next.bmp"))
@@ -1670,7 +1713,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                     break
             miss_count += 1
             gui_log(serial, f"[Loop {loop_num}] gachafree1 not here, swiping... ({miss_count}/{max_miss})", step="Swipe")
-            device.shell("input swipe 618 308 54 306 5000")
+            device.shell("input swipe 618 308 54 306 3000")
             time.sleep(2)
             # เช็ค fixcoin หลังเลื่อน (เลื่อนไปโดนตู้ fixcoin ขึ้น)
             _check_fixcoin()
@@ -1733,8 +1776,12 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                 if pts:
                     gui_log(serial, f"[Loop {loop_num}] checkpointgacha found! Clicking (478,320) continuously...", step="Click Loop")
                     click_count = 0
+                    click_start = time.time()
                     while True:
                         check_device_reset(serial, cycle_start)
+                        if time.time() - click_start > 15:
+                            gui_log(serial, f"[Loop {loop_num}] Click loop timed out (15s) without seeing checkpointgacha1.bmp!", step="Click Timeout")
+                            break
                         _check_fixcoin()  # priority #1
                         device.shell("input swipe 478 320 478 320 100")
                         click_count += 1
