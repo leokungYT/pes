@@ -51,6 +51,10 @@ gui_instance  = None
 
 # ── โหลด config จาก config.py ──────────────────────────────────────────────
 from config import EVENT_IMG, DO_BOX, DO_GACHA, HERO_LIST, IMG_DIR, INPUT_DIR, LOGIN_SUCCESS_DIR, FIND_HERO, HERO_IMG_MAP, GACHA_FREE, HERO_LIST_FREE, DEBUG_OCR, CHECK_COIN, GACHA_FREE_LOOPS
+try:
+    from config import list_find_hero
+except ImportError:
+    list_find_hero = HERO_LIST
 
 REMOTE_AUTH_DIR   = "/data/data/jp.konami.pesam/files/SaveData/AUTH"
 REMOTE_DAT_FILE   = f"{REMOTE_AUTH_DIR}/online_user_id_data.dat"
@@ -82,10 +86,13 @@ RUN_FILE_DIR = "run-file"
 os.makedirs(RUN_FILE_DIR, exist_ok=True)
 RANDOM_FAIL_DIR = "random-fail"
 os.makedirs(RANDOM_FAIL_DIR, exist_ok=True)
+LOGIN_FAILED_DIR = "login-failed"
+os.makedirs(LOGIN_FAILED_DIR, exist_ok=True)
 
 # ── Exceptions ────────────────────────────────────────────────────────────────
 class DeviceResetException(Exception):  pass
 class CycleTimeoutException(Exception): pass
+class SellScreenException(Exception):  pass
 
 # ═════════════════════════════════════════════════════════════════════════════
 # GUI
@@ -810,6 +817,25 @@ def get_screen_capture(device):
                 x, y = fg_pts[0]
                 device.shell(f"input swipe {x} {y} {x} {y} 100")
 
+            sell_pts = img_search(img, os.path.join(IMG_DIR, "sell.bmp"))
+            if sell_pts:
+                gui_log(device.serial, "🛑 Floating: sell.bmp found! Force closing app and moving file to login-failed", step="Sell Detected")
+                device.shell("am force-stop jp.konami.pesam")
+                time.sleep(1)
+                
+                original_name = DEVICE_FILE_ASSIGNMENTS.get(device.serial)
+                if original_name:
+                    file_path = os.path.join(INPUT_DIR, original_name)
+                    dest_path = os.path.join(LOGIN_FAILED_DIR, original_name)
+                    if os.path.exists(file_path):
+                        if os.path.exists(dest_path):
+                            os.remove(dest_path)
+                        shutil.copy2(file_path, dest_path)
+                        os.remove(file_path)
+                        gui_log(device.serial, f"✅ Sorted (Sell): {original_name} -> {LOGIN_FAILED_DIR}", step="Sell Sorted")
+                
+                raise SellScreenException("sell.bmp detected")
+
             fc_pts = img_search(img, os.path.join(IMG_DIR, "fixclear.bmp"))
             if fc_pts:
                 gui_log(device.serial, "Floating: fixclear.bmp found! Clearing app and moving file to file-error", step="Fix Clear")
@@ -974,7 +1000,7 @@ def get_screen_capture(device):
 
         update_gui(device.serial, screenshot=img)
         return img
-    except DeviceResetException:
+    except (DeviceResetException, SellScreenException):
         raise
     except Exception:
         return None
@@ -1120,6 +1146,43 @@ def _read_screen_text_locked(img, serial):
             pass
             
     return ""
+
+def is_hero_match(hero_name, ocr_text):
+    if not hero_name or not ocr_text:
+        return False
+    
+    import unicodedata
+    def clean_str(s):
+        normalized = unicodedata.normalize('NFKD', s)
+        ascii_bytes = normalized.encode('ASCII', 'ignore')
+        ascii_str = ascii_bytes.decode('ASCII')
+        return "".join([c.lower() for c in ascii_str if c.isalnum() or c.isspace()]).strip()
+        
+    cleaned_hero = clean_str(hero_name)
+    cleaned_ocr = clean_str(ocr_text)
+    
+    if not cleaned_hero or not cleaned_ocr:
+        return False
+        
+    if cleaned_hero in cleaned_ocr:
+        return True
+        
+    if cleaned_ocr in cleaned_hero:
+        return True
+        
+    hero_words = cleaned_hero.split()
+    if len(hero_words) > 1:
+        if all(w in cleaned_ocr for w in hero_words):
+            return True
+        match_count = sum(1 for w in hero_words if w in cleaned_ocr)
+        if match_count >= max(2, len(hero_words) * 0.7):
+            return True
+            
+    for w in hero_words:
+        if len(w) >= 5 and w in cleaned_ocr:
+            return True
+            
+    return False
 
 # ═════════════════════════════════════════════════════════════════════════════
 # File management  ← แก้ตรงนี้
@@ -1323,7 +1386,8 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
 
     # 6. OCR Scanning
     found_heroes = []
-    target_heroes = [h.strip() for h in HERO_LIST if h and h.strip()]
+    target_list = list_find_hero if (list_find_hero and any(list_find_hero)) else HERO_LIST
+    target_heroes = [h.strip() for h in target_list if h and h.strip()]
 
     # Lock 1 Scanning
     gui_log(serial, "Scanning Lock 1...", step="Scan Lock 1")
@@ -1334,7 +1398,7 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
         gui_log(serial, f"Lock 1 OCR: {lock1_text if lock1_text else '<EMPTY>'}", step="Scan Lock 1")
         
         for h in target_heroes:
-            if h.lower() in lock1_text.lower():
+            if is_hero_match(h, lock1_text):
                 found_heroes.append(h)
                 gui_log(serial, f"Lock 1 Match: {h}", step="Match!")
                 break
@@ -1351,7 +1415,7 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
         gui_log(serial, f"Lock 2 OCR: {lock2_text if lock2_text else '<EMPTY>'}", step="Scan Lock 2")
         
         for h in target_heroes:
-            if h.lower() in lock2_text.lower():
+            if is_hero_match(h, lock2_text):
                 found_heroes.append(h)
                 gui_log(serial, f"Lock 2 Match: {h}", step="Match!")
                 break
@@ -1360,14 +1424,18 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
     device.shell("am force-stop jp.konami.pesam")
     time.sleep(1)
 
+    clean_orig = original_name
+    if "+" in clean_orig: clean_orig = clean_orig.split("+")[-1]
+    elif "-" in clean_orig: clean_orig = clean_orig.split("-")[-1]
+
     if found_heroes:
         dest_dir = FOUND_HERO_DIR
         hero_prefix = "+".join(found_heroes)
-        final_name = f"{hero_prefix}+{original_name}"
+        final_name = f"{hero_prefix}+{clean_orig}"
         gui_log(serial, f"⭐ MATCH: {hero_prefix}", step="Match!")
     else:
         dest_dir = NO_HERO_DIR
-        final_name = original_name
+        final_name = clean_orig
         gui_log(serial, "No hero match found.", step="No Match")
 
     dest = os.path.join(dest_dir, final_name)
@@ -1625,7 +1693,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                     print(f"[{serial}] GachaFree Loop{loop_num} OCR: {display_text}")
 
                     for h in HERO_LIST_FREE:
-                        if h and h.strip().lower() in ocr_text.lower():
+                        if is_hero_match(h, ocr_text):
                             found_heroes.append(h.strip())
                             gui_log(serial, f"[Loop {loop_num}] ⭐ Match: {h.strip()}", step="Match!")
                             break
@@ -1670,14 +1738,18 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
     device.shell("am force-stop jp.konami.pesam")
     time.sleep(1)
 
+    clean_orig = original_name
+    if "+" in clean_orig: clean_orig = clean_orig.split("+")[-1]
+    elif "-" in clean_orig: clean_orig = clean_orig.split("-")[-1]
+
     if found_heroes:
         dest_dir = BACKUP_ID_DIR
         hero_prefix = "+".join(found_heroes)
-        final_name = f"{hero_prefix}+{original_name}"
+        final_name = f"{hero_prefix}+{clean_orig}"
         gui_log(serial, f"⭐ GACHA FREE RESULT: {hero_prefix}", step="Match!")
     else:
         dest_dir = RANDOM_FAIL_DIR
-        final_name = original_name
+        final_name = clean_orig
         gui_log(serial, f"No match in all {GACHA_FREE_LOOPS} loops → random-fail", step="No Match")
 
     dest = os.path.join(dest_dir, final_name)
@@ -2147,7 +2219,7 @@ def process_device_login(device):
                         ocr_text = read_screen_text(img, region=gacha_region, serial=serial)
                         gui_log(serial, f"OCR Result (at No-Coins): {ocr_text}", step="OCR Done")
                         for h in HERO_LIST:
-                            if h and h.strip().lower() in ocr_text.lower():
+                            if is_hero_match(h, ocr_text):
                                 gacha_hero_found = h.strip()
                                 break
                     # จบรอบนี้ทันที
@@ -2193,7 +2265,7 @@ def process_device_login(device):
                                 print(f"[{serial}] Gacha OCR: {display_text}")
                                 
                                 for h in HERO_LIST:
-                                    if h and h.strip().lower() in ocr_text.lower():
+                                    if is_hero_match(h, ocr_text):
                                         gacha_hero_found = h.strip()
                                         break
                                 break
@@ -2220,18 +2292,22 @@ def process_device_login(device):
             device.shell("am force-stop jp.konami.pesam")
             time.sleep(1)
 
+            clean_orig = original_name
+            if "+" in clean_orig: clean_orig = clean_orig.split("+")[-1]
+            elif "-" in clean_orig: clean_orig = clean_orig.split("-")[-1]
+
             if DO_GACHA == 1:
                 if gacha_hero_found:
                     dest_dir = BACKUP_ID_DIR
-                    final_name = f"{gacha_hero_found}-{original_name}"
+                    final_name = f"{gacha_hero_found}-{clean_orig}"
                     gui_log(serial, f"⭐ HERO MATCH: {gacha_hero_found}", step="Match!")
                 else:
                     dest_dir = NO_HERO_DIR
-                    final_name = original_name
+                    final_name = clean_orig
                     gui_log(serial, "No hero match found.", step="No Match")
             else:
                 dest_dir = LOGIN_SUCCESS_DIR
-                final_name = original_name
+                final_name = clean_orig
 
             dest = os.path.join(dest_dir, final_name)
             if os.path.exists(file_path):
@@ -2258,6 +2334,12 @@ def process_device_login(device):
         except DeviceResetException:
             release_file(original_name)
             gui_log(serial, "🛑 Manual reset", step="Reset", status="stuck")
+            device.shell("am force-stop jp.konami.pesam")
+            time.sleep(1)
+
+        except SellScreenException:
+            release_file(original_name)
+            gui_log(serial, "🛑 Sell screen detected - force closing app and ending cycle", step="Sell Reset", status="working")
             device.shell("am force-stop jp.konami.pesam")
             time.sleep(1)
 

@@ -11,7 +11,7 @@ EVENT_IMG = 0
 # ── Box Sequence (main-pes.py) ────────────────────
 # 1 = เปิดกล่อง (ทำ play26-play31 และ box1-box4)
 # 0 = ข้ามการเปิดกล่อง (จบที่ play25 แล้วส่งไฟล์เลย)
-DO_BOX = 1
+DO_BOX = 0
 
 # ── Gacha Sequence (login.py) ──────────────────────
 # 1 = สุ่มกาชา (ต่อจากจบ box4)
@@ -36,7 +36,7 @@ LOGIN_SUCCESS_DIR = "login-success"
 # ── Find Hero Sequence ─────────────────────────────
 # 1 = ทำงาน fin1-fin8 และค้นหาฮีโร่ตามภาพ
 # 0 = ข้าม
-FIND_HERO = 0
+FIND_HERO = 1
 
 # แมพไฟล์ภาพฮีโร่เข้ากับชื่อฮีโร่
 HERO_IMG_MAP = {
@@ -48,7 +48,7 @@ HERO_IMG_MAP = {
 # ── Gacha Free Sequence ───────────────────────────
 # 1 = ทำ gacha free หลังจบ box (gacha1 → gacha2 → เลื่อนหา gachafree1)
 # 0 = ข้าม
-GACHA_FREE = 1
+GACHA_FREE = 0
 
 # จำนวนลูปย่อยที่ต้องการสุ่มกาชาฟรี (เช่น 2, 3, 5)
 GACHA_FREE_LOOPS = 6
@@ -74,6 +74,30 @@ HERO_LIST_FREE = [
     "Martin Odegaard",
     "Atep"
 ]
+
+list_find_hero = [
+    "Fabio Cannavaro",
+    "Paolo Maldini",
+    "Daniele De Rossi",
+    "Didier Drogba",
+    "Mohamed Salah",
+    "Nico Paz",
+    "Federico Dimarco",
+    "Luka",
+    "rgson",
+    "Arribas",
+    "Ramedhan Saifullah",
+    "Chrigor",
+    "Lamine Yamal",
+    "Kylian Mbappe",
+    "Joan Garcia",
+    "Martin Odegaard",
+    "Atep",
+    "Gareth Bale",
+    "Aubameyang",
+    "Marcelo"
+]
+
 
 # ── Debug OCR ─────────────────────────────────────
 # 1 = บันทึกภาพที่สแกน OCR ทุกครั้งไว้ในโฟลเดอร์ debug-ocr/

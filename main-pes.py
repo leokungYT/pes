@@ -647,6 +647,43 @@ def read_screen_text(img, region=None, serial="unknown"):
                 print(f"[OCR] Pytesseract Error: {e}")
     return ""
 
+def is_hero_match(hero_name, ocr_text):
+    if not hero_name or not ocr_text:
+        return False
+    
+    import unicodedata
+    def clean_str(s):
+        normalized = unicodedata.normalize('NFKD', s)
+        ascii_bytes = normalized.encode('ASCII', 'ignore')
+        ascii_str = ascii_bytes.decode('ASCII')
+        return "".join([c.lower() for c in ascii_str if c.isalnum() or c.isspace()]).strip()
+        
+    cleaned_hero = clean_str(hero_name)
+    cleaned_ocr = clean_str(ocr_text)
+    
+    if not cleaned_hero or not cleaned_ocr:
+        return False
+        
+    if cleaned_hero in cleaned_ocr:
+        return True
+        
+    if cleaned_ocr in cleaned_hero:
+        return True
+        
+    hero_words = cleaned_hero.split()
+    if len(hero_words) > 1:
+        if all(w in cleaned_ocr for w in hero_words):
+            return True
+        match_count = sum(1 for w in hero_words if w in cleaned_ocr)
+        if match_count >= max(2, len(hero_words) * 0.7):
+            return True
+            
+    for w in hero_words:
+        if len(w) >= 5 and w in cleaned_ocr:
+            return True
+            
+    return False
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Gacha Free Mode (main-pes.py version)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -855,7 +892,7 @@ def gacha_free_mode_mainpes(device, cycle_start, serial):
                     gui_log(serial, f"[Loop {loop_num}] OCR: {display_text}", step="OCR Done")
 
                     for h in HERO_LIST_FREE:
-                        if h and h.strip().lower() in ocr_text.lower():
+                        if is_hero_match(h, ocr_text):
                             found_heroes.append(h.strip())
                             gui_log(serial, f"[Loop {loop_num}] ⭐ Match: {h.strip()}", step="Match!")
                             break
