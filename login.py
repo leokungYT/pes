@@ -1586,8 +1586,11 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
 
     # 2. ทำลูปสุ่มกาชาฟรีตามจำนวนที่กำหนดใน config
     found_heroes = []  # เก็บชื่อฮีโร่ที่เจอจากทุก loop
+    end_swip_detected = False
 
     for loop_num in range(1, GACHA_FREE_LOOPS + 1):
+        if end_swip_detected:
+            break
         gui_log(serial, f"=== Gacha Free Loop {loop_num}/{GACHA_FREE_LOOPS} ===", step=f"Loop {loop_num}")
 
         # 2a. เลื่อนหา gachafree1.bmp (เช็คก่อน → ไม่เจอ → เลื่อน, ครบ 10 รอบ = ข้าม loop นี้)
@@ -1602,6 +1605,14 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
             _check_fixcoin()  # priority #1
             img = get_screen_capture(device)
             if img is not None:
+                # === Priority: เช็ค endswip.bmp ===
+                pts_es = img_search(img, os.path.join(IMG_DIR, "endswip.bmp"))
+                if pts_es:
+                    gui_log(serial, "🛑 endswip.bmp found! Ending Gacha Free cycle.", step="End Swipe")
+                    gui_log(serial, f"=== Gacha Free Loop {GACHA_FREE_LOOPS}/{GACHA_FREE_LOOPS} ===", step=f"Loop {GACHA_FREE_LOOPS}")
+                    end_swip_detected = True
+                    break
+
                 # === Priority: เช็ค next.bmp ค้าง ===
                 pts_next = img_search(img, os.path.join(IMG_DIR, "next.bmp"))
                 if pts_next:
@@ -1665,6 +1676,8 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
             _check_fixcoin()
 
         if not found_free:
+            if end_swip_detected:
+                break
             gui_log(serial, f"[Loop {loop_num}] gachafree1 not found after {max_miss} swipes, skipping loop", step="Skip")
             continue  # ข้ามไป loop ถัดไป (หรือจบถ้า loop 2)
 
