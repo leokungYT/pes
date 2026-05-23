@@ -934,7 +934,7 @@ def get_screen_capture(device):
             fa_pts = img_search(img, os.path.join(IMG_DIR, "fixalert1.bmp"))
             if fa_pts:
                 gui_log(device.serial, "Floating: fixalert1.bmp found! Executing fixalert2 -> fixalert3", step="Fix Alert")
-                # Wait up to 15 seconds for fixalert2 and click it
+                # Wait up to 15 seconds for fixalert2 and click until gone
                 deadline_fa2 = time.time() + 15
                 clicked_fa2 = False
                 while time.time() < deadline_fa2:
@@ -947,7 +947,9 @@ def get_screen_capture(device):
                             gui_log(device.serial, "Clicked fixalert2.bmp", step="Fix Alert")
                             time.sleep(2)
                             clicked_fa2 = True
-                            break
+                            deadline_fa2 = time.time() + 10  # ต่อเวลารอหายไป
+                        elif clicked_fa2:
+                            break  # เคยกดแล้ว + หายแล้ว → ไป fixalert3
                     time.sleep(0.5)
 
                 if clicked_fa2:
