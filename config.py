@@ -11,7 +11,7 @@ EVENT_IMG = 0
 # ── Box Sequence (main-pes.py) ────────────────────
 # 1 = เปิดกล่อง (ทำ play26-play31 และ box1-box4)
 # 0 = ข้ามการเปิดกล่อง (จบที่ play25 แล้วส่งไฟล์เลย)
-DO_BOX = 0
+DO_BOX = 1
 
 # ── Gacha Sequence (login.py) ──────────────────────
 # 1 = สุ่มกาชา (ต่อจากจบ box4)
@@ -36,7 +36,7 @@ LOGIN_SUCCESS_DIR = "login-success"
 # ── Find Hero Sequence ─────────────────────────────
 # 1 = ทำงาน fin1-fin8 และค้นหาฮีโร่ตามภาพ
 # 0 = ข้าม
-FIND_HERO = 1
+FIND_HERO = 0
 
 # แมพไฟล์ภาพฮีโร่เข้ากับชื่อฮีโร่
 HERO_IMG_MAP = {
@@ -48,12 +48,11 @@ HERO_IMG_MAP = {
 # ── Gacha Free Sequence ───────────────────────────
 # 1 = ทำ gacha free หลังจบ box (gacha1 → gacha2 → เลื่อนหา gachafree1)
 # 0 = ข้าม
-GACHA_FREE = 0
+GACHA_FREE = 1
 
 # จำนวนลูปย่อยที่ต้องการสุ่มกาชาฟรี (เช่น 2, 3, 5)
 GACHA_FREE_LOOPS = 6
 
-# รายชื่อนักเตะที่ต้องการเก็บ (Gacha Free → backup-id)
 # รายชื่อนักเตะที่ต้องการเก็บ (Gacha Free → backup-id)
 HERO_LIST_FREE = [
     "Fabio Cannavaro",
@@ -68,11 +67,14 @@ HERO_LIST_FREE = [
     "Arribas",
     "Ramedhan Saifullah",
     "Chrigor",
-    "Lamine Yamal",
-    "Kylian Mbappe",
+    "Lamine",
+    "Kylian",
     "Joan Garcia",
     "Martin Odegaard",
-    "Atep"
+    "Atep",
+    "Gareth Bale",
+    "Aubameyang",
+    "Marcelo"
 ]
 
 list_find_hero = [
@@ -88,8 +90,8 @@ list_find_hero = [
     "Arribas",
     "Ramedhan Saifullah",
     "Chrigor",
-    "Lamine Yamal",
-    "Kylian Mbappe",
+    "Lamine",
+    "Mbappe",
     "Joan Garcia",
     "Martin Odegaard",
     "Atep",
