@@ -68,7 +68,7 @@ HERO_LIST_FREE = [
     "Ramedhan Saifullah",
     "Chrigor",
     "Lamine",
-    "Kylian",
+    "Mbappe",
     "Joan Garcia",
     "Martin Odegaard",
     "Atep",
@@ -76,7 +76,6 @@ HERO_LIST_FREE = [
     "Aubameyang",
     "Marcelo"
 ]
-
 list_find_hero = [
     "Fabio Cannavaro",
     "Paolo Maldini",
