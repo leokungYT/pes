@@ -1573,11 +1573,9 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
 
 def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
     """
-    Gacha Free mode (2 loops):
+    Gacha Free mode (G loops):
     Each loop: swipe to find gachafree1 → click → gachafree2 → click → checkpointgacha → OCR
-    Accumulates hero names from both loops.
-    - Found heroes → backup-id with hero1+hero2+original.dat
-    - No heroes → random-fail with original.dat
+    Accumulates hero names from all loops.
     """
     gui_log(serial, "Gacha Free sequence started...", step="GachaFree", status="working")
 
@@ -1592,7 +1590,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                 if not fixcoin_handled:
                     gui_log(serial, "fixcoin.bmp detected! Pressing Back (once)...", step="Fix Coin")
                     device.shell("input keyevent 4")  # KEYCODE_BACK
-                    time.sleep(2)
+                    time.sleep(1.5)
                     fixcoin_handled = True
                 return True
             else:
@@ -1613,9 +1611,9 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                 if pts:
                     x, y = pts[0]
                     device.shell(f"input swipe {x} {y} {x} {y} 100")
-                    time.sleep(4)
+                    time.sleep(1.2)
                     break
-            time.sleep(1)
+            time.sleep(0.3)
 
     # 2. ทำลูปสุ่มกาชาฟรีตามจำนวนที่กำหนดใน config
     found_heroes = []  # เก็บชื่อฮีโร่ที่เจอจากทุก loop
@@ -1673,7 +1671,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                                 if pts_n:
                                     x_n, y_n = pts_n[0]
                                     device.shell(f"input swipe {x_n} {y_n} {x_n} {y_n} 100")
-                                    time.sleep(1)
+                                    time.sleep(0.8)
                                 else:
                                     break  # หายแล้ว
                             else:
@@ -1681,7 +1679,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                         gui_log(serial, f"[Loop {loop_num}] next.bmp gone! Resetting swipe search to 1/{max_miss}", step="Next Reset")
                         next_first_seen = None
                         miss_count = 0  # reset เริ่มเลื่อนใหม่
-                        time.sleep(2)
+                        time.sleep(1.0)
                         continue
                 else:
                     next_first_seen = None  # ไม่เจอ next → reset timer
@@ -1692,7 +1690,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                     x, y = pts[0]
                     gui_log(serial, f"[Loop {loop_num}] gachafree1 found! Clicking ({x},{y})", step="Free Found")
                     device.shell(f"input swipe {x} {y} {x} {y} 100")
-                    time.sleep(2)
+                    time.sleep(0.8)
                     found_free = True
                     # กดจนกว่าจะหายไป (timeout 15s กันค้าง)
                     deadline_gone = time.time() + 15
@@ -1704,17 +1702,17 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                             if pts2:
                                 x2, y2 = pts2[0]
                                 device.shell(f"input swipe {x2} {y2} {x2} {y2} 100")
-                                time.sleep(2)
+                                time.sleep(0.8)
                             else:
                                 break
                         else:
                             break
-                    time.sleep(2)
+                    time.sleep(0.5)
                     break
             miss_count += 1
             gui_log(serial, f"[Loop {loop_num}] gachafree1 not here, swiping... ({miss_count}/{max_miss})", step="Swipe")
-            device.shell("input swipe 618 308 54 306 3000")
-            time.sleep(2)
+            device.shell("input swipe 618 308 54 306 1000")
+            time.sleep(1.0)
             # เช็ค fixcoin หลังเลื่อน (เลื่อนไปโดนตู้ fixcoin ขึ้น)
             _check_fixcoin()
 
@@ -1738,12 +1736,12 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                     x, y = pts[0]
                     gui_log(serial, f"[Loop {loop_num}] gachafree2 found! Clicking ({x},{y})", step="Free2 Found")
                     device.shell(f"input swipe {x} {y} {x} {y} 100")
-                    time.sleep(2)
+                    time.sleep(0.8)
                     clicked_gf2 = True
                     deadline_gf2 = time.time() + 10  # ต่อเวลารอหายไป
                 elif clicked_gf2:
                     break  # เคยกดแล้ว + หายไปแล้ว → ไปต่อ
-            time.sleep(1)
+            time.sleep(0.3)
 
         # ถ้าไม่เจอ gachafree2 เลย → file-error แล้วไปไฟล์ใหม่
         if not clicked_gf2:
@@ -1794,7 +1792,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                             if pts_fl:
                                 x_fl, y_fl = pts_fl[0]
                                 device.shell(f"input swipe {x_fl} {y_fl} {x_fl} {y_fl} 100")
-                                time.sleep(1)
+                                time.sleep(0.8)
                                 continue
                                 
                             # เช็คว่าเจอ checkpointgacha1.bmp หรือยัง
@@ -1813,9 +1811,9 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                         x_fl, y_fl = pts_fl[0]
                         device.shell(f"input swipe {x_fl} {y_fl} {x_fl} {y_fl} 100")
                         gui_log(serial, "Clicked fixlocked via fix-cp path", step="Fix Done")
-                        time.sleep(2)
+                        time.sleep(0.8)
                     break
-            time.sleep(1)
+            time.sleep(0.3)
 
         # 2c2. รอ checkpointgacha1.bmp → แล้วค่อย OCR scan จริงๆ
         gui_log(serial, f"[Loop {loop_num}] Waiting checkpointgacha1 (OCR)...", step="CP1 Wait")
@@ -1827,14 +1825,14 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
             if img is not None:
                 pts = img_search(img, os.path.join(IMG_DIR, "checkpointgacha1.bmp"))
                 if pts:
-                    time.sleep(1.2)  # ให้หน้าจอและตัวหนังสือเฟดอินจนเสร็จเรียบร้อย ป้องกันภาพเบลอ
+                    time.sleep(0.8)  # ให้หน้าจอและตัวหนังสือเฟดอินจนเสร็จเรียบร้อย ป้องกันภาพเบลอ
                     img = get_screen_capture(device)
                     gacha_region = Region(68, 28, 579, 57)
                     ocr_text = read_screen_text(img, region=gacha_region, serial=serial)
                     display_text = ocr_text if ocr_text else "<EMPTY>"
                     gui_log(serial, f"[Loop {loop_num}] OCR Result: {display_text}", step="OCR Done")
                     print(f"[{serial}] GachaFree Loop{loop_num} OCR: {display_text}")
-
+ 
                     for h in HERO_LIST_FREE:
                         if is_hero_match(h, ocr_text):
                             h_clean = h.strip()
@@ -1842,7 +1840,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                                 found_heroes.append(h_clean)
                                 gui_log(serial, f"[Loop {loop_num}] ⭐ Match: {h_clean}", step=f"⭐ {h_clean}")
                     break
-            time.sleep(1)
+            time.sleep(0.3)
 
         # 2d. รอ scanout.bmp → click
         gui_log(serial, f"[Loop {loop_num}] Waiting scanout.bmp...", step="Scanout")
@@ -1857,9 +1855,9 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                     x, y = pts[0]
                     gui_log(serial, f"[Loop {loop_num}] scanout.bmp found! Clicking ({x},{y})", step="Scanout OK")
                     device.shell(f"input swipe {x} {y} {x} {y} 100")
-                    time.sleep(3)
+                    time.sleep(1.2)
                     break
-            time.sleep(1)
+            time.sleep(0.3)
 
         # 2e. รอ next.bmp → click (จบ loop นี้แล้วค่อยไป loop ถัดไป)
         gui_log(serial, f"[Loop {loop_num}] Waiting next.bmp...", step="Next")
@@ -1874,9 +1872,9 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                     x, y = pts[0]
                     gui_log(serial, f"[Loop {loop_num}] next.bmp found! Clicking ({x},{y})", step="Next OK")
                     device.shell(f"input swipe {x} {y} {x} {y} 100")
-                    time.sleep(3)
+                    time.sleep(1.2)
                     break
-            time.sleep(1)
+            time.sleep(0.3)
 
     # 3. จบตามลูปที่ตั้งค่า → Sort file
     device.shell("am force-stop jp.konami.pesam")
@@ -1899,32 +1897,30 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
 
         hero_prefix = "+".join(found_heroes)
         final_name = f"{hero_prefix}+{clean_orig}"
-        gui_log(serial, f"⭐ GACHA FREE RESULT: {hero_prefix}", step=f"⭐ {hero_prefix}")
+        gui_log(serial, f"⭐ GachaFree Match: {hero_prefix}", step=f"⭐ {hero_prefix}")
     else:
         dest_dir = RANDOM_FAIL_DIR
         final_name = clean_orig
-        gui_log(serial, f"No match in all {GACHA_FREE_LOOPS} loops → random-fail", step="No Match")
+        gui_log(serial, "GachaFree: No hero matched", step="No Match")
 
     dest = os.path.join(dest_dir, final_name)
     if os.path.exists(file_path):
-        time.sleep(2)
+        time.sleep(1)
         try:
             if os.path.exists(dest):
                 os.remove(dest)
             shutil.copy2(file_path, dest)
             os.remove(file_path)
-            gui_log(serial, f"✅ Sorted: {final_name} → {dest_dir}", step="Sorted", status="working")
-        except Exception as e:
-            gui_log(serial, f"⚠️ Sort failed: {e}", step="Sort Error")
-
+            gui_log(serial, f"✅ Sorted (GachaFree): {dest_dir}", step="Sorted", status="working")
+        except Exception as me:
+            gui_log(serial, f"⚠️ GachaFree Sort failed: {me}", step="Sort Error")
+        
         dur = time.time() - cycle_start
         if gui_instance:
             gui_instance.login_times.append(dur)
 
     release_file(original_name)
-    gui_log(serial, f"Cycle finished for {original_name}", step="Done")
     return True
-
 
 def check_coin_mode(device, cycle_start, serial, original_name, file_path):
     """
