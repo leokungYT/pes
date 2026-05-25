@@ -835,6 +835,17 @@ def get_screen_capture(device):
             return None
         
         if img is not None:
+            # === fixnet floating check ===
+            fn_pts = img_search(img, os.path.join(IMG_DIR, "fixnet.bmp"))
+            if fn_pts:
+                gui_log(device.serial, "Floating: fixnet.bmp found! Clicking...", step="Fix Net")
+                x, y = fn_pts[0]
+                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                time.sleep(1)
+                img = fast_screencap(device)  # Re-capture fresh image after click
+                if img is None:
+                    return None
+
             dl_pts = img_search(img, os.path.join(IMG_DIR, "download.bmp"))
             if dl_pts:
                 gui_log(device.serial, "Floating: download.bmp found! Clicking...", step="Floating")
@@ -1711,8 +1722,8 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                     break
             miss_count += 1
             gui_log(serial, f"[Loop {loop_num}] gachafree1 not here, swiping... ({miss_count}/{max_miss})", step="Swipe")
-            device.shell("input swipe 618 308 54 306 1000")
-            time.sleep(1.0)
+            device.shell("input swipe 618 308 54 306 4000")
+            time.sleep(2.0)
             # เช็ค fixcoin หลังเลื่อน (เลื่อนไปโดนตู้ fixcoin ขึ้น)
             _check_fixcoin()
 

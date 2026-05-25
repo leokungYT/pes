@@ -51,7 +51,7 @@ HERO_IMG_MAP = {
 GACHA_FREE = 1
 
 # จำนวนลูปย่อยที่ต้องการสุ่มกาชาฟรี (เช่น 2, 3, 5)
-GACHA_FREE_LOOPS = 6
+GACHA_FREE_LOOPS = 3
 
 # รายชื่อนักเตะที่ต้องการเก็บ (Gacha Free → backup-id)
 HERO_LIST_FREE = [
@@ -74,8 +74,12 @@ HERO_LIST_FREE = [
     "Atep",
     "Gareth Bale",
     "Aubameyang",
-    "Marcelo"
+    "Marcelo",
+    "Peter Schmeichel",
+    "Leonardo Bonucci",
+    "Ronald Koeman"
 ]
+
 list_find_hero = [
     "Fabio Cannavaro",
     "Paolo Maldini",
@@ -96,7 +100,10 @@ list_find_hero = [
     "Atep",
     "Gareth Bale",
     "Aubameyang",
-    "Marcelo"
+    "Marcelo",
+    "Peter Schmeichel",
+    "Leonardo Bonucci",
+    "Ronald Koeman"
 ]
 
 
