@@ -842,7 +842,23 @@ def get_screen_capture(device):
                 x, y = fn_pts[0]
                 device.shell(f"input swipe {x} {y} {x} {y} 100")
                 time.sleep(1)
-                img = fast_screencap(device)  # Re-capture fresh image after click
+                
+                # Search for fixnet1.bmp for up to 10 seconds
+                gui_log(device.serial, "Waiting for fixnet1.bmp (up to 10s)...", step="Fix Net 1")
+                deadline_fn1 = time.time() + 10
+                while time.time() < deadline_fn1:
+                    img_fn1 = fast_screencap(device)
+                    if img_fn1 is not None:
+                        fn1_pts = img_search(img_fn1, os.path.join(IMG_DIR, "fixnet1.bmp"))
+                        if fn1_pts:
+                            x_fn1, y_fn1 = fn1_pts[0]
+                            device.shell(f"input swipe {x_fn1} {y_fn1} {x_fn1} {y_fn1} 100")
+                            gui_log(device.serial, "Clicked fixnet1.bmp!", step="Fix Net 1")
+                            time.sleep(1)
+                            break
+                    time.sleep(0.5)
+
+                img = fast_screencap(device)  # Re-capture fresh image after clicks
                 if img is None:
                     return None
 
@@ -2079,14 +2095,14 @@ def process_device_login(device):
 
 
 
-            # 3. Launch with Black Screen Check (30s check, threshold > 85% dark -> force-stop & relaunch)
+            # 3. Launch with Black Screen Check (45s check, threshold > 85% dark -> force-stop & relaunch)
             gui_log(serial, "Launching PES...", step="Launch", status="working")
             
             for black_attempt in range(3):
                 device.shell("monkey -p jp.konami.pesam -c android.intent.category.LAUNCHER 1")
                 black_start = time.time()
                 is_stuck = False
-                while time.time() - black_start < 30:
+                while time.time() - black_start < 45:
                     check_device_reset(serial, cycle_start)
                     img = get_screen_capture(device)
                     if img is not None:
