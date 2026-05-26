@@ -117,3 +117,10 @@ DEBUG_OCR = 0
 # 1 = ทำงานสแกนเหรียญ (หา checkpointcoin.bmp → OCR สแกนหาเลขเหรียญที่ Region(52, 10, 106, 41) → บันทึกลง check-coin)
 # 0 = ข้าม
 CHECK_COIN = 0
+
+# ── No Scan Mode ──────────────────────────────────
+# 1 = ข้ามขั้นตอน checkpointgacha (ไม่สแกน OCR)
+#     ข้ามไปหา next.bmp ต่อเลย
+#     ไฟล์จะเก็บในโฟลเดอร์ fast-random/ แทน backup-id/
+# 0 = ทำงานปกติ (สแกน OCR ที่ checkpointgacha)
+NOSCAN = 1

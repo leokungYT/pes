@@ -219,7 +219,14 @@ if GUI_ENABLED:
             var_debug = ctk.IntVar(value=cfg.DEBUG_OCR)
             ctk.CTkSwitch(row_debug, text="", variable=var_debug, onvalue=1, offvalue=0).pack(side="right")
 
-            # 5. HERO_LIST_FREE Textarea
+            # 5. NOSCAN Switch
+            row_noscan = ctk.CTkFrame(form_frame, fg_color="transparent")
+            row_noscan.pack(fill="x", pady=4)
+            ctk.CTkLabel(row_noscan, text="No Scan Mode (ข้ามสแกน → fast-random)", font=ctk.CTkFont(size=12)).pack(side="left")
+            var_noscan = ctk.IntVar(value=cfg.NOSCAN)
+            ctk.CTkSwitch(row_noscan, text="", variable=var_noscan, onvalue=1, offvalue=0).pack(side="right")
+
+            # 6. HERO_LIST_FREE Textarea
             ctk.CTkLabel(form_frame, text="Hero Target List (รายชื่อนักเตะ - บรรทัดละคน):", font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10, 2))
             txt_heroes = ctk.CTkTextbox(form_frame, height=180, font=ctk.CTkFont(family="Consolas", size=11))
             txt_heroes.pack(fill="both", expand=True, pady=(0, 10))
@@ -229,7 +236,7 @@ if GUI_ENABLED:
             txt_heroes.insert("1.0", current_heroes)
 
             def _save():
-                global DO_BOX, GACHA_FREE, GACHA_FREE_LOOPS, HERO_LIST_FREE, DEBUG_OCR, EVENT_IMG
+                global DO_BOX, GACHA_FREE, GACHA_FREE_LOOPS, HERO_LIST_FREE, DEBUG_OCR, EVENT_IMG, NOSCAN
                 
                 val_event = var_event.get()
                 val_box = var_box.get()
@@ -241,6 +248,7 @@ if GUI_ENABLED:
                     val_loops = 6
                     
                 val_debug = var_debug.get()
+                val_noscan = var_noscan.get()
                 
                 # Parse heroes
                 raw_heroes = txt_heroes.get("1.0", "end").strip()
@@ -285,6 +293,13 @@ IMG_DIR = "img"
 # 1 = บันทึกภาพที่สแกน OCR ทุกครั้งไว้ในโฟลเดอร์ debug-ocr/
 # 0 = ไม่บันทึก
 DEBUG_OCR = {val_debug}
+
+# ── No Scan Mode ──────────────────────────────────
+# 1 = ข้ามขั้นตอน checkpointgacha (ไม่สแกน OCR)
+#     ข้ามไปหา next.bmp ต่อเลย
+#     ไฟล์จะเก็บในโฟลเดอร์ fast-random/ แทน backup-id/
+# 0 = ทำงานปกติ (สแกน OCR ที่ checkpointgacha)
+NOSCAN = {val_noscan}
 """
                 try:
                     with open(cfg_path, "w", encoding="utf-8") as f:
@@ -297,10 +312,11 @@ DEBUG_OCR = {val_debug}
                     GACHA_FREE_LOOPS = val_loops
                     HERO_LIST_FREE = parsed_heroes
                     DEBUG_OCR = val_debug
+                    NOSCAN = val_noscan
                     
                     importlib.reload(cfg)
                     label_status.configure(text="✅ Saved settings successfully!", text_color="#2cc985")
-                    self.log(f"Config updated: EVENT={val_event}, BOX={val_box}, FREE={val_free}, LOOPS={val_loops}, HEROES={len(parsed_heroes)}")
+                    self.log(f"Config updated: EVENT={val_event}, BOX={val_box}, FREE={val_free}, LOOPS={val_loops}, NOSCAN={val_noscan}, HEROES={len(parsed_heroes)}")
                 except Exception as ex:
                     label_status.configure(text=f"❌ Save error: {ex}", text_color="#ff5555")
 
@@ -411,11 +427,14 @@ def gui_log(serial, msg, step=None, status=None):
     update_gui(serial, log=msg, step=step, status=status)
 
 # --- Configuration ---
-from config_gen import DO_BOX, IMG_DIR, GACHA_FREE, GACHA_FREE_LOOPS, HERO_LIST_FREE, DEBUG_OCR, EVENT_IMG
+from config_gen import DO_BOX, IMG_DIR, GACHA_FREE, GACHA_FREE_LOOPS, HERO_LIST_FREE, DEBUG_OCR, EVENT_IMG, NOSCAN
 IMAGE_CACHE = {}
 
 BACKUP_ID_DIR = "backup-id"
 os.makedirs(BACKUP_ID_DIR, exist_ok=True)
+
+FAST_RANDOM_DIR = "fast-random"
+os.makedirs(FAST_RANDOM_DIR, exist_ok=True)
 
 # OCR imports (optional)
 try:
@@ -846,103 +865,122 @@ def gacha_free_mode_mainpes(device, cycle_start, serial):
             gui_log(serial, f"[Loop {loop_num}] gachafree2 not found, skipping loop", step="Error")
             continue
 
-        # 2c. Wait checkpointgacha → click (478,320) → checkpointgacha1
-        gui_log(serial, f"[Loop {loop_num}] Waiting checkpointgacha...", step="CP Wait")
-        deadline_cp = time.time() + 45
-        while time.time() < deadline_cp:
-            check_device_reset(serial, cycle_start)
-            _check_fixcoin()
-            img = get_screen_capture(device)
-            if img is not None:
-                pts = ImgSearchADB(img, os.path.join(IMG_DIR, "checkpointgacha.bmp"))
-                if pts:
-                    gui_log(serial, f"[Loop {loop_num}] checkpointgacha found! Clicking...", step="Click Loop")
-                    click_count = 0
-                    while True:
-                        check_device_reset(serial, cycle_start)
-                        _check_fixcoin()
-                        device.shell("input swipe 478 320 478 320 100")
-                        click_count += 1
-                        time.sleep(0.3)
-                        img_check = get_screen_capture(device)
-                        if img_check is not None:
-                            pts_fl = ImgSearchADB(img_check, os.path.join(IMG_DIR, "fixlocked.bmp"))
-                            if pts_fl:
-                                x_fl, y_fl = pts_fl[0]
-                                device.shell(f"input swipe {x_fl} {y_fl} {x_fl} {y_fl} 100")
-                                time.sleep(1)
-                                continue
-                            pts_cp1 = ImgSearchADB(img_check, os.path.join(IMG_DIR, "checkpointgacha1.bmp"))
-                            if pts_cp1:
-                                gui_log(serial, f"[Loop {loop_num}] checkpointgacha1 found after {click_count} clicks!", step="CP1 Found")
+        # ── NOSCAN mode: skip checkpointgacha → jump to next ──
+        if NOSCAN == 1:
+            gui_log(serial, f"[Loop {loop_num}] NOSCAN=1 → Skipping checkpointgacha/OCR/scanout", step="NoScan Skip")
+        else:
+            # 2c. Wait checkpointgacha → click (478,320) → checkpointgacha1
+            gui_log(serial, f"[Loop {loop_num}] Waiting checkpointgacha...", step="CP Wait")
+            deadline_cp = time.time() + 45
+            while time.time() < deadline_cp:
+                check_device_reset(serial, cycle_start)
+                _check_fixcoin()
+                img = get_screen_capture(device)
+                if img is not None:
+                    pts = ImgSearchADB(img, os.path.join(IMG_DIR, "checkpointgacha.bmp"))
+                    if pts:
+                        gui_log(serial, f"[Loop {loop_num}] checkpointgacha found! Clicking...", step="Click Loop")
+                        click_count = 0
+                        while True:
+                            check_device_reset(serial, cycle_start)
+                            _check_fixcoin()
+                            device.shell("input swipe 478 320 478 320 100")
+                            click_count += 1
+                            time.sleep(0.3)
+                            img_check = get_screen_capture(device)
+                            if img_check is not None:
+                                pts_fl = ImgSearchADB(img_check, os.path.join(IMG_DIR, "fixlocked.bmp"))
+                                if pts_fl:
+                                    x_fl, y_fl = pts_fl[0]
+                                    device.shell(f"input swipe {x_fl} {y_fl} {x_fl} {y_fl} 100")
+                                    time.sleep(1)
+                                    continue
+                                pts_cp1 = ImgSearchADB(img_check, os.path.join(IMG_DIR, "checkpointgacha1.bmp"))
+                                if pts_cp1:
+                                    gui_log(serial, f"[Loop {loop_num}] checkpointgacha1 found after {click_count} clicks!", step="CP1 Found")
+                                    break
+                        break
+
+                    pts_fix = ImgSearchADB(img, os.path.join(IMG_DIR, "fixcheckpointgacha.bmp"))
+                    if pts_fix:
+                        gui_log(serial, f"[Loop {loop_num}] fixcheckpointgacha detected!", step="Fix CP")
+                        pts_fl = ImgSearchADB(img, os.path.join(IMG_DIR, "fixlocked.bmp"))
+                        if pts_fl:
+                            x_fl, y_fl = pts_fl[0]
+                            device.shell(f"input swipe {x_fl} {y_fl} {x_fl} {y_fl} 100")
+                            time.sleep(2)
+                        break
+                time.sleep(1)
+
+            # 2c2. Wait checkpointgacha1 → OCR
+            gui_log(serial, f"[Loop {loop_num}] Waiting checkpointgacha1 (OCR)...", step="CP1 Wait")
+            deadline_cp1 = time.time() + 30
+            while time.time() < deadline_cp1:
+                check_device_reset(serial, cycle_start)
+                _check_fixcoin()
+                img = get_screen_capture(device)
+                if img is not None:
+                    pts = ImgSearchADB(img, os.path.join(IMG_DIR, "checkpointgacha1.bmp"))
+                    if pts:
+                        gacha_region = Region(68, 28, 579, 57)
+                        ocr_text = read_screen_text(img, region=gacha_region, serial=serial)
+                        display_text = ocr_text if ocr_text else "<EMPTY>"
+                        gui_log(serial, f"[Loop {loop_num}] OCR: {display_text}", step="OCR Done")
+
+                        for h in HERO_LIST_FREE:
+                            if is_hero_match(h, ocr_text):
+                                found_heroes.append(h.strip())
+                                gui_log(serial, f"[Loop {loop_num}] ⭐ Match: {h.strip()}", step="Match!")
                                 break
-                    break
+                        break
+                time.sleep(1)
 
-                pts_fix = ImgSearchADB(img, os.path.join(IMG_DIR, "fixcheckpointgacha.bmp"))
-                if pts_fix:
-                    gui_log(serial, f"[Loop {loop_num}] fixcheckpointgacha detected!", step="Fix CP")
-                    pts_fl = ImgSearchADB(img, os.path.join(IMG_DIR, "fixlocked.bmp"))
-                    if pts_fl:
-                        x_fl, y_fl = pts_fl[0]
-                        device.shell(f"input swipe {x_fl} {y_fl} {x_fl} {y_fl} 100")
-                        time.sleep(2)
-                    break
-            time.sleep(1)
-
-        # 2c2. Wait checkpointgacha1 → OCR
-        gui_log(serial, f"[Loop {loop_num}] Waiting checkpointgacha1 (OCR)...", step="CP1 Wait")
-        deadline_cp1 = time.time() + 30
-        while time.time() < deadline_cp1:
-            check_device_reset(serial, cycle_start)
-            _check_fixcoin()
-            img = get_screen_capture(device)
-            if img is not None:
-                pts = ImgSearchADB(img, os.path.join(IMG_DIR, "checkpointgacha1.bmp"))
-                if pts:
-                    gacha_region = Region(68, 28, 579, 57)
-                    ocr_text = read_screen_text(img, region=gacha_region, serial=serial)
-                    display_text = ocr_text if ocr_text else "<EMPTY>"
-                    gui_log(serial, f"[Loop {loop_num}] OCR: {display_text}", step="OCR Done")
-
-                    for h in HERO_LIST_FREE:
-                        if is_hero_match(h, ocr_text):
-                            found_heroes.append(h.strip())
-                            gui_log(serial, f"[Loop {loop_num}] ⭐ Match: {h.strip()}", step="Match!")
-                            break
-                    break
-            time.sleep(1)
-
-        # 2d. Wait scanout
-        gui_log(serial, f"[Loop {loop_num}] Waiting scanout.bmp...", step="Scanout")
-        deadline_so = time.time() + 15
-        while time.time() < deadline_so:
-            check_device_reset(serial, cycle_start)
-            _check_fixcoin()
-            img = get_screen_capture(device)
-            if img is not None:
-                pts = ImgSearchADB(img, os.path.join(IMG_DIR, "scanout.bmp"))
-                if pts:
-                    x, y = pts[0]
-                    device.shell(f"input swipe {x} {y} {x} {y} 100")
-                    time.sleep(3)
-                    break
-            time.sleep(1)
+            # 2d. Wait scanout
+            gui_log(serial, f"[Loop {loop_num}] Waiting scanout.bmp...", step="Scanout")
+            deadline_so = time.time() + 15
+            while time.time() < deadline_so:
+                check_device_reset(serial, cycle_start)
+                _check_fixcoin()
+                img = get_screen_capture(device)
+                if img is not None:
+                    pts = ImgSearchADB(img, os.path.join(IMG_DIR, "scanout.bmp"))
+                    if pts:
+                        x, y = pts[0]
+                        device.shell(f"input swipe {x} {y} {x} {y} 100")
+                        time.sleep(3)
+                        break
+                time.sleep(1)
 
         # 2e. Wait next
         gui_log(serial, f"[Loop {loop_num}] Waiting next.bmp...", step="Next")
-        deadline_next = time.time() + 15
-        while time.time() < deadline_next:
-            check_device_reset(serial, cycle_start)
-            _check_fixcoin()
-            img = get_screen_capture(device)
-            if img is not None:
-                pts = ImgSearchADB(img, os.path.join(IMG_DIR, "next.bmp"))
-                if pts:
-                    x, y = pts[0]
-                    device.shell(f"input swipe {x} {y} {x} {y} 100")
-                    time.sleep(3)
-                    break
-            time.sleep(1)
+        if NOSCAN == 1:
+            # NOSCAN mode: หา next.bmp ไปเรื่อยๆจนกว่าจะเจอ (ไม่มี timeout)
+            while True:
+                check_device_reset(serial, cycle_start)
+                _check_fixcoin()
+                img = get_screen_capture(device)
+                if img is not None:
+                    pts = ImgSearchADB(img, os.path.join(IMG_DIR, "next.bmp"))
+                    if pts:
+                        x, y = pts[0]
+                        device.shell(f"input swipe {x} {y} {x} {y} 100")
+                        time.sleep(3)
+                        break
+                time.sleep(1)
+        else:
+            deadline_next = time.time() + 15
+            while time.time() < deadline_next:
+                check_device_reset(serial, cycle_start)
+                _check_fixcoin()
+                img = get_screen_capture(device)
+                if img is not None:
+                    pts = ImgSearchADB(img, os.path.join(IMG_DIR, "next.bmp"))
+                    if pts:
+                        x, y = pts[0]
+                        device.shell(f"input swipe {x} {y} {x} {y} 100")
+                        time.sleep(3)
+                        break
+                time.sleep(1)
 
     # 3. Done — report results
     if found_heroes:
@@ -1343,8 +1381,13 @@ def process_device(device):
                             data = json.loads(content[start_idx:end_idx+1])
                             user_code = data.get("user_code", "unknown")
                     
+                    # ถ้า NOSCAN=1 → ส่งไป fast-random/ เสมอ
+                    if NOSCAN == 1:
+                        final_name = f"{user_code}.dat"
+                        dest_dir = FAST_RANDOM_DIR
+                        gui_log(serial, f"NOSCAN → {dest_dir}/{final_name}", step="Fast Random")
                     # ถ้ามี gacha free result → ส่งไป backup-id
-                    if GACHA_FREE == 1 and gacha_free_result:
+                    elif GACHA_FREE == 1 and gacha_free_result:
                         hero_prefix = "+".join(gacha_free_result)
                         final_name = f"{hero_prefix}+{user_code}.dat"
                         dest_dir = BACKUP_ID_DIR

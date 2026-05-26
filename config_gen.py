@@ -19,7 +19,7 @@ DO_BOX = 1
 GACHA_FREE = 1
 
 # จำนวนลูปย่อยที่ต้องการสุ่มกาชาฟรี (เช่น 2, 3, 6)
-GACHA_FREE_LOOPS = 6
+GACHA_FREE_LOOPS = 3
 
 # รายชื่อนักเตะที่ต้องการเก็บ (Gacha Free → found-hero)
 HERO_LIST_FREE = ['Fabio Cannavaro', 'Paolo Maldini', 'Daniele De Rossi', 'Didier Drogba', 'Mohamed Salah', 'Nico Paz', 'Federico Dimarco', 'Luka', 'rgson', 'Arribas', 'Ramedhan Saifullah', 'Chrigor', 'Lamine Yamal', 'Kylian Mbappe', 'Joan Garcia', 'Martin Odegaard', 'Atep']
@@ -31,3 +31,10 @@ IMG_DIR = "img"
 # 1 = บันทึกภาพที่สแกน OCR ทุกครั้งไว้ในโฟลเดอร์ debug-ocr/
 # 0 = ไม่บันทึก
 DEBUG_OCR = 0
+
+# ── No Scan Mode ──────────────────────────────────
+# 1 = ข้ามขั้นตอน checkpointgacha (ไม่สแกน OCR)
+#     ข้ามไปหา next.bmp ต่อเลย
+#     ไฟล์จะเก็บในโฟลเดอร์ fast-random/ แทน backup-id/
+# 0 = ทำงานปกติ (สแกน OCR ที่ checkpointgacha)
+NOSCAN = 1
