@@ -579,7 +579,7 @@ def fast_screencap(device):
     return None
 
 def get_screen_capture(device):
-    """Screencap with global floating checks (namesom, download, fixgoogle)"""
+    """Screencap with global floating checks (namesom, download, fixgoogle, fixball)"""
     try:
         img = fast_screencap(device)
         if img is None:
@@ -589,6 +589,13 @@ def get_screen_capture(device):
         if ImgSearchADB(img, os.path.join(IMG_DIR, "namesom.bmp"), threshold=0.9):
             gui_log(device.serial, "⚠️ NAMESOM DETECTED! Restarting bot...", status="stuck")
             DEVICE_RESET_FLAGS[device.serial] = True
+
+        # Global check for fixball.bmp (Force restart from scratch / clear app)
+        if ImgSearchADB(img, os.path.join(IMG_DIR, "fixball.bmp"), threshold=0.8):
+            gui_log(device.serial, "⚠️ FIXBALL DETECTED! Clearing app and restarting from scratch...", status="stuck")
+            device.shell("am force-stop jp.konami.pesam")
+            DEVICE_RESET_FLAGS[device.serial] = True
+            raise DeviceResetException(f"Fixball detected for {device.serial}")
 
         # Global floating checks for download and fixgoogle
         dl_pts = ImgSearchADB(img, os.path.join(IMG_DIR, "download.bmp"))
@@ -606,6 +613,8 @@ def get_screen_capture(device):
         # Send to GUI for preview
         update_gui(device.serial, screenshot=img)
         return img
+    except (DeviceResetException, CycleTimeoutException):
+        raise
     except Exception as e:
         return None
 

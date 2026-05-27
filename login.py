@@ -940,6 +940,12 @@ def get_screen_capture(device):
                 
                 raise DeviceResetException("fixclear.bmp detected")
 
+            fb_pts = img_search(img, os.path.join(IMG_DIR, "fixball.bmp"))
+            if fb_pts:
+                gui_log(device.serial, "Floating: fixball.bmp found! Force closing app and resetting cycle...", step="Fix Ball")
+                device.shell("am force-stop jp.konami.pesam")
+                raise DeviceResetException("fixball.bmp detected")
+
             flg1_pts = img_search(img, os.path.join(IMG_DIR, "fixlg1.bmp"))
             if flg1_pts:
                 gui_log(device.serial, "Floating: fixlg1.bmp found! Looping fixlg2 -> fixlg3", step="Fix Lg")
