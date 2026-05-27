@@ -37,4 +37,4 @@ DEBUG_OCR = 0
 #     ข้ามไปหา next.bmp ต่อเลย
 #     ไฟล์จะเก็บในโฟลเดอร์ fast-random/ แทน backup-id/
 # 0 = ทำงานปกติ (สแกน OCR ที่ checkpointgacha)
-NOSCAN = 1
+NOSCAN = 0

@@ -81,6 +81,7 @@ DEVICE_LAST_GAME_CHECK  = {}  # throttle: เช็คเกมออนทุ�
 file_pick_lock = threading.Lock()
 ocr_lock       = threading.Lock()   # ป้องกัน OCR หลาย device พร้อมกัน (ลด CPU spike)
 in_use_files   = set()   # filenames currently being processed
+_gui_last_update = {}    # throttle GUI text updates per-device
 
 LOG_DIR = "logs"
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -636,7 +637,7 @@ if GUI_ENABLED:
 
             t = threading.Thread(target=_bg_scan, daemon=True)
             t.start()
-            self.after(10000, self.update_realtime_stats)
+            self.after(15000, self.update_realtime_stats)
 
         def _apply_stats_ui(self, input_count, success_count, hero_count, hero_counts):
             try:
@@ -688,9 +689,19 @@ def update_gui(serial, **kwargs):
     if gui_instance:
         gui_instance.after(0, lambda: gui_instance.update_device(serial, **kwargs))
 
+_GUI_LOG_INTERVAL = 2  # seconds — ส่ง text update ไป GUI ทุก 2 วินาทีต่อ device
+
 def gui_log(serial, msg, step=None, status=None):
     print(f"{Fore.CYAN}[{serial}] {msg}{Style.RESET_ALL}")
-    update_gui(serial, log=msg, step=step, status=status)
+    # Throttle GUI text updates — ส่ง step/status ทุกครั้ง แต่ log text ส่งทุก 2 วิ
+    now = time.time()
+    last = _gui_last_update.get(serial, 0)
+    if status or (now - last >= _GUI_LOG_INTERVAL):
+        _gui_last_update[serial] = now
+        update_gui(serial, log=msg, step=step, status=status)
+    elif step:
+        # step สำคัญ ส่งทุกครั้ง แต่ไม่ส่ง log text
+        update_gui(serial, step=step)
     # บันทึก log ลงไฟล์แยกตาม device
     try:
         safe_name = serial.replace(".", "_").replace(":", "_")
@@ -1073,7 +1084,7 @@ def get_screen_capture(device):
                 # Re-capture after fixing
                 img = fast_screencap(device)
 
-        update_gui(device.serial, screenshot=img)
+        # (screenshot preview removed — login.py ไม่มี preview widget, ลด GUI lag)
         return img
     except (DeviceResetException, SellScreenException):
         raise
@@ -1117,8 +1128,15 @@ def read_screen_text(img, region=None, serial="unknown"):
         img = img[region.y : region.y + region.h, region.x : region.x + region.w].copy()
     
     # Lock ป้องกันหลาย thread สแกน OCR พร้อมกัน (ลด CPU spike)
-    with ocr_lock:
+    # ใช้ timeout 30s ป้องกัน deadlock — ถ้ารอนานเกินข้ามไปเลย
+    acquired = ocr_lock.acquire(timeout=30)
+    if not acquired:
+        print(f"[OCR] [{serial}] WARNING: ocr_lock timeout (30s)! Skipping OCR.")
+        return ""
+    try:
         return _read_screen_text_locked(img, serial)
+    finally:
+        ocr_lock.release()
 
 def _read_screen_text_locked(img, serial):
     """Internal OCR — เรียกผ่าน read_screen_text เท่านั้น (มี lock แล้ว)"""

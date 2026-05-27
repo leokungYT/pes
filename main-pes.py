@@ -549,38 +549,63 @@ def get_connected_devices():
         return final_devices
     except: return []
 
-def get_screen_capture(device):
-    """Unique screencap per device serial to avoid conflicts in multi-threading"""
+def fast_screencap(device):
+    """Fast screencap using raw RGBA data — ~30-50ms vs ~200-500ms PNG"""
+    try:
+        conn = device.client.create_connection(timeout=device.client.timeout)
+        conn.send(f"host:transport:{device.serial}")
+        conn.check_status()
+        conn.send("shell:screencap")
+        conn.check_status()
+        raw = conn.read_all()
+        
+        if len(raw) > 16:
+            w = int.from_bytes(raw[0:4], byteorder='little')
+            h = int.from_bytes(raw[4:8], byteorder='little')
+            expected_size = w * h * 4
+            if len(raw) >= 12 + expected_size:
+                img_data = raw[12:12+expected_size]
+                img = np.frombuffer(img_data, dtype=np.uint8).reshape((h, w, 4))
+                return cv2.cvtColor(img, cv2.COLOR_RGBA2GRAY)
+    except Exception:
+        pass
+    # Fallback to PNG method
     try:
         raw = device.screencap()
         if raw:
-            # Decode จากหน่วยความจำโดยตรงเพื่อความเร็วที่สูงกว่าเดิม
-            nparr = np.frombuffer(raw, np.uint8)
-            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            return cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_GRAYSCALE)
+    except:
+        pass
+    return None
+
+def get_screen_capture(device):
+    """Screencap with global floating checks (namesom, download, fixgoogle)"""
+    try:
+        img = fast_screencap(device)
+        if img is None:
+            return None
             
-            # Global check for namesom.bmp (Automatic Reset)
-            if img is not None:
-                if ImgSearchADB(img, os.path.join(IMG_DIR, "namesom.bmp"), threshold=0.9):
-                    gui_log(device.serial, "⚠️ NAMESOM DETECTED! Restarting bot...", status="stuck")
-                    DEVICE_RESET_FLAGS[device.serial] = True
+        # Global check for namesom.bmp (Automatic Reset)
+        if ImgSearchADB(img, os.path.join(IMG_DIR, "namesom.bmp"), threshold=0.9):
+            gui_log(device.serial, "⚠️ NAMESOM DETECTED! Restarting bot...", status="stuck")
+            DEVICE_RESET_FLAGS[device.serial] = True
 
-                # Global floating checks for download and fixgoogle
-                dl_pts = ImgSearchADB(img, os.path.join(IMG_DIR, "download.bmp"))
-                if dl_pts:
-                    gui_log(device.serial, "Floating: download.bmp found! Clicking...", step="Floating")
-                    x, y = dl_pts[0]
-                    device.shell(f"input swipe {x} {y} {x} {y} 100")
-                
-                fg_pts = ImgSearchADB(img, os.path.join(IMG_DIR, "fixgoogle.bmp"))
-                if fg_pts:
-                    gui_log(device.serial, "Floating: fixgoogle.bmp found! Clicking...", step="Floating")
-                    x, y = fg_pts[0]
-                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+        # Global floating checks for download and fixgoogle
+        dl_pts = ImgSearchADB(img, os.path.join(IMG_DIR, "download.bmp"))
+        if dl_pts:
+            gui_log(device.serial, "Floating: download.bmp found! Clicking...", step="Floating")
+            x, y = dl_pts[0]
+            device.shell(f"input swipe {x} {y} {x} {y} 100")
+        
+        fg_pts = ImgSearchADB(img, os.path.join(IMG_DIR, "fixgoogle.bmp"))
+        if fg_pts:
+            gui_log(device.serial, "Floating: fixgoogle.bmp found! Clicking...", step="Floating")
+            x, y = fg_pts[0]
+            device.shell(f"input swipe {x} {y} {x} {y} 100")
 
-            # Send to GUI for preview
-            update_gui(device.serial, screenshot=img)
-            return img
-        return None
+        # Send to GUI for preview
+        update_gui(device.serial, screenshot=img)
+        return img
     except Exception as e:
         return None
 
@@ -1097,6 +1122,17 @@ def process_device(device):
                                 gui_log(serial, "Still found play2.bmp, clicking again...", step="Retry play2")
                                 device.shell(f"input swipe {x} {y} {x} {y} 100")
 
+                        if img_name == "play3.bmp":
+                            gui_log(serial, "play3 clicked. Repeating until play4 found...", step="Repeat play3")
+                            while True:
+                                check_device_reset(serial, cycle_start)
+                                time.sleep(0.033)
+                                p4_img = get_screen_capture(device)
+                                if p4_img is not None and ImgSearchADB(p4_img, os.path.join(IMG_DIR, "play4.bmp")):
+                                    gui_log(serial, "play4.bmp found! Moving on.", step="play4 Found")
+                                    break
+                                device.shell(f"input swipe {x} {y} {x} {y} 100")
+
                         time.sleep(5)
                         found = True
                     time.sleep(0.01)
@@ -1135,7 +1171,7 @@ def process_device(device):
                             time.sleep(3)
                 time.sleep(0.01)
 
-            # play19
+            # play19 → spam (815, 355) จนเจอ play21
             gui_log(serial, "Waiting for play19.bmp...", step="Post-UID")
             while True:
                 check_device_reset(serial, cycle_start)
@@ -1145,31 +1181,25 @@ def process_device(device):
                     if p:
                         x, y = p[0]
                         device.shell(f"input swipe {x} {y} {x} {y} 100")
-                        gui_log(serial, "play19 clicked. Waiting 20s...", step="Play19 Clicked")
-                        time.sleep(20)
+                        gui_log(serial, "play19 clicked. Spamming (815,355) until play21...", step="Play19 Clicked")
                         break
                 time.sleep(0.01)
 
-            # Transition to play21
+            # Spam (815, 355) จนเจอ play21 (ไม่รอ 20 วิ กดเลย)
             gui_log(serial, "Searching for play21.bmp via (815, 355)...", step="Transition")
             while True:
                 check_device_reset(serial, cycle_start)
                 device.shell("input swipe 815 355 815 355 100")
-                found_p21 = False
-                for _ in range(5):
-                    check_device_reset(serial, cycle_start)
-                    adb_img = get_screen_capture(device)
-                    if adb_img is not None:
-                        p = ImgSearchADB(adb_img, os.path.join(IMG_DIR, "play21.bmp"))
-                        if p:
-                            x, y = p[0]
-                            gui_log(serial, f"Found play21.bmp at ({x}, {y})", step="Found Play21")
-                            device.shell(f"input swipe {x} {y} {x} {y} 100")
-                            time.sleep(5)
-                            found_p21 = True
-                            break
-                    time.sleep(0.01)
-                if found_p21: break
+                time.sleep(1)
+                adb_img = get_screen_capture(device)
+                if adb_img is not None:
+                    p = ImgSearchADB(adb_img, os.path.join(IMG_DIR, "play21.bmp"))
+                    if p:
+                        x, y = p[0]
+                        gui_log(serial, f"Found play21.bmp at ({x}, {y})", step="Found Play21")
+                        device.shell(f"input swipe {x} {y} {x} {y} 100")
+                        time.sleep(5)
+                        break
             
             # ── Event Image Mode (EVENT_IMG) ──
             if EVENT_IMG == 0:
