@@ -1185,12 +1185,11 @@ def process_device(device):
                         break
                 time.sleep(0.01)
 
-            # Spam (815, 355) จนเจอ play21 (ไม่รอ 20 วิ กดเลย)
+            # Spam (815, 355) จนเจอ play21 (ไม่รอ 20 วิ กดรัวๆ เลย)
             gui_log(serial, "Searching for play21.bmp via (815, 355)...", step="Transition")
             while True:
                 check_device_reset(serial, cycle_start)
                 device.shell("input swipe 815 355 815 355 100")
-                time.sleep(1)
                 adb_img = get_screen_capture(device)
                 if adb_img is not None:
                     p = ImgSearchADB(adb_img, os.path.join(IMG_DIR, "play21.bmp"))
