@@ -579,7 +579,7 @@ def fast_screencap(device):
     return None
 
 def get_screen_capture(device):
-    """Screencap with global floating checks (namesom, download, fixgoogle, fixball)"""
+    """Screencap with global floating checks (namesom, download, fixgoogle)"""
     try:
         img = fast_screencap(device)
         if img is None:
@@ -589,13 +589,6 @@ def get_screen_capture(device):
         if ImgSearchADB(img, os.path.join(IMG_DIR, "namesom.bmp"), threshold=0.9):
             gui_log(device.serial, "⚠️ NAMESOM DETECTED! Restarting bot...", status="stuck")
             DEVICE_RESET_FLAGS[device.serial] = True
-
-        # Global check for fixball.bmp (Force restart from scratch / clear app)
-        if ImgSearchADB(img, os.path.join(IMG_DIR, "fixball.bmp"), threshold=0.8):
-            gui_log(device.serial, "⚠️ FIXBALL DETECTED! Clearing app and restarting from scratch...", status="stuck")
-            device.shell("am force-stop jp.konami.pesam")
-            DEVICE_RESET_FLAGS[device.serial] = True
-            raise DeviceResetException(f"Fixball detected for {device.serial}")
 
         # Global floating checks for download and fixgoogle
         dl_pts = ImgSearchADB(img, os.path.join(IMG_DIR, "download.bmp"))
@@ -1204,9 +1197,15 @@ def process_device(device):
                     p = ImgSearchADB(adb_img, os.path.join(IMG_DIR, "play21.bmp"))
                     if p:
                         x, y = p[0]
-                        gui_log(serial, f"Found play21.bmp at ({x}, {y})", step="Found Play21")
-                        device.shell(f"input swipe {x} {y} {x} {y} 100")
-                        time.sleep(5)
+                        gui_log(serial, f"Found play21.bmp at ({x}, {y}). Spamming until gone...", step="Spam Play21")
+                        while True:
+                            check_device_reset(serial, cycle_start)
+                            device.shell(f"input swipe {x} {y} {x} {y} 100")
+                            time.sleep(0.5)
+                            check_img = get_screen_capture(device)
+                            if check_img is not None and not ImgSearchADB(check_img, os.path.join(IMG_DIR, "play21.bmp")):
+                                break
+                        time.sleep(3)
                         break
             
             # ── Event Image Mode (EVENT_IMG) ──
