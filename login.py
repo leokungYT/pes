@@ -2872,6 +2872,18 @@ def process_device_login(device):
             release_file(original_name)
             gui_log(serial, f"❌ Error: {e}", status="stuck")
             time.sleep(5)
+        finally:
+            # Safe, non-disruptive memory optimization at the end of each account cycle
+            try:
+                device.shell("pm trim-caches 9999999999G")
+                device.shell("su -c 'sync && echo 3 > /proc/sys/vm/drop_caches'")
+            except Exception:
+                pass
+            try:
+                import gc
+                gc.collect()
+            except Exception:
+                pass
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Entry point
