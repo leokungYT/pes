@@ -11,12 +11,17 @@ EVENT_IMG = 0
 # ── Box Sequence (main-pes.py) ────────────────────
 # 1 = เปิดกล่อง (ทำ play26-play31 และ box1-box4)
 # 0 = ข้ามการเปิดกล่อง (จบที่ play25 แล้วส่งไฟล์เลย)
-DO_BOX = 0
+DO_BOX = 1
 
 # ── Gacha Sequence (login.py) ──────────────────────
 # 1 = สุ่มกาชา (ต่อจากจบ box4)
 # 0 = ไม่สุ่มกาชา (จบงานปกติ)
 DO_GACHA = 0
+
+# ── Gacha + Check Mode ──────────────────────────────
+# 1 = สุ่มกาชาเสร็จแล้วกด backhome ต่อด้วยค้นหาฮีโร่ทันที
+# 0 = ข้าม
+GACHA_CHECK = 1
 
 # รายชื่อนักเตะที่ต้องการเก็บ (Backup-id)
 HERO_LIST = [
@@ -36,7 +41,7 @@ LOGIN_SUCCESS_DIR = "login-success"
 # ── Find Hero Sequence ─────────────────────────────
 # 1 = ทำงาน fin1-fin8 และค้นหาฮีโร่ตามภาพ
 # 0 = ข้าม
-FIND_HERO = 1
+FIND_HERO = 0
 
 # แมพไฟล์ภาพฮีโร่เข้ากับชื่อฮีโร่
 HERO_IMG_MAP = {
@@ -132,10 +137,10 @@ CHECK_COIN = 0
 #     ข้ามไปหา next.bmp ต่อเลย
 #     ไฟล์จะเก็บในโฟลเดอร์ fast-random/ แทน backup-id/
 # 0 = ทำงานปกติ (สแกน OCR ที่ checkpointgacha)
-NOSCAN = 0
+NOSCAN = 1
 
 # ── Skip Animation (Gacha Free) ──────────────────
 # 1 = หลังกด gachafree2 จะกดตำแหน่ง [611,129] ซ้ำๆเร็วๆ
 #     จนกว่าจะเจอ skiphero.bmp แล้วคลิก → ไปหา next ต่อ
 # 0 = ทำงานปกติ (ไม่กดข้ามแอนิเมชั่น)
-SKIPANIMATION = 0
+SKIPANIMATION = 1

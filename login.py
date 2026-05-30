@@ -69,6 +69,10 @@ _gui_queue    = _queue_mod.Queue()   # thread-safe queue for all GUI updates
 # ── โหลด config จาก config.py ──────────────────────────────────────────────
 from config import EVENT_IMG, DO_BOX, DO_GACHA, HERO_LIST, IMG_DIR, INPUT_DIR, LOGIN_SUCCESS_DIR, FIND_HERO, HERO_IMG_MAP, GACHA_FREE, HERO_LIST_FREE, DEBUG_OCR, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION
 try:
+    from config import GACHA_CHECK
+except ImportError:
+    GACHA_CHECK = 0
+try:
     from config import list_find_hero
 except ImportError:
     list_find_hero = HERO_LIST
@@ -325,7 +329,7 @@ if GUI_ENABLED:
 
             win = ctk.CTkToplevel(self)
             win.title("⚙️ Config")
-            win.geometry("340x440")
+            win.geometry("340x480")
             win.resizable(False, False)
             win.grab_set()   # modal
 
@@ -413,9 +417,18 @@ if GUI_ENABLED:
             ctk.CTkSwitch(row8, text="", variable=var_skipanim,
                           onvalue=1, offvalue=0).pack(side="right")
 
+            # ── GACHA_CHECK toggle ─────────────────────────────
+            row9 = ctk.CTkFrame(win, fg_color="transparent")
+            row9.pack(fill="x", padx=20, pady=4)
+            ctk.CTkLabel(row9, text="Gachafree + check mode",
+                         font=ctk.CTkFont(size=12)).pack(side="left")
+            var_gacha_check = ctk.IntVar(value=getattr(cfg, 'GACHA_CHECK', 0))
+            ctk.CTkSwitch(row9, text="", variable=var_gacha_check,
+                          onvalue=1, offvalue=0).pack(side="right")
+
             # ── Save button ───────────────────────────────
             def _save():
-                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION
+                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK
                 new_event = var_event.get()
                 new_box   = var_box.get()
                 new_gacha = var_gacha.get()
@@ -424,6 +437,7 @@ if GUI_ENABLED:
                 new_ccoin = var_check_coin.get()
                 new_noscan = var_noscan.get()
                 new_skipanim = var_skipanim.get()
+                new_gacha_check = var_gacha_check.get()
                 try:
                     new_gfree_loops = int(entry_gfree_loops.get())
                 except ValueError:
@@ -470,6 +484,11 @@ if GUI_ENABLED:
                                      content, flags=re.MULTILINE)
                 else:
                     content += f"\nSKIPANIMATION = {new_skipanim}\n"
+                if re.search(r"^GACHA_CHECK\s*=\s*\d", content, flags=re.MULTILINE):
+                    content = re.sub(r"^GACHA_CHECK\s*=\s*\d", f"GACHA_CHECK = {new_gacha_check}",
+                                     content, flags=re.MULTILINE)
+                else:
+                    content += f"\nGACHA_CHECK = {new_gacha_check}\n"
                 with open(cfg_path, "w", encoding="utf-8") as f:
                     f.write(content)
                 # อัปเดต runtime ด้วย
@@ -481,10 +500,11 @@ if GUI_ENABLED:
                 GACHA_FREE_LOOPS = new_gfree_loops
                 CHECK_COIN = new_ccoin
                 NOSCAN     = new_noscan
+                GACHA_CHECK = new_gacha_check
                 importlib.reload(cfg)
                 label_status.configure(text=f"✅ Saved!",
                                        text_color="#4caf50")
-                self.log(f"Config saved: EVENT={new_event}, BOX={new_box}, GACHA={new_gacha}, HERO={new_find}, GFREE={new_gfree}({new_gfree_loops} loops), COIN={new_ccoin}, NOSCAN={new_noscan}")
+                self.log(f"Config saved: EVENT={new_event}, BOX={new_box}, GACHA={new_gacha}, HERO={new_find}, GFREE={new_gfree}({new_gfree_loops} loops), COIN={new_ccoin}, NOSCAN={new_noscan}, GACHACHECK={new_gacha_check}")
 
             ctk.CTkButton(win, text="💾 Save", fg_color="#2cc985",
                           hover_color="#229f69", command=_save).pack(pady=8)
@@ -1239,20 +1259,12 @@ def read_screen_text(img, region=None, serial="unknown"):
     """OCR Logic using EasyOCR (priority) or Pytesseract — Enhanced for max accuracy"""
     if img is None: return ""
     
-    # Crop region ก่อน lock (เบา) — .copy() ป้องกัน numpy view แชร์หน่วยความจำข้าม thread
+    # Crop region (numpy view copy to avoid sharing memory across threads)
     if region:
         img = img[region.y : region.y + region.h, region.x : region.x + region.w].copy()
     
-    # Lock ป้องกันหลาย thread สแกน OCR พร้อมกัน (ลด CPU spike)
-    # ใช้ timeout 30s ป้องกัน deadlock — ถ้ารอนานเกินข้ามไปเลย
-    acquired = ocr_lock.acquire(timeout=30)
-    if not acquired:
-        print(f"[OCR] [{serial}] WARNING: ocr_lock timeout (30s)! Skipping OCR.")
-        return ""
-    try:
-        return _read_screen_text_locked(img, serial)
-    finally:
-        ocr_lock.release()
+    # Run OCR concurrently in parallel at full performance without queue waiting
+    return _read_screen_text_locked(img, serial)
 
 def _read_screen_text_locked(img, serial):
     """Internal OCR — เรียกผ่าน read_screen_text เท่านั้น (มี lock แล้ว)"""
@@ -1275,7 +1287,13 @@ def _read_screen_text_locked(img, serial):
             print(f"[OCR] [{serial}] Attempting EasyOCR...")
             if _reader is None:
                 _reader = easyocr.Reader(['en'], gpu=False)
-            results = _reader.readtext(img, detail=0)
+            
+            # Apply bilateral filter to smooth card textures but keep text edges extremely sharp
+            cleaned_img = cv2.bilateralFilter(img, 9, 75, 75)
+            # Resize 2x using Cubic interpolation for cleaner character strokes
+            resized_easy = cv2.resize(cleaned_img, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
+            
+            results = _reader.readtext(resized_easy, detail=0)
             res = " ".join(results).strip()
             if res:
                 print(f"[OCR] [{serial}] EasyOCR Result: '{res}'")
@@ -1297,39 +1315,14 @@ def _read_screen_text_locked(img, serial):
             # ขยายภาพ 4 เท่าเพื่อให้ตัวหนังสือใหญ่ขึ้น (4x ดีกว่า 3x สำหรับตัวเล็ก)
             img_resized = cv2.resize(img_gray, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
             
-            # ── Method A: Adaptive Threshold (จัดการแสงไม่เท่ากันได้ดี) ──
-            img_blur_a = cv2.GaussianBlur(img_resized, (3, 3), 0)
-            img_adapt = cv2.adaptiveThreshold(
-                img_blur_a, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                cv2.THRESH_BINARY, 15, 4
-            )
-            # Morphological cleanup (ลบจุดเล็กๆ / noise)
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-            img_clean_a = cv2.morphologyEx(img_adapt, cv2.MORPH_CLOSE, kernel)
-            
-            # ── Method B: OTSU Threshold (ดีกับพื้นหลังสม่ำเสมอ) ──
-            img_blur_b = cv2.GaussianBlur(img_resized, (5, 5), 0)
-            _, img_otsu = cv2.threshold(img_blur_b, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            
-            # ── Method C: Fixed high threshold (เหมือนเดิม แต่ปรับค่า) ──
-            img_blur_c = cv2.GaussianBlur(img_resized, (3, 3), 0)
-            _, img_fixed = cv2.threshold(img_blur_c, 180, 255, cv2.THRESH_BINARY)
-            
-            # ── Debug: บันทึกภาพ preprocessed ทุก method ──
+            # ── Debug: บันทึกภาพ preprocessed ──
             if DEBUG_OCR == 1:
-                cv2.imwrite(os.path.join(debug_dir, f"{debug_name}_methodA.png"), img_clean_a)
-                cv2.imwrite(os.path.join(debug_dir, f"{debug_name}_methodB.png"), img_otsu)
-                cv2.imwrite(os.path.join(debug_dir, f"{debug_name}_methodC.png"), img_fixed)
+                cv2.imwrite(os.path.join(debug_dir, f"{debug_name}_methodRaw.png"), img_resized)
             
-            # ── ลองสแกนทุก method + ทุก PSM mode → เอาผลที่ยาวที่สุด (น่าจะถูกที่สุด) ──
-            best_result = ""
+            # ── สแกนโหมดเดียวเพื่อความรวดเร็ว ──
+            all_results = []
             configs = [
                 (img_resized, "--psm 7", "Raw-psm7"), # raw grayscale single line
-                (img_resized, "--psm 6", "Raw-psm6"), # raw grayscale block
-                (img_clean_a, "--psm 7", "A-psm7"),   # single line + adaptive
-                (img_clean_a, "--psm 6", "A-psm6"),   # block + adaptive
-                (img_otsu,    "--psm 7", "B-psm7"),   # single line + otsu
-                (img_fixed,   "--psm 7", "C-psm7"),   # single line + fixed
             ]
             
             for proc_img, psm, label in configs:
@@ -1340,14 +1333,14 @@ def _read_screen_text_locked(img, serial):
                 res = text.strip()
                 if res:
                     print(f"[OCR] {label}: '{res}'")
-                    if len(res) > len(best_result):
-                        best_result = res
+                    all_results.append(res)
             
-            if best_result:
-                print(f"[OCR] ★ Best Result: '{best_result}'")
+            combined_result = " | ".join(all_results)
+            if combined_result:
+                print(f"[OCR] ★ Combined Result: '{combined_result}'")
             else:
                 print(f"[OCR] Pytesseract returned EMPTY string (all methods)")
-            return best_result
+            return combined_result
         except Exception as e:
             print(f"[OCR] Pytesseract Error: {e}")
             pass
@@ -1709,48 +1702,52 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
     
     time.sleep(3) # Let screen settle
 
-    # 6. OCR Scanning (Lock 1 & Lock 2 with Robust Two-Pass Double Check)
+    # 6. OCR Scanning (Lock 1, Lock 2 & Lock 3 with Robust Two-Pass Double Check)
     found_heroes = []
     last_lock1_text = ""
     last_lock2_text = ""
+    last_lock3_text = ""
     target_list = list_find_hero if (list_find_hero and any(list_find_hero)) else HERO_LIST
     target_heroes = [h.strip() for h in target_list if h and h.strip()]
 
     for pass_num in range(1, 3):
         found_heroes.clear()
         
-        # Lock 1 Scanning
-        gui_log(serial, f"Scanning Lock 1 (Pass {pass_num})...", step="Scan Lock 1")
-        img1 = get_screen_capture(device)
-        if img1 is not None:
-            lock1_region = Region(58, 122, 351, 343)
-            lock1_text = read_screen_text(img1, region=lock1_region, serial=serial)
+        # Capture screen once for this pass (maximum speed, zero mismatch)
+        img = get_screen_capture(device)
+        if img is not None:
+            # Lock 1 Scanning
+            lock1_region = Region(154, 134, 679, 39)
+            lock1_text = read_screen_text(img, region=lock1_region, serial=serial)
             last_lock1_text = lock1_text if lock1_text else ""
             gui_log(serial, f"Lock 1 OCR: {lock1_text if lock1_text else '<EMPTY>'}", step="Scan Lock 1")
-            
             for h in target_heroes:
                 if is_hero_match(h, lock1_text):
                     if h not in found_heroes:
                         found_heroes.append(h)
                         gui_log(serial, f"Lock 1 Match: {h}", step=f"⭐ {h}")
 
-        # Delay to let Lock 2 fully load/animate
-        time.sleep(2.5)
-
-        # Lock 2 Scanning
-        gui_log(serial, f"Scanning Lock 2 (Pass {pass_num})...", step="Scan Lock 2")
-        img2 = get_screen_capture(device)
-        if img2 is not None:
-            lock2_region = Region(503, 116, 341, 338)
-            lock2_text = read_screen_text(img2, region=lock2_region, serial=serial)
+            # Lock 2 Scanning
+            lock2_region = Region(156, 249, 646, 34)
+            lock2_text = read_screen_text(img, region=lock2_region, serial=serial)
             last_lock2_text = lock2_text if lock2_text else ""
             gui_log(serial, f"Lock 2 OCR: {lock2_text if lock2_text else '<EMPTY>'}", step="Scan Lock 2")
-            
             for h in target_heroes:
                 if is_hero_match(h, lock2_text):
                     if h not in found_heroes:
                         found_heroes.append(h)
                         gui_log(serial, f"Lock 2 Match: {h}", step=f"⭐ {h}")
+
+            # Lock 3 Scanning
+            lock3_region = Region(157, 360, 658, 34)
+            lock3_text = read_screen_text(img, region=lock3_region, serial=serial)
+            last_lock3_text = lock3_text if lock3_text else ""
+            gui_log(serial, f"Lock 3 OCR: {lock3_text if lock3_text else '<EMPTY>'}", step="Scan Lock 3")
+            for h in target_heroes:
+                if is_hero_match(h, lock3_text):
+                    if h not in found_heroes:
+                        found_heroes.append(h)
+                        gui_log(serial, f"Lock 3 Match: {h}", step=f"⭐ {h}")
         
         # If at least one hero matched, exit scanning successfully!
         if found_heroes:
@@ -1786,16 +1783,20 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
     else:
         l1_lower = last_lock1_text.lower()
         l2_lower = last_lock2_text.lower()
+        l3_lower = last_lock3_text.lower()
         
         is_empty_state = (
             "n 'chang trv" in l1_lower or 
             "found ter conditions" in l2_lower or
             "no matching" in l1_lower or
             "no matching" in l2_lower or
+            "no matching" in l3_lower or
             "filter conditions" in l1_lower or
             "filter conditions" in l2_lower or
+            "filter conditions" in l3_lower or
             "conditions" in l1_lower or
-            "conditions" in l2_lower
+            "conditions" in l2_lower or
+            "conditions" in l3_lower
         )
         
         if is_empty_state:
@@ -2205,6 +2206,44 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                 time.sleep(0.3)
 
     # 3. จบตามลูปที่ตั้งค่า → Sort file
+    if GACHA_CHECK == 1:
+        gui_log(serial, "GachaFree finished. Gacha+Check mode active: waiting for backhome...", step="GachaFree Done")
+        
+        # 1. Wait for backhome.bmp indefinitely
+        clicked_home = False
+        while True:
+            check_device_reset(serial, cycle_start)
+            img = get_screen_capture(device)
+            if img is not None:
+                pts_home = img_search(img, os.path.join(IMG_DIR, "backhome.bmp"))
+                if pts_home:
+                    x, y = pts_home[0]
+                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                    gui_log(serial, f"Clicked backhome.bmp at ({x}, {y})!", step="Back Home Click")
+                    clicked_home = True
+                    time.sleep(4)
+                    break
+            time.sleep(1)
+        
+        if clicked_home:
+            # 1b. Wait for backhome1.bmp indefinitely
+            gui_log(serial, "Waiting for backhome1.bmp...", step="Back Home 1 Wait")
+            while True:
+                check_device_reset(serial, cycle_start)
+                img = get_screen_capture(device)
+                if img is not None:
+                    pts_home1 = img_search(img, os.path.join(IMG_DIR, "backhome1.bmp"))
+                    if pts_home1:
+                        x, y = pts_home1[0]
+                        device.shell(f"input swipe {x} {y} {x} {y} 100")
+                        gui_log(serial, f"Clicked backhome1.bmp at ({x}, {y})!", step="Back Home 1 Click")
+                        time.sleep(4)
+                        break
+                time.sleep(1)
+        
+        # 2. Run Find Hero sequence continuously!
+        return find_hero_mode(device, cycle_start, serial, original_name, file_path)
+
     device.shell("am force-stop jp.konami.pesam")
     time.sleep(1)
 
@@ -2649,12 +2688,12 @@ def process_device_login(device):
                     continue  # Start next file immediately
 
             # 7.5 Find Hero Sequence (Optional)
-            if FIND_HERO == 1:
+            if FIND_HERO == 1 and GACHA_CHECK != 1:
                 if find_hero_mode(device, cycle_start, serial, original_name, file_path):
                     continue  # Start next file immediately
 
             # 7.6 Gacha Free Sequence (Optional)
-            if GACHA_FREE == 1:
+            if GACHA_FREE == 1 or GACHA_CHECK == 1:
                 if gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                     continue  # Start next file immediately
 

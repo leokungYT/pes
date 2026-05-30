@@ -734,7 +734,13 @@ def read_screen_text(img, region=None, serial="unknown"):
             try:
                 if _reader is None:
                     _reader = easyocr.Reader(['en'], gpu=False)
-                results = _reader.readtext(img, detail=0)
+                
+                # Apply bilateral filter to smooth card textures but keep text edges extremely sharp
+                cleaned_img = cv2.bilateralFilter(img, 9, 75, 75)
+                # Resize 2x using Cubic interpolation for cleaner character strokes
+                resized_easy = cv2.resize(cleaned_img, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
+                
+                results = _reader.readtext(resized_easy, detail=0)
                 res = " ".join(results).strip()
                 if res:
                     print(f"[OCR] EasyOCR: '{res}'")
