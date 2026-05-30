@@ -1194,9 +1194,24 @@ def get_screen_capture(device):
 
 def load_template(path):
     if path not in IMAGE_CACHE:
-        t = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
-        if t is not None:
-            IMAGE_CACHE[path] = t
+        if os.path.exists(path):
+            t = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+            if t is not None:
+                IMAGE_CACHE[path] = t
+                return t
+        
+        # Try alternate extension (.bmp <-> .png) if not found
+        base, ext = os.path.splitext(path)
+        alt_exts = [".bmp", ".png"]
+        alt_exts = [e for e in alt_exts if e.lower() != ext.lower()]
+        for alt in alt_exts:
+            alt_path = base + alt
+            if os.path.exists(alt_path):
+                t = cv2.imread(alt_path, cv2.IMREAD_GRAYSCALE)
+                if t is not None:
+                    IMAGE_CACHE[path] = t
+                    return t
+                    
     return IMAGE_CACHE.get(path)
 
 def img_search(gray_img, find_path, threshold=0.8):
@@ -1309,6 +1324,8 @@ def _read_screen_text_locked(img, serial):
             # ── ลองสแกนทุก method + ทุก PSM mode → เอาผลที่ยาวที่สุด (น่าจะถูกที่สุด) ──
             best_result = ""
             configs = [
+                (img_resized, "--psm 7", "Raw-psm7"), # raw grayscale single line
+                (img_resized, "--psm 6", "Raw-psm6"), # raw grayscale block
                 (img_clean_a, "--psm 7", "A-psm7"),   # single line + adaptive
                 (img_clean_a, "--psm 6", "A-psm6"),   # block + adaptive
                 (img_otsu,    "--psm 7", "B-psm7"),   # single line + otsu
@@ -1325,10 +1342,6 @@ def _read_screen_text_locked(img, serial):
                     print(f"[OCR] {label}: '{res}'")
                     if len(res) > len(best_result):
                         best_result = res
-                    # Early exit: ได้ผลยาวพอแล้ว ไม่ต้องลอง method ถัดไป (ประหยัด CPU)
-                    if len(best_result) >= 3:
-                        print(f"[OCR] ★ Early exit with: '{best_result}'")
-                        return best_result
             
             if best_result:
                 print(f"[OCR] ★ Best Result: '{best_result}'")
@@ -1505,102 +1518,178 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
     """
     gui_log(serial, "Find Hero sequence started...", step="Find Hero", status="working")
     
-    # 1. fin1 -> fin3 navigation (Click and wait 3s, retry if still visible until next fin is found)
-    for i in [1, 2, 3]:
-        name_curr = f"fin{i}.bmp"
-        name_next = f"fin{i+1}.bmp"
+    # 1. fin1 -> fin2 -> fin3 -> fin4 -> fin5 -> fin6 -> fin7 -> fin8 -> fin9 navigation
+    nav_steps = [
+        ("fin1.bmp", "fin2.bmp"),
+        ("fin2.bmp", "fin3.bmp"),
+        ("fin3.bmp", "fin4.bmp"),
+        ("fin4.bmp", "fin5.bmp"),
+        ("fin5.bmp", "fin6.bmp"),
+        ("fin6.bmp", "fin7.bmp"),
+        ("fin7.bmp", "fin8.bmp"),
+        ("fin8.bmp", "fin9.bmp"),
+    ]
+    for name_curr, name_next in nav_steps:
         gui_log(serial, f"Waiting for {name_curr}...", step=f"{name_curr} Waiting")
         deadline = time.time() + 30
         while time.time() < deadline:
             check_device_reset(serial, cycle_start)
             img = get_screen_capture(device)
             if img is not None:
-                # Check if the next button is already visible (meaning transition succeeded)
                 if img_search(img, os.path.join(IMG_DIR, name_next)):
                     gui_log(serial, f"{name_next} detected! Proceeding to next step.", step=f"{name_next} Seen")
                     break
-                
-                # If next button is not visible, look for the current button to click
                 pts = img_search(img, os.path.join(IMG_DIR, name_curr))
                 if pts:
                     x, y = pts[0]
                     device.shell(f"input swipe {x} {y} {x} {y} 100")
                     gui_log(serial, f"Clicked {name_curr}", step=f"{name_curr} Click")
-                    time.sleep(3.0)  # หน่วงเวลา 3 วินาทีเพื่อให้จอนิ่งและเปลี่ยนเสร็จ
+                    time.sleep(3.0)
                     continue
             time.sleep(0.5)
 
-    # 1c. Wait and click fin4.bmp once
-    gui_log(serial, "Waiting fin4.bmp...", step="fin4")
-    deadline_fin4 = time.time() + 15
-    while time.time() < deadline_fin4:
+    # 2. Wait, click, and verify fin9.bmp
+    gui_log(serial, "Waiting fin9.bmp...", step="fin9 Wait")
+    deadline_fin9 = time.time() + 45
+    fin9_verified = False
+    while time.time() < deadline_fin9:
         check_device_reset(serial, cycle_start)
         img = get_screen_capture(device)
         if img is not None:
-            pts4 = img_search(img, os.path.join(IMG_DIR, "fin4.bmp"))
-            if pts4:
-                x, y = pts4[0]
-                device.shell(f"input swipe {x} {y} {x} {y} 100")
-                gui_log(serial, "Clicked fin4.bmp", step="fin4 Click")
-                time.sleep(2.5)
+            # Check if verify.png is already visible on screen
+            if img_search(img, os.path.join(IMG_DIR, "verify.png"), threshold=0.9):
+                gui_log(serial, "verify.png detected! Proceeding to swipe...", step="fin9 Verified")
+                fin9_verified = True
                 break
+            
+            # Find and click fin9.bmp
+            pts9 = img_search(img, os.path.join(IMG_DIR, "fin9.bmp"))
+            if pts9:
+                x, y = pts9[0]
+                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                gui_log(serial, "Clicked fin9.bmp", step="fin9 Click")
+                time.sleep(3.0)  # รอให้หน้าจอเปลี่ยน/แสดง verify.png
+                
+                # Check immediately after click
+                img_after = get_screen_capture(device)
+                if img_after is not None:
+                    if img_search(img_after, os.path.join(IMG_DIR, "verify.png"), threshold=0.9):
+                        gui_log(serial, "verify.png detected after click! Proceeding...", step="fin9 Verified")
+                        fin9_verified = True
+                        break
         time.sleep(0.5)
 
-    # 2. Swipe down for fin5
-    gui_log(serial, "Swiping down for fin5...", step="Swipe fin5")
-    found_fin5 = False
-    for swipe_count in range(20):
+    # 3. Swipe coordinate 529 360 536 161 (scroll down)
+    gui_log(serial, "Swiping at 529 360 536 161...", step="Swipe 529 360")
+    device.shell("input swipe 529 360 536 161 2000")
+    
+    # 4. Wait 10s then click Position 1 (329, 274) with verification (requires at least 2 verify icons)
+    gui_log(serial, "Sleeping 10s after swipe...", step="Sleep Post-Swipe")
+    time.sleep(10.0)
+    
+    while True:
         check_device_reset(serial, cycle_start)
-        img = get_screen_capture(device)
-        if img is not None:
-            pts = img_search(img, os.path.join(IMG_DIR, "fin5.bmp"))
-            if pts:
-                x, y = pts[0]
-                device.shell(f"input swipe {x} {y} {x} {y} 100")
-                gui_log(serial, "Found fin5.bmp!", step="fin5")
-                time.sleep(2.5)
-                found_fin5 = True
-                break
-        device.shell("input swipe 91 306 91 131 4000")
-        time.sleep(2.0)
-
-    # 3. Wait for fin6 and click continuously until not found for 5s
-    gui_log(serial, "Waiting for and clicking fin6...", step="fin6")
-    last_seen = time.time()
-    while time.time() - last_seen < 5:
-        check_device_reset(serial, cycle_start)
-        img = get_screen_capture(device)
-        if img is not None:
-            pts = img_search(img, os.path.join(IMG_DIR, "fin6.bmp"))
-            if pts:
-                x, y = pts[0]
-                device.shell(f"input swipe {x} {y} {x} {y} 100")
-                gui_log(serial, "Clicked fin6.bmp", step="fin6")
-                time.sleep(1.5)
-                last_seen = time.time()
-                continue
-        time.sleep(0.5)
-    gui_log(serial, "fin6 not found for 5s, proceeding...", step="fin6-done")
-
-    # 4. Wait and click fin7 -> fin8
-    for i in [7, 8]:
-        name = f"fin{i}.bmp"
-        gui_log(serial, f"Waiting {name}...", step=name)
-        deadline = time.time() + 15
-        while time.time() < deadline:
+        gui_log(serial, "Clicking Position 1 (329, 274)...", step="Click Pos1")
+        device.shell("input swipe 329 274 329 274 100")
+        
+        # Search for 5s to find at least 2 verify icons on screen
+        deadline_pos1 = time.time() + 5.0
+        verified_pos1 = False
+        while time.time() < deadline_pos1:
             check_device_reset(serial, cycle_start)
             img = get_screen_capture(device)
             if img is not None:
-                thresh = 0.95 if i == 8 else 0.8
-                pts = img_search(img, os.path.join(IMG_DIR, name), threshold=thresh)
-                if pts:
-                    x, y = pts[0]
-                    device.shell(f"input swipe {x} {y} {x} {y} 100")
-                    time.sleep(2.5)
+                pts_v = img_search(img, os.path.join(IMG_DIR, "verify.png"), threshold=0.9)
+                if len(pts_v) >= 2:
+                    gui_log(serial, f"Detected {len(pts_v)} verify icons (>= 2)! Position 1 Verified.", step="Pos1 Verified")
+                    verified_pos1 = True
                     break
             time.sleep(0.5)
+            
+        if verified_pos1:
+            break
+        else:
+            gui_log(serial, "Failed to find 2 verify icons in 5s! Retrying click on Position 1...", step="Pos1 Retry")
 
-    # 5. Wait for checkpointfind
+    time.sleep(2.5)
+
+    # 4b. Click Position 2 (319, 338) with verification (requires at least 3 verify icons)
+    while True:
+        check_device_reset(serial, cycle_start)
+        gui_log(serial, "Clicking Position 2 (319, 338)...", step="Click Pos2")
+        device.shell("input swipe 319 338 319 338 100")
+        
+        # Search for 5s to find at least 3 verify icons on screen
+        deadline_pos2 = time.time() + 5.0
+        verified_pos2 = False
+        while time.time() < deadline_pos2:
+            check_device_reset(serial, cycle_start)
+            img = get_screen_capture(device)
+            if img is not None:
+                pts_v = img_search(img, os.path.join(IMG_DIR, "verify.png"), threshold=0.9)
+                if len(pts_v) >= 3:
+                    gui_log(serial, f"Detected {len(pts_v)} verify icons (>= 3)! Position 2 Verified.", step="Pos2 Verified")
+                    verified_pos2 = True
+                    break
+            time.sleep(0.5)
+            
+        if verified_pos2:
+            break
+        else:
+            gui_log(serial, "Failed to find 3 verify icons in 5s! Retrying click on Position 2...", step="Pos2 Retry")
+
+    time.sleep(3.0)  # รอหน้าจอเปลี่ยนเสร็จ
+
+
+    # 5b. Wait and click fin13.bmp with stuck protection (click once, then retry if still on screen for 10s)
+    gui_log(serial, "Waiting for fin13.bmp...", step="fin13 Wait")
+    deadline_fin13 = time.time() + 45
+    clicked_fin13 = False
+    while time.time() < deadline_fin13:
+        check_device_reset(serial, cycle_start)
+        img = get_screen_capture(device)
+        if img is not None:
+            pts13 = img_search(img, os.path.join(IMG_DIR, "fin13.bmp"), threshold=0.95)
+            if pts13:
+                x, y = pts13[0]
+                gui_log(serial, f"Found fin13.bmp! Performing normal click at ({x}, {y})...", step="fin13 First Click")
+                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                time.sleep(2.5)  # รอระยะนิ่งเปลี่ยนหน้าจอ
+                
+                # ตรวจเช็คต่อไปว่า fin13 ค้างอยู่บนหน้าจอครบ 10 วินาทีหรือไม่
+                stuck_start = time.time()
+                while True:
+                    check_device_reset(serial, cycle_start)
+                    img_check = get_screen_capture(device)
+                    if img_check is None:
+                        time.sleep(0.5)
+                        continue
+                    
+                    pts_check = img_search(img_check, os.path.join(IMG_DIR, "fin13.bmp"), threshold=0.95)
+                    if not pts_check:
+                        # fin13 หายไปแล้วสำเร็จ!
+                        gui_log(serial, "fin13.bmp disappeared successfully!", step="fin13 Gone")
+                        break
+                    
+                    # ถ้ายังเจอค้างอยู่บนจอ
+                    x_sk, y_sk = pts_check[0] # อัปเดตพิกัดเผื่อปุ่มเลื่อน
+                    elapsed = time.time() - stuck_start
+                    if elapsed >= 10.0:
+                        # ค้างครบ 10 วินาที ค่อยกดซ้ำอีกรอบ!
+                        gui_log(serial, f"fin13.bmp stuck for {elapsed:.1f}s! Clicking again...", step="fin13 Stuck Retry")
+                        device.shell(f"input swipe {x_sk} {y_sk} {x_sk} {y_sk} 100")
+                        stuck_start = time.time()  # รีเซ็ตเวลาเริ่มต้นค้างใหม่เพื่อเฝ้ารออีก
+                    
+                    time.sleep(0.5)
+                
+                clicked_fin13 = True
+                break
+        time.sleep(0.5)
+
+    if not clicked_fin13:
+        gui_log(serial, "fin13.bmp not clicked (timeout), proceeding anyway...", step="fin13 Skip")
+
+    # 6. Wait for checkpointfind (OCR Screen)
     gui_log(serial, "Waiting checkpointfind.bmp...", step="checkpointfind")
     deadline_cp = time.time() + 45
     found_cp = False

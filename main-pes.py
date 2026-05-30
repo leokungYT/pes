@@ -630,9 +630,24 @@ def get_screen_capture(device):
 
 def load_template(find_img_path):
     if find_img_path not in IMAGE_CACHE:
-        template = cv2.imread(find_img_path, cv2.IMREAD_GRAYSCALE)
-        if template is not None:
-            IMAGE_CACHE[find_img_path] = template
+        if os.path.exists(find_img_path):
+            template = cv2.imread(find_img_path, cv2.IMREAD_GRAYSCALE)
+            if template is not None:
+                IMAGE_CACHE[find_img_path] = template
+                return template
+        
+        # Try alternate extension (.bmp <-> .png) if not found
+        base, ext = os.path.splitext(find_img_path)
+        alt_exts = [".bmp", ".png"]
+        alt_exts = [e for e in alt_exts if e.lower() != ext.lower()]
+        for alt in alt_exts:
+            alt_path = base + alt
+            if os.path.exists(alt_path):
+                template = cv2.imread(alt_path, cv2.IMREAD_GRAYSCALE)
+                if template is not None:
+                    IMAGE_CACHE[find_img_path] = template
+                    return template
+                    
     return IMAGE_CACHE.get(find_img_path)
 
 def ImgSearchADB(adb_img, find_img_path, threshold=0.8):
