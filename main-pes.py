@@ -9,7 +9,7 @@ try:
     import torch
     torch.set_num_threads(1)
     torch.set_num_interop_threads(1)
-except ImportError:
+except (ImportError, AttributeError):
     pass
 
 import cv2
@@ -172,12 +172,12 @@ if GUI_ENABLED:
 
             win = ctk.CTkToplevel(self)
             win.title("⚙️ Config (config_gen.py)")
-            win.geometry("450x550")
+            win.geometry("450x580")
             win.resizable(False, False)
             win.grab_set()
 
             ctk.CTkLabel(win, text="Bot Settings (config_gen.py)",
-                         font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(15, 10))
+                          font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(15, 10))
 
             # Scrollable frame for forms
             form_frame = ctk.CTkFrame(win, fg_color="transparent")
@@ -226,6 +226,13 @@ if GUI_ENABLED:
             var_noscan = ctk.IntVar(value=cfg.NOSCAN)
             ctk.CTkSwitch(row_noscan, text="", variable=var_noscan, onvalue=1, offvalue=0).pack(side="right")
 
+            # 5.5 SKIPANIMATION Switch
+            row_skipanim = ctk.CTkFrame(form_frame, fg_color="transparent")
+            row_skipanim.pack(fill="x", pady=4)
+            ctk.CTkLabel(row_skipanim, text="Skip Animation (กด [611,129] ข้ามสปิน)", font=ctk.CTkFont(size=12)).pack(side="left")
+            var_skipanim = ctk.IntVar(value=getattr(cfg, 'SKIPANIMATION', 0))
+            ctk.CTkSwitch(row_skipanim, text="", variable=var_skipanim, onvalue=1, offvalue=0).pack(side="right")
+
             # 6. HERO_LIST_FREE Textarea
             ctk.CTkLabel(form_frame, text="Hero Target List (รายชื่อนักเตะ - บรรทัดละคน):", font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10, 2))
             txt_heroes = ctk.CTkTextbox(form_frame, height=180, font=ctk.CTkFont(family="Consolas", size=11))
@@ -236,7 +243,7 @@ if GUI_ENABLED:
             txt_heroes.insert("1.0", current_heroes)
 
             def _save():
-                global DO_BOX, GACHA_FREE, GACHA_FREE_LOOPS, HERO_LIST_FREE, DEBUG_OCR, EVENT_IMG, NOSCAN
+                global DO_BOX, GACHA_FREE, GACHA_FREE_LOOPS, HERO_LIST_FREE, DEBUG_OCR, EVENT_IMG, NOSCAN, SKIPANIMATION
                 
                 val_event = var_event.get()
                 val_box = var_box.get()
@@ -249,6 +256,7 @@ if GUI_ENABLED:
                     
                 val_debug = var_debug.get()
                 val_noscan = var_noscan.get()
+                val_skipanim = var_skipanim.get()
                 
                 # Parse heroes
                 raw_heroes = txt_heroes.get("1.0", "end").strip()
@@ -300,6 +308,12 @@ DEBUG_OCR = {val_debug}
 #     ไฟล์จะเก็บในโฟลเดอร์ fast-random/ แทน backup-id/
 # 0 = ทำงานปกติ (สแกน OCR ที่ checkpointgacha)
 NOSCAN = {val_noscan}
+
+# ── Skip Animation (Gacha Free) ──────────────────
+# 1 = หลังกด gachafree2 จะกดตำแหน่ง [611,129] ซ้ำๆเร็วๆ
+#     จนกว่าจะเจอ skiphero.bmp แล้วคลิก → ไปหา next ต่อ
+# 0 = ทำงานปกติ (ไม่กดข้ามแอนิเมชั่น)
+SKIPANIMATION = {val_skipanim}
 """
                 try:
                     with open(cfg_path, "w", encoding="utf-8") as f:
@@ -313,10 +327,11 @@ NOSCAN = {val_noscan}
                     HERO_LIST_FREE = parsed_heroes
                     DEBUG_OCR = val_debug
                     NOSCAN = val_noscan
+                    SKIPANIMATION = val_skipanim
                     
                     importlib.reload(cfg)
                     label_status.configure(text="✅ Saved settings successfully!", text_color="#2cc985")
-                    self.log(f"Config updated: EVENT={val_event}, BOX={val_box}, FREE={val_free}, LOOPS={val_loops}, NOSCAN={val_noscan}, HEROES={len(parsed_heroes)}")
+                    self.log(f"Config updated: EVENT={val_event}, BOX={val_box}, FREE={val_free}, LOOPS={val_loops}, NOSCAN={val_noscan}, SKIP={val_skipanim}, HEROES={len(parsed_heroes)}")
                 except Exception as ex:
                     label_status.configure(text=f"❌ Save error: {ex}", text_color="#ff5555")
 
@@ -427,7 +442,7 @@ def gui_log(serial, msg, step=None, status=None):
     update_gui(serial, log=msg, step=step, status=status)
 
 # --- Configuration ---
-from config_gen import DO_BOX, IMG_DIR, GACHA_FREE, GACHA_FREE_LOOPS, HERO_LIST_FREE, DEBUG_OCR, EVENT_IMG, NOSCAN
+from config_gen import DO_BOX, IMG_DIR, GACHA_FREE, GACHA_FREE_LOOPS, HERO_LIST_FREE, DEBUG_OCR, EVENT_IMG, NOSCAN, SKIPANIMATION
 IMAGE_CACHE = {}
 
 BACKUP_ID_DIR = "backup-id"
@@ -443,6 +458,8 @@ except ImportError:
     easyocr = None
 try:
     import pytesseract
+    if os.path.exists(r"C:\Program Files\Tesseract-OCR\tesseract.exe"):
+        pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 except ImportError:
     pytesseract = None
 
@@ -660,6 +677,31 @@ def ImgSearchADB(adb_img, find_img_path, threshold=0.8):
     except Exception as e:
         print(f"Error in ImgSearchADB: {e}")
         return []
+def run_back_spam_recovery(device, serial, cycle_start):
+    gui_log(serial, "Running recovery: spamming Back until cancel.bmp...", step="Recovery Back")
+    cancel_clicked = False
+    spam_count = 0
+    while not cancel_clicked:
+        check_device_reset(serial, cycle_start)
+        spam_count += 1
+        if spam_count > 20:   # ป้องกันหลุดค้าง
+            gui_log(serial, "Recovery timeout: cancel.bmp not found in 20 taps.", step="Recov Timeout")
+            break
+        # Press back key
+        device.shell("input keyevent 4")
+        time.sleep(1.5)
+        
+        # Capture and check for cancel.bmp
+        adb_img = get_screen_capture(device)
+        if adb_img is not None:
+            pts_cancel = ImgSearchADB(adb_img, os.path.join(IMG_DIR, "cancel.bmp"))
+            if pts_cancel:
+                x_c, y_c = pts_cancel[0]
+                gui_log(serial, f"cancel.bmp found! Clicking at ({x_c}, {y_c})...", step="Click Cancel")
+                device.shell(f"input swipe {x_c} {y_c} {x_c} {y_c} 100")
+                time.sleep(5)
+                cancel_clicked = True
+                break
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # OCR Helper
@@ -891,6 +933,59 @@ def gacha_free_mode_mainpes(device, cycle_start, serial):
         if not clicked_gf2:
             gui_log(serial, f"[Loop {loop_num}] gachafree2 not found, skipping loop", step="Error")
             continue
+
+        # ── SKIPANIMATION mode: กด [611,129] ซ้ำๆเร็วๆ จนเจอ skiphero → คลิก → ไปหา next ──
+        if SKIPANIMATION == 1:
+            gui_log(serial, f"[Loop {loop_num}] SKIPANIMATION=1 → Tapping (611,129) super-rapidly in background...", step="Skip Anim")
+            
+            # เปิดเธรดกดพิกัดรัวฝั่งเบื้องหลัง (Background Thread) เพื่อรันการกดรัวแบบคู่ขนาน ไม่บล็อกการแคปหน้าจอ
+            tapping_active = [True]
+            
+            def tap_worker():
+                # รันคำสั่งกดรัว 50 ครั้งต่อคำสั่ง คู่วิธี Loop รวม 25 รอบ (ทั้งหมด 1,250 ครั้ง)
+                for _ in range(25):
+                    if not tapping_active[0]:
+                        break
+                    device.shell("for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50; do input tap 611 129; done")
+
+            t_tap = threading.Thread(target=tap_worker, daemon=True)
+            t_tap.start()
+            
+            skip_deadline = time.time() + 30  # timeout 30s กันค้าง
+            skiphero_found = False
+            while time.time() < skip_deadline:
+                check_device_reset(serial, cycle_start)
+                # ดึงภาพหน้าจอดิบผ่าน fast_screencap โดยตรง ไม่ผ่านระบบตรวจสอบลอยตัว/อัปเดต GUI เพื่อความเร็วระดับสูงสุด
+                img_skip = fast_screencap(device)
+                if img_skip is not None:
+                    pts_skip = ImgSearchADB(img_skip, os.path.join(IMG_DIR, "skiphero.bmp"))
+                    if pts_skip:
+                        tapping_active[0] = False  # สั่งหยุดยิงทันที
+                        x_sk, y_sk = pts_skip[0]
+                        gui_log(serial, f"[Loop {loop_num}] skiphero.bmp found! Clicking ({x_sk},{y_sk}) repeatedly until gone...", step="Skip Hero")
+                        
+                        # วนลูปกดซ้ำๆ จนกว่าจะหายไปเลย
+                        while True:
+                            check_device_reset(serial, cycle_start)
+                            device.shell(f"input swipe {x_sk} {y_sk} {x_sk} {y_sk} 100")
+                            time.sleep(0.2)
+                            img_check = fast_screencap(device)
+                            if img_check is None:
+                                continue
+                            pts_check = ImgSearchADB(img_check, os.path.join(IMG_DIR, "skiphero.bmp"))
+                            if not pts_check:
+                                gui_log(serial, f"[Loop {loop_num}] skiphero.bmp disappeared!", step="Skip Hero Gone")
+                                break
+                            else:
+                                x_sk, y_sk = pts_check[0]  # อัปเดตพิกัด
+                        
+                        skiphero_found = True
+                        break
+                time.sleep(0.01)
+            
+            tapping_active[0] = False
+            if not skiphero_found:
+                gui_log(serial, f"[Loop {loop_num}] skiphero.bmp not found in 30s, proceeding...", step="Skip Timeout")
 
         # ── NOSCAN mode: skip checkpointgacha → jump to next ──
         if NOSCAN == 1:
@@ -1189,8 +1284,12 @@ def process_device(device):
 
             # Spam (815, 355) จนเจอ play21 (ไม่รอ 20 วิ กดรัวๆ เลย)
             gui_log(serial, "Searching for play21.bmp via (815, 355)...", step="Transition")
+            spam_count_p21 = 0
             while True:
                 check_device_reset(serial, cycle_start)
+                spam_count_p21 += 1
+                if spam_count_p21 % 15 == 0:
+                    gui_log(serial, f"Still searching for play21.bmp... (Spammed 815,355 x{spam_count_p21})", step="Search Play21")
                 device.shell("input swipe 815 355 815 355 100")
                 adb_img = get_screen_capture(device)
                 if adb_img is not None:
@@ -1213,6 +1312,7 @@ def process_device(device):
                 gui_log(serial, "Event Image Mode = 0 (No Event). Waiting for play22.bmp...", step="No Event")
                 
                 # 1. Wait for play22.bmp
+                spam_count_p22 = 0
                 while True:
                     check_device_reset(serial, cycle_start)
                     adb_img = get_screen_capture(device)
@@ -1221,6 +1321,9 @@ def process_device(device):
                             gui_log(serial, "play22.bmp detected! Starting Back spam...", step="Spamming Back")
                             break
                     # Spam click 815 355 to get to play22 screen if needed
+                    spam_count_p22 += 1
+                    if spam_count_p22 % 10 == 0:
+                        gui_log(serial, f"Still waiting for play22.bmp... (Spammed 815,355 x{spam_count_p22})", step="Wait Play22")
                     device.shell("input swipe 815 355 815 355 100")
                     time.sleep(1)
 
@@ -1250,6 +1353,7 @@ def process_device(device):
                 for img_name in seq_ext:
                     if img_name == "play22.bmp":
                         gui_log(serial, "Clicking 815 355 until play22/play23...", step="Loop play22")
+                        spam_count_p22_event = 0
                         while True:
                             check_device_reset(serial, cycle_start)
                             adb_img = get_screen_capture(device)
@@ -1265,14 +1369,21 @@ def process_device(device):
                                     time.sleep(3)
                                 else:
                                     # Not found play22 or play23, spam click 815 355
+                                    spam_count_p22_event += 1
+                                    if spam_count_p22_event % 15 == 0:
+                                        gui_log(serial, f"Still waiting for play22/play23... (Spammed 815,355 x{spam_count_p22_event})", step="Wait Play22")
                                     device.shell("input swipe 815 355 815 355 100")
                                     time.sleep(0.5)
-                            time.sleep(0.01)
+                            time.sleep(0.05)   # Optimized sleep from 0.01 to 0.05 to save host CPU
                         continue
 
                     gui_log(serial, f"Waiting for {img_name}...", step=f"Wait {img_name}")
+                    wait_count = 0
                     while True:
                         check_device_reset(serial, cycle_start)
+                        wait_count += 1
+                        if wait_count % 300 == 0:
+                            gui_log(serial, f"Still waiting for {img_name}... ({wait_count // 20}s elapsed)", step=f"Wait {img_name}")
                         adb_img = get_screen_capture(device)
                         if adb_img is not None:
                             p = ImgSearchADB(adb_img, os.path.join(IMG_DIR, img_name))
@@ -1282,31 +1393,39 @@ def process_device(device):
                                 device.shell(f"input swipe {x} {y} {x} {y} 100")
                                 time.sleep(5)
                                 break
-                        time.sleep(0.01)
+                        time.sleep(0.05)   # Optimized sleep from 0.01 to 0.05 to save host CPU
 
                 # ── Box Sequence (เอาระบบในไฟล์ login.py มาทดแทนทั้งหมด) ──
                 if DO_BOX == 1:
                     gui_log(serial, "Box sequence started...", step="Box Mode", status="working")
+                    
+                    # play26 - play31 (リードアップ) - ทำเพียงครั้งเดียวตอนเริ่มขั้นตอนกล่อง
+                    found_any_play = False
+                    for i in range(26, 32):
+                        name = f"play{i}.bmp"
+                        gui_log(serial, f"Waiting {name} (Box path)...", step=name)
+                        deadline = time.time() + 4
+                        while time.time() < deadline:
+                            check_device_reset(serial, cycle_start)
+                            adb_img = get_screen_capture(device)
+                            if adb_img is not None:
+                                pts = ImgSearchADB(adb_img, os.path.join(IMG_DIR, name))
+                                if pts:
+                                    x, y = pts[0]
+                                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                    found_any_play = True
+                                    time.sleep(2.5)
+                                    break
+                            time.sleep(0.5)
+                    
+                    # ถ้าระหว่างทางหา play26 - play31 ไม่เจอเลยสักตัว ให้ทำระบบ Recovery: กด Back รัวๆ จนเจอ cancel.bmp
+                    if not found_any_play:
+                        run_back_spam_recovery(device, serial, cycle_start)
+                    
+                    # วนหา box1 และ box2
                     box2_found = False
                     while not box2_found:
                         check_device_reset(serial, cycle_start)
-                        
-                        # play26 - play31 (リードアップ)
-                        for i in range(26, 32):
-                            name = f"play{i}.bmp"
-                            gui_log(serial, f"Waiting {name} (Box path)...", step=name)
-                            deadline = time.time() + 4
-                            while time.time() < deadline:
-                                check_device_reset(serial, cycle_start)
-                                adb_img = get_screen_capture(device)
-                                if adb_img is not None:
-                                    pts = ImgSearchADB(adb_img, os.path.join(IMG_DIR, name))
-                                    if pts:
-                                        x, y = pts[0]
-                                        device.shell(f"input swipe {x} {y} {x} {y} 100")
-                                        time.sleep(2.5)
-                                        break
-                                time.sleep(0.5)
                         
                         # box1
                         gui_log(serial, "Waiting box1.bmp...", step="box1")
@@ -1326,7 +1445,8 @@ def process_device(device):
                             time.sleep(0.8)
                         
                         if not box1_found:
-                            gui_log(serial, "box1.bmp not found, retrying sequence", step="Retry")
+                            gui_log(serial, "box1.bmp not found! Running recovery: spamming Back until cancel.bmp...", step="Retry")
+                            run_back_spam_recovery(device, serial, cycle_start)
                             continue
 
                         # box2
@@ -1344,6 +1464,11 @@ def process_device(device):
                                     box2_found = True
                                     break
                             time.sleep(0.8)
+                            
+                        if not box2_found:
+                            gui_log(serial, "box2.bmp not found! Running recovery: spamming Back until cancel.bmp...", step="Retry")
+                            run_back_spam_recovery(device, serial, cycle_start)
+                            continue
                     
                     # box3 (กดเรื่อยๆ จนไม่เจอครบ 10s ค่อยไป box4)
                     gui_log(serial, "Waiting box3.bmp...", step="box3")

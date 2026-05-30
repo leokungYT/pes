@@ -7,9 +7,11 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
 try:
     import torch
-    torch.set_num_threads(1)
-    torch.set_num_interop_threads(1)
-except ImportError:
+    if hasattr(torch, "set_num_threads"):
+        torch.set_num_threads(1)
+    if hasattr(torch, "set_num_interop_threads"):
+        torch.set_num_interop_threads(1)
+except Exception:
     pass
 
 import cv2
@@ -58,12 +60,14 @@ class Region:
         self.x, self.y, self.w, self.h = x, y, w, h
 
 # ── Globals ──────────────────────────────────────────────────────────────────
+import queue as _queue_mod
 adb_path      = "adb"
 bot_running   = False
 gui_instance  = None
+_gui_queue    = _queue_mod.Queue()   # thread-safe queue for all GUI updates
 
 # ── โหลด config จาก config.py ──────────────────────────────────────────────
-from config import EVENT_IMG, DO_BOX, DO_GACHA, HERO_LIST, IMG_DIR, INPUT_DIR, LOGIN_SUCCESS_DIR, FIND_HERO, HERO_IMG_MAP, GACHA_FREE, HERO_LIST_FREE, DEBUG_OCR, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN
+from config import EVENT_IMG, DO_BOX, DO_GACHA, HERO_LIST, IMG_DIR, INPUT_DIR, LOGIN_SUCCESS_DIR, FIND_HERO, HERO_IMG_MAP, GACHA_FREE, HERO_LIST_FREE, DEBUG_OCR, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION
 try:
     from config import list_find_hero
 except ImportError:
@@ -151,13 +155,19 @@ if GUI_ENABLED:
                           command=lambda: trigger_manual_reset(device_id)
                           ).pack(side="right", padx=2)
 
+            # Cache last values to skip redundant configure calls
+            self._last_status = "Ready"
+            self._last_step   = ""
+
         def update_state(self, step=None, status=None, **kwargs):
-            if status:
+            if status and status != self._last_status:
+                self._last_status = status
                 colors = {'working': "#4caf50", 'stuck': "#e53935",
                           'waiting': "#ff9800", 'idle': "#888"}
                 self.lbl_status.configure(text=status.upper(),
                                           text_color=colors.get(status.lower(), "#888"))
-            if step:
+            if step and step != self._last_step:
+                self._last_step = step
                 self.lbl_file.configure(text=step[:35])
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -175,10 +185,13 @@ if GUI_ENABLED:
             self.stat_labels      = {}
             self.stat_rows        = {}
             self.login_times      = []
+            self._log_buffer      = []     # batch log lines
+            self._prev_stats      = {}     # cache previous stat counts to skip no-op updates
             self.setup_ui()
             self.after(500,  self.connect_adb)
             self.after(2000, self.update_realtime_stats)
             self.after(10000, self.auto_scan_devices)
+            self.after(100,  self._process_gui_queue)   # centralized GUI queue poller
             self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         # ── UI build ──────────────────────────────────────────────────────
@@ -312,7 +325,7 @@ if GUI_ENABLED:
 
             win = ctk.CTkToplevel(self)
             win.title("⚙️ Config")
-            win.geometry("340x410")
+            win.geometry("340x440")
             win.resizable(False, False)
             win.grab_set()   # modal
 
@@ -391,9 +404,18 @@ if GUI_ENABLED:
             ctk.CTkSwitch(row7, text="", variable=var_noscan,
                           onvalue=1, offvalue=0).pack(side="right")
 
+            # ── SKIPANIMATION toggle ─────────────────────────────
+            row8 = ctk.CTkFrame(win, fg_color="transparent")
+            row8.pack(fill="x", padx=20, pady=4)
+            ctk.CTkLabel(row8, text="Skip Animation (Fast Taps)",
+                         font=ctk.CTkFont(size=12)).pack(side="left")
+            var_skipanim = ctk.IntVar(value=getattr(cfg, 'SKIPANIMATION', 0))
+            ctk.CTkSwitch(row8, text="", variable=var_skipanim,
+                          onvalue=1, offvalue=0).pack(side="right")
+
             # ── Save button ───────────────────────────────
             def _save():
-                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN
+                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION
                 new_event = var_event.get()
                 new_box   = var_box.get()
                 new_gacha = var_gacha.get()
@@ -401,6 +423,7 @@ if GUI_ENABLED:
                 new_gfree = var_gacha_free.get()
                 new_ccoin = var_check_coin.get()
                 new_noscan = var_noscan.get()
+                new_skipanim = var_skipanim.get()
                 try:
                     new_gfree_loops = int(entry_gfree_loops.get())
                 except ValueError:
@@ -442,6 +465,11 @@ if GUI_ENABLED:
                                      content, flags=re.MULTILINE)
                 else:
                     content += f"\nNOSCAN = {new_noscan}\n"
+                if re.search(r"^SKIPANIMATION\s*=\s*\d", content, flags=re.MULTILINE):
+                    content = re.sub(r"^SKIPANIMATION\s*=\s*\d", f"SKIPANIMATION = {new_skipanim}",
+                                     content, flags=re.MULTILINE)
+                else:
+                    content += f"\nSKIPANIMATION = {new_skipanim}\n"
                 with open(cfg_path, "w", encoding="utf-8") as f:
                     f.write(content)
                 # อัปเดต runtime ด้วย
@@ -467,10 +495,24 @@ if GUI_ENABLED:
         def log(self, msg):
             from datetime import datetime
             ts = datetime.now().strftime("%H:%M:%S")
-            self.log_text.configure(state="normal")
-            self.log_text.insert("end", f"[{ts}] {msg}\n")
-            self.log_text.see("end")
-            self.log_text.configure(state="disabled")
+            self._log_buffer.append(f"[{ts}] {msg}\n")
+            # Flush buffer immediately if it's large, otherwise the queue poller handles it
+            if len(self._log_buffer) >= 20:
+                self._flush_log_buffer()
+
+        def _flush_log_buffer(self):
+            """Batch-insert all pending log lines in one configure cycle."""
+            if not self._log_buffer:
+                return
+            lines = self._log_buffer[:50]   # cap per flush to keep UI responsive
+            self._log_buffer = self._log_buffer[50:]
+            try:
+                self.log_text.configure(state="normal")
+                self.log_text.insert("end", "".join(lines))
+                self.log_text.see("end")
+                self.log_text.configure(state="disabled")
+            except Exception:
+                pass
 
         def add_stat_row(self, name, count, is_error=False):
             if name not in self.stat_rows:
@@ -500,10 +542,9 @@ if GUI_ENABLED:
                 if find_adb_executable():
                     connect_known_ports()
                     devices = get_connected_devices()
-                    self.after(0, lambda: self._on_adb_ready(devices))
+                    _gui_queue.put(('adb_ready', devices))
                 else:
-                    self.after(0, lambda: self.lbl_status.configure(
-                        text="   ● ADB NOT FOUND", text_color="#ff5555"))
+                    _gui_queue.put(('log', '● ADB NOT FOUND'))
             threading.Thread(target=_thread, daemon=True).start()
 
         def _on_adb_ready(self, devices):
@@ -521,8 +562,16 @@ if GUI_ENABLED:
 
         def connect_missing_devices(self):
             self.log("Scanning for missing emulators...")
-            connect_known_ports(quiet=False, kill_server=False)
-            for dev in get_connected_devices():
+            def _bg_connect():
+                connect_known_ports(quiet=False, kill_server=False)
+                devices = get_connected_devices()
+                new_devs = [d for d in devices if d not in self.device_monitors]
+                if new_devs:
+                    self.after(0, lambda: self._add_missing_devices(new_devs))
+            threading.Thread(target=_bg_connect, daemon=True).start()
+
+        def _add_missing_devices(self, new_devs):
+            for dev in new_devs:
                 if dev not in self.device_monitors:
                     m = DeviceMonitorWidget(self.dev_scroll, dev,
                                             len(self.device_monitors) + 1)
@@ -546,7 +595,7 @@ if GUI_ENABLED:
                 devices = get_connected_devices()
                 new_devs = [dev for dev in devices if dev not in self.device_monitors]
                 if new_devs:
-                    self.after(0, lambda: self._on_auto_scan_result(new_devs))
+                    _gui_queue.put(('auto_scan', new_devs))
             threading.Thread(target=_thread, daemon=True).start()
             self.after(10000, self.auto_scan_devices)
 
@@ -631,7 +680,7 @@ if GUI_ENABLED:
                             if h_key:
                                 hero_counts[h_key] = hero_counts.get(h_key, 0) + 1
                     
-                    self.after(0, lambda: self._apply_stats_ui(input_count, success_count, hero_count, hero_counts))
+                    _gui_queue.put(('stats', (input_count, success_count, hero_count, hero_counts)))
                 except Exception:
                     pass
 
@@ -641,29 +690,77 @@ if GUI_ENABLED:
 
         def _apply_stats_ui(self, input_count, success_count, hero_count, hero_counts):
             try:
-                # เคลียร์ Widget สถิติเก่าทั้งหมดเพื่ออัปเดตแบบเรียลไทม์
-                for widget in self.result_scroll.winfo_children():
-                    widget.destroy()
-                self.stat_rows.clear()
-                self.stat_labels.clear()
-
-                self.lbl_file_count.configure(text=f"📁 {input_count}")
-                self.lbl_succ_count.configure(text=f"✅ {success_count}")
-                if hasattr(self, 'lbl_hero_count'):
+                # อัปเดตเฉพาะค่าที่เปลี่ยน — ไม่ destroy/recreate widget ทุกรอบ
+                prev = self._prev_stats
+                if prev.get('input') != input_count:
+                    self.lbl_file_count.configure(text=f"📁 {input_count}")
+                    prev['input'] = input_count
+                if prev.get('success') != success_count:
+                    self.lbl_succ_count.configure(text=f"✅ {success_count}")
+                    prev['success'] = success_count
+                if hasattr(self, 'lbl_hero_count') and prev.get('hero') != hero_count:
                     self.lbl_hero_count.configure(text=f"⭐ {hero_count}")
-                    
+                    prev['hero'] = hero_count
+
+                # Build desired stat rows
+                desired = {}
                 if success_count:
-                    self.add_stat_row("✅ login สำเร็จ", success_count)
-                
+                    desired["✅ login สำเร็จ"] = (success_count, False)
                 for h_name, count in hero_counts.items():
-                    self.add_stat_row(f"⭐ {h_name}", count)
+                    desired[f"⭐ {h_name}"] = (count, False)
+
+                # Remove rows no longer needed
+                stale = [k for k in self.stat_rows if k not in desired]
+                for k in stale:
+                    self.stat_rows[k].destroy()
+                    del self.stat_rows[k]
+                    if k in self.stat_labels:
+                        del self.stat_labels[k]
+
+                # Add or update rows
+                for name, (count, is_error) in desired.items():
+                    self.add_stat_row(name, count, is_error)
                     
                 if self.login_times:
                     avg = sum(self.login_times) / len(self.login_times)
-                    self.lbl_avg_time.configure(
-                        text=f"⏱ Avg: {avg/60:.1f}m" if avg >= 60 else f"⏱ Avg: {avg:.0f}s")
+                    new_text = f"⏱ Avg: {avg/60:.1f}m" if avg >= 60 else f"⏱ Avg: {avg:.0f}s"
+                    if prev.get('avg_text') != new_text:
+                        self.lbl_avg_time.configure(text=new_text)
+                        prev['avg_text'] = new_text
             except Exception:
                 pass
+
+        def _process_gui_queue(self):
+            """Central poller: drain _gui_queue and apply updates. Runs every 30ms for maximum smoothness."""
+            try:
+                processed = 0
+                while processed < 100:    # cap per tick to keep UI alive
+                    try:
+                        kind, data = _gui_queue.get_nowait()
+                    except Exception:
+                        break
+                    processed += 1
+                    if kind == 'device_update':
+                        serial, kwargs = data
+                        if serial in self.device_monitors:
+                            self.device_monitors[serial].update_state(**kwargs)
+                    elif kind == 'log':
+                        self.log(data)
+                    elif kind == 'stats':
+                        self._apply_stats_ui(*data)
+                    elif kind == 'adb_ready':
+                        self._on_adb_ready(data)
+                    elif kind == 'auto_scan':
+                        self._on_auto_scan_result(data)
+
+                # Flush any pending log buffer
+                self._flush_log_buffer()
+                # Force Tkinter to process all idle tasks and update screen graphics immediately to prevent any freezing
+                self.update_idletasks()
+            except Exception:
+                pass
+            finally:
+                self.after(30, self._process_gui_queue)
 
         def on_closing(self):
             from tkinter import messagebox
@@ -686,8 +783,9 @@ def check_device_reset(serial, cycle_start=None):
         raise DeviceResetException(serial)
 
 def update_gui(serial, **kwargs):
+    """Queue a device update — never call GUI directly from worker threads."""
     if gui_instance:
-        gui_instance.after(0, lambda: gui_instance.update_device(serial, **kwargs))
+        _gui_queue.put(('device_update', (serial, kwargs)))
 
 _GUI_LOG_INTERVAL = 2  # seconds — ส่ง text update ไป GUI ทุก 2 วินาทีต่อ device
 
@@ -699,10 +797,13 @@ def gui_log(serial, msg, step=None, status=None):
     if status or (now - last >= _GUI_LOG_INTERVAL):
         _gui_last_update[serial] = now
         update_gui(serial, log=msg, step=step, status=status)
+        # Queue log text to GUI (will be batched by _process_gui_queue)
+        if gui_instance:
+            _gui_queue.put(('log', f"[{serial}] {msg}"))
     elif step:
         # step สำคัญ ส่งทุกครั้ง แต่ไม่ส่ง log text
         update_gui(serial, step=step)
-    # บันทึก log ลงไฟล์แยกตาม device
+    # บันทึก log ลงไฟล์แยกตาม device (ทำใน worker thread โดยตรง ไม่ block GUI)
     try:
         safe_name = serial.replace(".", "_").replace(":", "_")
         log_file = os.path.join(LOG_DIR, f"{safe_name}.txt")
@@ -1825,6 +1926,59 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                     gui_log(serial, f"Sort failed: {e}", step="Sort Error")
             release_file(original_name)
             return True  # break ออกไปเริ่มไฟล์ใหม่
+
+        # ── SKIPANIMATION mode: กด [611,129] ซ้ำๆเร็วๆ จนเจอ skiphero → คลิก → ไปหา next ──
+        if SKIPANIMATION == 1:
+            gui_log(serial, f"[Loop {loop_num}] SKIPANIMATION=1 → Tapping (611,129) super-rapidly in background...", step="Skip Anim")
+            
+            # เปิดเธรดกดพิกัดรัวฝั่งเบื้องหลัง (Background Thread) เพื่อรันการกดรัวแบบคู่ขนาน ไม่บล็อกการแคปหน้าจอ
+            tapping_active = [True]
+            
+            def tap_worker():
+                # รันคำสั่งกดรัว 50 ครั้งต่อคำสั่ง คู่วิธี Loop รวม 25 รอบ (ทั้งหมด 1,250 ครั้ง)
+                for _ in range(25):
+                    if not tapping_active[0]:
+                        break
+                    device.shell("for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50; do input tap 611 129; done")
+
+            t_tap = threading.Thread(target=tap_worker, daemon=True)
+            t_tap.start()
+            
+            skip_deadline = time.time() + 30  # timeout 30s กันค้าง
+            skiphero_found = False
+            while time.time() < skip_deadline:
+                check_device_reset(serial, cycle_start)
+                # ดึงภาพหน้าจอดิบผ่าน fast_screencap โดยตรง ไม่ผ่านระบบตรวจสอบลอยตัว/อัปเดต GUI เพื่อความเร็วระดับสูงสุด
+                img_skip = fast_screencap(device)
+                if img_skip is not None:
+                    pts_skip = img_search(img_skip, os.path.join(IMG_DIR, "skiphero.bmp"))
+                    if pts_skip:
+                        tapping_active[0] = False  # สั่งหยุดยิงทันที
+                        x_sk, y_sk = pts_skip[0]
+                        gui_log(serial, f"[Loop {loop_num}] skiphero.bmp found! Clicking ({x_sk},{y_sk}) repeatedly until gone...", step="Skip Hero")
+                        
+                        # วนลูปกดซ้ำๆ จนกว่าจะหายไปเลย
+                        while True:
+                            check_device_reset(serial, cycle_start)
+                            device.shell(f"input swipe {x_sk} {y_sk} {x_sk} {y_sk} 100")
+                            time.sleep(0.2)
+                            img_check = fast_screencap(device)
+                            if img_check is None:
+                                continue
+                            pts_check = img_search(img_check, os.path.join(IMG_DIR, "skiphero.bmp"))
+                            if not pts_check:
+                                gui_log(serial, f"[Loop {loop_num}] skiphero.bmp disappeared!", step="Skip Hero Gone")
+                                break
+                            else:
+                                x_sk, y_sk = pts_check[0]  # อัปเดตพิกัด
+                        
+                        skiphero_found = True
+                        break
+                time.sleep(0.01)
+            
+            tapping_active[0] = False
+            if not skiphero_found:
+                gui_log(serial, f"[Loop {loop_num}] skiphero.bmp not found in 30s, proceeding...", step="Skip Timeout")
 
         # ── NOSCAN mode: skip checkpointgacha → jump to next ──
         if NOSCAN == 1:

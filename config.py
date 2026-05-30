@@ -77,7 +77,11 @@ HERO_LIST_FREE = [
     "Marcelo",
     "Peter Schmeichel",
     "Leonardo Bonucci",
-    "Ronald Koeman"
+    "Ronald Koeman",
+    "Casemiro",
+    "Erling Haaland",
+    "Hugo Ekitike",
+    "Declan Rice"
 ]
 
 list_find_hero = [
@@ -103,7 +107,12 @@ list_find_hero = [
     "Marcelo",
     "Peter Schmeichel",
     "Leonardo Bonucci",
-    "Ronald Koeman"
+    "Ronald Koeman",
+    "Casemiro",
+    "Erling Haaland",
+    "Hugo Ekitike",
+    "Declan Rice"
+    
 ]
 
 
@@ -124,3 +133,9 @@ CHECK_COIN = 0
 #     ไฟล์จะเก็บในโฟลเดอร์ fast-random/ แทน backup-id/
 # 0 = ทำงานปกติ (สแกน OCR ที่ checkpointgacha)
 NOSCAN = 1
+
+# ── Skip Animation (Gacha Free) ──────────────────
+# 1 = หลังกด gachafree2 จะกดตำแหน่ง [611,129] ซ้ำๆเร็วๆ
+#     จนกว่าจะเจอ skiphero.bmp แล้วคลิก → ไปหา next ต่อ
+# 0 = ทำงานปกติ (ไม่กดข้ามแอนิเมชั่น)
+SKIPANIMATION = 1
