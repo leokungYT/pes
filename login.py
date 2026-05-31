@@ -1521,16 +1521,41 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
     ]
     for name_curr, name_next in nav_steps_1:
         gui_log(serial, f"Waiting for {name_curr}...", step=f"{name_curr} Waiting")
-        deadline = time.time() + 60
         last_click_time = 0
-        while time.time() < deadline:
+        fixfind_first_seen = None
+        while True:
             check_device_reset(serial, cycle_start)
             img = get_screen_capture(device)
             if img is not None:
-                if img_search(img, os.path.join(IMG_DIR, name_next)):
+                if img_search(img, os.path.join(IMG_DIR, name_next), threshold=0.95):
                     gui_log(serial, f"{name_next} detected! Proceeding to next step.", step=f"{name_next} Seen")
                     break
-                pts = img_search(img, os.path.join(IMG_DIR, name_curr))
+                    
+                if name_curr == "fin5.bmp":
+                    pts_ff = img_search(img, os.path.join(IMG_DIR, "fixfind.bmp"), threshold=0.95)
+                    if pts_ff:
+                        if fixfind_first_seen is None:
+                            fixfind_first_seen = time.time()
+                            gui_log(serial, "fixfind.bmp detected, watching for 15s...", step="fixfind Watch")
+                        elif time.time() - fixfind_first_seen >= 15.0:
+                            gui_log(serial, "fixfind.bmp stuck for 15s! Proceeding to fin6...", step="fixfind Restart")
+                            break
+                    else:
+                        if "fixfind_first_seen" in locals():
+                            fixfind_first_seen = None
+
+                    pts_ff2 = img_search(img, os.path.join(IMG_DIR, "fixfinv2.bmp"), threshold=0.95)
+                    if pts_ff2:
+                        gui_log(serial, "fixfinv2.bmp detected! Clicking fixout.bmp...", step="fixfinv2 Action")
+                        pts_out = img_search(img, os.path.join(IMG_DIR, "fixout.bmp"), threshold=0.95)
+                        if pts_out:
+                            x_o, y_o = pts_out[0]
+                            device.shell(f"input swipe {x_o} {y_o} {x_o} {y_o} 100")
+                            gui_log(serial, f"Clicked fixout.bmp at ({x_o}, {y_o})", step="fixout Click")
+                            time.sleep(1.0)
+                        break
+
+                pts = img_search(img, os.path.join(IMG_DIR, name_curr), threshold=0.95)
                 if pts:
                     now = time.time()
                     if now - last_click_time >= 5.0:
@@ -1548,16 +1573,15 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
         ]
         for name_curr, name_next in nav_steps_2:
             gui_log(serial, f"Waiting for {name_curr}...", step=f"{name_curr} Waiting")
-            deadline = time.time() + 60
             last_click_time = 0
-            while time.time() < deadline:
+            while True:
                 check_device_reset(serial, cycle_start)
                 img = get_screen_capture(device)
                 if img is not None:
-                    if img_search(img, os.path.join(IMG_DIR, name_next)):
+                    if img_search(img, os.path.join(IMG_DIR, name_next), threshold=0.95):
                         gui_log(serial, f"{name_next} detected! Proceeding to next step.", step=f"{name_next} Seen")
                         break
-                    pts = img_search(img, os.path.join(IMG_DIR, name_curr))
+                    pts = img_search(img, os.path.join(IMG_DIR, name_curr), threshold=0.95)
                     if pts:
                         now = time.time()
                         if now - last_click_time >= 5.0:
@@ -1569,9 +1593,8 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
 
         # 2. Wait, click, and verify fin9.bmp
         gui_log(serial, "Waiting fin9.bmp...", step="fin9 Wait")
-        deadline_fin9 = time.time() + 45
         fin9_verified = False
-        while time.time() < deadline_fin9:
+        while True:
             check_device_reset(serial, cycle_start)
             img = get_screen_capture(device)
             if img is not None:
@@ -1582,7 +1605,7 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
                     break
             
                 # Find and click fin9.bmp
-                pts9 = img_search(img, os.path.join(IMG_DIR, "fin9.bmp"))
+                pts9 = img_search(img, os.path.join(IMG_DIR, "fin9.bmp"), threshold=0.95)
                 if pts9:
                     x, y = pts9[0]
                     device.shell(f"input swipe {x} {y} {x} {y} 100")
@@ -1719,9 +1742,8 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
 
         # 5b. Wait and click fin13.bmp with stuck protection (click once, then retry if still on screen for 10s)
         gui_log(serial, "Waiting for fin13.bmp...", step="fin13 Wait")
-        deadline_fin13 = time.time() + 45
         clicked_fin13 = False
-        while time.time() < deadline_fin13:
+        while True:
             check_device_reset(serial, cycle_start)
             img = get_screen_capture(device)
             if img is not None:
