@@ -1632,6 +1632,18 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
                     else:
                         fixfind_first_seen = None
 
+                    pts_ff2 = img_search(img, os.path.join(IMG_DIR, "fixfinv2.bmp"), threshold=0.95)
+                    if pts_ff2:
+                        gui_log(serial, "fixfinv2.bmp detected! Clicking fixout.bmp...", step="fixfinv2 Action")
+                        pts_out = img_search(img, os.path.join(IMG_DIR, "fixout.bmp"), threshold=0.95)
+                        if pts_out:
+                            x_o, y_o = pts_out[0]
+                            device.shell(f"input swipe {x_o} {y_o} {x_o} {y_o} 100")
+                            gui_log(serial, f"Clicked fixout.bmp at ({x_o}, {y_o})", step="fixout Click")
+                            time.sleep(1.0)
+                        need_restart = True
+                        break
+
                     pts_v = img_search(img, os.path.join(IMG_DIR, "verify.png"), threshold=0.9)
                     if len(pts_v) >= 2:
                         gui_log(serial, f"Detected {len(pts_v)} verify icons (>= 2)! Position 1 Verified.", step="Pos1 Verified")
@@ -1674,6 +1686,18 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
                             break
                     else:
                         fixfind_first_seen = None
+
+                    pts_ff2 = img_search(img, os.path.join(IMG_DIR, "fixfinv2.bmp"), threshold=0.95)
+                    if pts_ff2:
+                        gui_log(serial, "fixfinv2.bmp detected! Clicking fixout.bmp...", step="fixfinv2 Action")
+                        pts_out = img_search(img, os.path.join(IMG_DIR, "fixout.bmp"), threshold=0.95)
+                        if pts_out:
+                            x_o, y_o = pts_out[0]
+                            device.shell(f"input swipe {x_o} {y_o} {x_o} {y_o} 100")
+                            gui_log(serial, f"Clicked fixout.bmp at ({x_o}, {y_o})", step="fixout Click")
+                            time.sleep(1.0)
+                        need_restart = True
+                        break
 
                     pts_v = img_search(img, os.path.join(IMG_DIR, "verify.png"), threshold=0.9)
                     if len(pts_v) >= 3:
