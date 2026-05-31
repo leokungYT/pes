@@ -1511,6 +1511,26 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
     """
     gui_log(serial, "Find Hero sequence started...", step="Find Hero", status="working")
     
+    def _check_fixteam(img_current):
+        pts_team = img_search(img_current, os.path.join(IMG_DIR, "fixteam.bmp"), threshold=0.95)
+        if pts_team:
+            gui_log(serial, "fixteam.bmp detected! Spamming Back...", step="Fix Team")
+            while True:
+                check_device_reset(serial, cycle_start)
+                device.shell("input keyevent 4")
+                time.sleep(0.4)
+                img_c = get_screen_capture(device)
+                if img_c is not None:
+                    pts_c = img_search(img_c, os.path.join(IMG_DIR, "cancel.bmp"))
+                    if pts_c:
+                        x, y = pts_c[0]
+                        gui_log(serial, f"cancel.bmp found at ({x},{y})! Clicking and stopping back spam.", step="Fix Team Stop")
+                        device.shell(f"input swipe {x} {y} {x} {y} 100")
+                        time.sleep(1.0)
+                        break
+            return True
+        return False
+
     # 1. fin1 -> fin2 -> fin3 -> fin4 -> fin5 -> fin6 -> fin7 -> fin8 -> fin9 navigation
     nav_steps_1 = [
         ("fin1.bmp", "fin2.bmp"),
@@ -1527,6 +1547,9 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
             check_device_reset(serial, cycle_start)
             img = get_screen_capture(device)
             if img is not None:
+                if _check_fixteam(img):
+                    continue
+                    
                 if img_search(img, os.path.join(IMG_DIR, name_next), threshold=0.95):
                     gui_log(serial, f"{name_next} detected! Proceeding to next step.", step=f"{name_next} Seen")
                     break
@@ -1578,6 +1601,9 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
                 check_device_reset(serial, cycle_start)
                 img = get_screen_capture(device)
                 if img is not None:
+                    if _check_fixteam(img):
+                        continue
+                        
                     if img_search(img, os.path.join(IMG_DIR, name_next), threshold=0.95):
                         gui_log(serial, f"{name_next} detected! Proceeding to next step.", step=f"{name_next} Seen")
                         break
@@ -1598,6 +1624,9 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
             check_device_reset(serial, cycle_start)
             img = get_screen_capture(device)
             if img is not None:
+                if _check_fixteam(img):
+                    continue
+                    
                 # Check if verify.png is already visible on screen
                 if img_search(img, os.path.join(IMG_DIR, "verify.png"), threshold=0.9):
                     gui_log(serial, "verify.png detected! Proceeding to swipe...", step="fin9 Verified")
@@ -1747,6 +1776,9 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
             check_device_reset(serial, cycle_start)
             img = get_screen_capture(device)
             if img is not None:
+                if _check_fixteam(img):
+                    continue
+                    
                 pts13 = img_search(img, os.path.join(IMG_DIR, "fin13.bmp"), threshold=0.95)
                 if pts13:
                     x, y = pts13[0]
