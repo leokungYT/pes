@@ -1608,7 +1608,7 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
     
         need_restart = False
         fixfind_first_seen = None
-        while True:
+            while True:
             check_device_reset(serial, cycle_start)
             gui_log(serial, "Clicking Position 1 (329, 274)...", step="Click Pos1")
             device.shell("input swipe 329 274 329 274 100")
@@ -1632,7 +1632,7 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
                     else:
                         fixfind_first_seen = None
 
-                    pts_v = img_search(img, os.path.join(IMG_DIR, "verify.png"), threshold=0.9)
+                        pts_v = img_search(img, os.path.join(IMG_DIR, "verify.png"), threshold=0.9)
                     if len(pts_v) >= 2:
                         gui_log(serial, f"Detected {len(pts_v)} verify icons (>= 2)! Position 1 Verified.", step="Pos1 Verified")
                         verified_pos1 = True
@@ -1651,7 +1651,7 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
 
         # 4b. Click Position 2 (319, 338) with verification (requires at least 3 verify icons)
         fixfind_first_seen = None
-        while True:
+            while True:
             check_device_reset(serial, cycle_start)
             gui_log(serial, "Clicking Position 2 (319, 338)...", step="Click Pos2")
             device.shell("input swipe 319 338 319 338 100")
@@ -1675,7 +1675,7 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
                     else:
                         fixfind_first_seen = None
 
-                    pts_v = img_search(img, os.path.join(IMG_DIR, "verify.png"), threshold=0.9)
+                        pts_v = img_search(img, os.path.join(IMG_DIR, "verify.png"), threshold=0.9)
                     if len(pts_v) >= 3:
                         gui_log(serial, f"Detected {len(pts_v)} verify icons (>= 3)! Position 2 Verified.", step="Pos2 Verified")
                         verified_pos2 = True
