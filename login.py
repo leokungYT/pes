@@ -99,9 +99,11 @@ os.makedirs(LOGIN_SUCCESS_DIR, exist_ok=True)
 BACKUP_ID_DIR = "backup-id"
 NO_HERO_DIR   = "no-hero"
 FOUND_HERO_DIR = "found-hero"
+TIMEOUT_DIR   = "timeout"
 os.makedirs(BACKUP_ID_DIR, exist_ok=True)
 os.makedirs(NO_HERO_DIR, exist_ok=True)
 os.makedirs(FOUND_HERO_DIR, exist_ok=True)
+os.makedirs(TIMEOUT_DIR, exist_ok=True)
 FAST_RANDOM_DIR = "fast-random"
 os.makedirs(FAST_RANDOM_DIR, exist_ok=True)
 FILE_ERROR_DIR = "file-error"
@@ -329,7 +331,7 @@ if GUI_ENABLED:
 
             win = ctk.CTkToplevel(self)
             win.title("⚙️ Config")
-            win.geometry("340x480")
+            win.geometry("380x600")
             win.resizable(False, False)
             win.grab_set()   # modal
 
@@ -426,6 +428,24 @@ if GUI_ENABLED:
             ctk.CTkSwitch(row9, text="", variable=var_gacha_check,
                           onvalue=1, offvalue=0).pack(side="right")
 
+            # ── TIMEOUT toggle ──────────────────────────────
+            row10 = ctk.CTkFrame(win, fg_color="transparent")
+            row10.pack(fill="x", padx=20, pady=4)
+            ctk.CTkLabel(row10, text="Timeout Mode (กันค้าง)",
+                         font=ctk.CTkFont(size=12)).pack(side="left")
+            var_timeout = ctk.IntVar(value=getattr(cfg, 'TIMEOUT_ENABLE', 1))
+            ctk.CTkSwitch(row10, text="", variable=var_timeout,
+                          onvalue=1, offvalue=0).pack(side="right")
+
+            # ── TIMEOUT_MINUTES entry ──────────────────────
+            row10_time = ctk.CTkFrame(win, fg_color="transparent")
+            row10_time.pack(fill="x", padx=20, pady=4)
+            ctk.CTkLabel(row10_time, text="  ↳ เวลาสูงสุด (Minutes)",
+                         font=ctk.CTkFont(size=11, slant="italic")).pack(side="left", padx=(10, 0))
+            entry_timeout = ctk.CTkEntry(row10_time, width=50, height=20, justify="center")
+            entry_timeout.insert(0, str(getattr(cfg, 'TIMEOUT_MINUTES', 10)))
+            entry_timeout.pack(side="right")
+
             # ── Save button ───────────────────────────────
             def _save():
                 global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK
@@ -438,6 +458,11 @@ if GUI_ENABLED:
                 new_noscan = var_noscan.get()
                 new_skipanim = var_skipanim.get()
                 new_gacha_check = var_gacha_check.get()
+                new_timeout = var_timeout.get()
+                try:
+                    new_timeout_mins = int(entry_timeout.get())
+                except ValueError:
+                    new_timeout_mins = 10
                 try:
                     new_gfree_loops = int(entry_gfree_loops.get())
                 except ValueError:
@@ -489,6 +514,18 @@ if GUI_ENABLED:
                                      content, flags=re.MULTILINE)
                 else:
                     content += f"\nGACHA_CHECK = {new_gacha_check}\n"
+
+                if re.search(r"^TIMEOUT_ENABLE\s*=\s*\d", content, flags=re.MULTILINE):
+                    content = re.sub(r"^TIMEOUT_ENABLE\s*=\s*\d", f"TIMEOUT_ENABLE = {new_timeout}",
+                                     content, flags=re.MULTILINE)
+                else:
+                    content += f"\nTIMEOUT_ENABLE = {new_timeout}\n"
+
+                if re.search(r"^TIMEOUT_MINUTES\s*=\s*\d+", content, flags=re.MULTILINE):
+                    content = re.sub(r"^TIMEOUT_MINUTES\s*=\s*\d+", f"TIMEOUT_MINUTES = {new_timeout_mins}",
+                                     content, flags=re.MULTILINE)
+                else:
+                    content += f"\nTIMEOUT_MINUTES = {new_timeout_mins}\n"
                 with open(cfg_path, "w", encoding="utf-8") as f:
                     f.write(content)
                 # อัปเดต runtime ด้วย
@@ -797,10 +834,20 @@ def trigger_manual_reset(serial):
     print(f"{Fore.YELLOW}[MANUAL] Reset triggered for {serial}{Style.RESET_ALL}")
     update_gui(serial, status="resetting", step="Manual Reset")
 
+class DeviceTimeoutException(Exception): pass
+
 def check_device_reset(serial, cycle_start=None):
     if DEVICE_RESET_FLAGS.get(serial):
         DEVICE_RESET_FLAGS[serial] = False
         raise DeviceResetException(serial)
+        
+    try:
+        from config import TIMEOUT_ENABLE, TIMEOUT_MINUTES
+        if TIMEOUT_ENABLE == 1 and cycle_start is not None:
+            if time.time() - cycle_start > TIMEOUT_MINUTES * 60:
+                raise DeviceTimeoutException(serial)
+    except ImportError:
+        pass
 
 def update_gui(serial, **kwargs):
     """Queue a device update — never call GUI directly from worker threads."""
@@ -3078,6 +3125,22 @@ def process_device_login(device):
                     gui_instance.login_times.append(dur)
 
             release_file(original_name)
+
+        except DeviceTimeoutException:
+            gui_log(serial, f"⏱️ Timeout Exceeded! Moving file to timeout...", step="Timeout", status="error")
+            device.shell("am force-stop jp.konami.pesam")
+            time.sleep(1)
+            
+            if original_name:
+                release_file(original_name)
+                try:
+                    src_file = os.path.join(INPUT_DIR, original_name)
+                    if os.path.exists(src_file):
+                        shutil.move(src_file, os.path.join(TIMEOUT_DIR, original_name))
+                        gui_log(serial, f"Moved {original_name} to timeout/", step="Timeout Move")
+                except Exception as e:
+                    gui_log(serial, f"Failed to move {original_name} to timeout: {e}", step="Timeout Error")
+            continue
 
         except DeviceResetException:
             release_file(original_name)
