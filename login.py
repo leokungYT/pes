@@ -1855,6 +1855,43 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                 fixcoin_handled = False  # fixcoin หายแล้ว → reset flag
         return False
 
+    def _check_fixgachafree():
+        img_fg = get_screen_capture(device)
+        if img_fg is not None:
+            pts_fg1 = img_search(img_fg, os.path.join(IMG_DIR, "fixgachafree1.bmp"), threshold=0.95)
+            if pts_fg1:
+                gui_log(serial, "fixgachafree1 detected! Running recovery sequence...", step="Fix GachaFree")
+                x, y = pts_fg1[0]
+                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                time.sleep(1.5)
+                
+                dl_2 = time.time() + 10
+                while time.time() < dl_2:
+                    img2 = get_screen_capture(device)
+                    if img2 is not None:
+                        pts_fg2 = img_search(img2, os.path.join(IMG_DIR, "fixgachafree2.bmp"), threshold=0.95)
+                        if pts_fg2:
+                            x2, y2 = pts_fg2[0]
+                            device.shell(f"input swipe {x2} {y2} {x2} {y2} 100")
+                            time.sleep(1.5)
+                            break
+                    time.sleep(0.5)
+                    
+                dl_3 = time.time() + 10
+                while time.time() < dl_3:
+                    img3 = get_screen_capture(device)
+                    if img3 is not None:
+                        pts_fg3 = img_search(img3, os.path.join(IMG_DIR, "fixgachafree3.bmp"), threshold=0.95)
+                        if pts_fg3:
+                            x3, y3 = pts_fg3[0]
+                            device.shell(f"input swipe {x3} {y3} {x3} {y3} 100")
+                            time.sleep(2.0)
+                            break
+                    time.sleep(0.5)
+                
+                return True
+        return False
+
     # 1. gacha1 → gacha2 (ทำแค่ครั้งเดียวตอนเริ่ม)
     for i in range(1, 3):
         name = f"gacha{i}.bmp"
@@ -1893,6 +1930,10 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
         while miss_count < max_miss:
             check_device_reset(serial, cycle_start)
             _check_fixcoin()  # priority #1
+            
+            if _check_fixgachafree():
+                miss_count = 0  # รีเซ็ตการนับเผื่อให้มันหา gachafree1 ต่อได้โดยไม่หลุด loop
+                
             img = get_screen_capture(device)
             if img is not None:
                 # === Priority: เช็ค endswip.bmp ===
@@ -1969,7 +2010,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                     break
             miss_count += 1
             gui_log(serial, f"[Loop {loop_num}] gachafree1 not here, swiping... ({miss_count}/{max_miss})", step="Swipe")
-            device.shell("input swipe 618 308 54 306 4000")
+            device.shell("input swipe 618 308 54 306 1500")
             time.sleep(2.0)
             # เช็ค fixcoin หลังเลื่อน (เลื่อนไปโดนตู้ fixcoin ขึ้น)
             _check_fixcoin()
