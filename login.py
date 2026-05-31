@@ -1524,7 +1524,8 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
     ]
     for name_curr, name_next in nav_steps:
         gui_log(serial, f"Waiting for {name_curr}...", step=f"{name_curr} Waiting")
-        deadline = time.time() + 30
+        deadline = time.time() + 60
+        last_click_time = 0
         while time.time() < deadline:
             check_device_reset(serial, cycle_start)
             img = get_screen_capture(device)
@@ -1534,11 +1535,12 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
                     break
                 pts = img_search(img, os.path.join(IMG_DIR, name_curr))
                 if pts:
-                    x, y = pts[0]
-                    device.shell(f"input swipe {x} {y} {x} {y} 100")
-                    gui_log(serial, f"Clicked {name_curr}", step=f"{name_curr} Click")
-                    time.sleep(3.0)
-                    continue
+                    now = time.time()
+                    if now - last_click_time >= 10.0:
+                        x, y = pts[0]
+                        device.shell(f"input swipe {x} {y} {x} {y} 100")
+                        gui_log(serial, f"Clicked {name_curr}", step=f"{name_curr} Click")
+                        last_click_time = now
             time.sleep(0.5)
 
     # 2. Wait, click, and verify fin9.bmp
