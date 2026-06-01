@@ -150,10 +150,8 @@ if GUI_ENABLED:
                                            text_color="#4caf50", width=60)
             self.lbl_status.pack(side="right", padx=6)
 
-            self.lbl_file = ctk.CTkLabel(self, text="",
-                                         font=ctk.CTkFont(size=9),
-                                         text_color="#aaa", width=180)
-            self.lbl_file.pack(side="right", padx=4)
+            # (Disabled lbl_file to improve performance)
+            self.lbl_file = None
 
             ctk.CTkButton(self, text="↺", width=22, height=20,
                           font=ctk.CTkFont(size=11, weight="bold"),
@@ -172,9 +170,8 @@ if GUI_ENABLED:
                           'waiting': "#ff9800", 'idle': "#888"}
                 self.lbl_status.configure(text=status.upper(),
                                           text_color=colors.get(status.lower(), "#888"))
-            if step and step != self._last_step:
-                self._last_step = step
-                self.lbl_file.configure(text=step[:35])
+            # (Disabled step text update to improve performance)
+            pass
 
     # ─────────────────────────────────────────────────────────────────────────
     class LoginBotGUI(ctk.CTk):
@@ -648,7 +645,8 @@ if GUI_ENABLED:
 
         def auto_scan_devices(self):
             def _thread():
-                connect_known_ports(quiet=True, kill_server=False)
+                # DO NOT scan/connect all 100 ports in a background thread every 10 seconds! That spikes CPU and freezes the system.
+                # Just call get_connected_devices() which is one fast call to see what is already connected.
                 devices = get_connected_devices()
                 new_devs = [dev for dev in devices if dev not in self.device_monitors]
                 if new_devs:
@@ -702,17 +700,33 @@ if GUI_ENABLED:
 
             client = AdbClient(host="127.0.0.1", port=5037)
             self.log(f"Starting threads for {len(devices)} devices...")
-            for serial in devices:
+
+            def launch_device(index):
+                if not bot_running:
+                    return  # หยุดการรันถ้าผู้ใช้กด STOP ระหว่างทาง
+                if index >= len(devices):
+                    self.log("All devices successfully started!")
+                    return
+
+                serial = devices[index]
                 device = client.device(serial)
                 if device is None:
                     self.log(f"ERROR: Cannot get device {serial} from ADB!")
-                    continue
+                    launch_device(index + 1)
+                    return
+
                 self.log(f"✅ Started bot on {serial}")
                 t = threading.Thread(target=process_device_login,
                                      args=(device,), daemon=True)
                 t.start()
                 self.threads.append(t)
-                time.sleep(0.5)   # ลดจาก 1s → 0.5s
+
+                if index < len(devices) - 1:
+                    self.log(f"Waiting 10 seconds before starting the next device...")
+                    # ใช้ self.after แทน time.sleep เพื่อไม่ให้เธรด GUI ค้าง (Not Responding)
+                    self.after(10000, lambda: launch_device(index + 1))
+
+            launch_device(0)
 
         def update_device(self, serial, **kwargs):
             if serial in self.device_monitors:
@@ -870,8 +884,8 @@ def gui_log(serial, msg, step=None, status=None):
         _gui_last_update[serial] = now
         update_gui(serial, log=msg, step=step, status=status)
     elif step:
-        # step สำคัญ ส่งทุกครั้ง แต่ไม่ส่ง log text
-        update_gui(serial, step=step)
+        # ปิดการอัปเดต step รัวๆ เพื่อลดอาการค้างของ UI
+        pass
     # บันทึก log ลงไฟล์แยกตาม device (ทำใน worker thread โดยตรง ไม่ block GUI)
     try:
         safe_name = serial.replace(".", "_").replace(":", "_")
@@ -1312,8 +1326,9 @@ def read_screen_text(img, region=None, serial="unknown"):
     if region:
         img = img[region.y : region.y + region.h, region.x : region.x + region.w].copy()
     
-    # Run OCR concurrently in parallel at full performance without queue waiting
-    return _read_screen_text_locked(img, serial)
+    # Run OCR sequentially across threads using ocr_lock to prevent CPU spike freezes and deadlocks
+    with ocr_lock:
+        return _read_screen_text_locked(img, serial)
 
 def _read_screen_text_locked(img, serial):
     """Internal OCR — เรียกผ่าน read_screen_text เท่านั้น (มี lock แล้ว)"""
@@ -2041,7 +2056,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                 fixcoin_handled = False  # fixcoin หายแล้ว → reset flag
         return False
 
-    def _check_fixgachafree(img_fg=None):
+    def _check_fixgachafree(img_fg=None, cycle_start_time=None):
         if img_fg is None:
             img_fg = get_screen_capture(device)
         if img_fg is not None:
@@ -2053,7 +2068,10 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                 time.sleep(1.5)
                 
                 gui_log(serial, "Waiting for fixgachafree2.bmp...", step="Fix2 Wait")
-                while True:
+                deadline2 = time.time() + 15
+                while time.time() < deadline2:
+                    if cycle_start_time is not None:
+                        check_device_reset(serial, cycle_start_time)
                     img2 = get_screen_capture(device)
                     if img2 is not None:
                         pts_fg2 = img_search(img2, os.path.join(IMG_DIR, "fixgachafree2.bmp"), threshold=0.95)
@@ -2066,7 +2084,10 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                     time.sleep(0.5)
                     
                 gui_log(serial, "Waiting for fixgachafree3.bmp...", step="Fix3 Wait")
-                while True:
+                deadline3 = time.time() + 15
+                while time.time() < deadline3:
+                    if cycle_start_time is not None:
+                        check_device_reset(serial, cycle_start_time)
                     img3 = get_screen_capture(device)
                     if img3 is not None:
                         pts_fg3 = img_search(img3, os.path.join(IMG_DIR, "fixgachafree3.bmp"), threshold=0.95)
@@ -2121,7 +2142,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
             
             img = get_screen_capture(device)
             if img is not None:
-                if _check_fixgachafree(img):
+                if _check_fixgachafree(img, cycle_start):
                     miss_count = 0  # รีเซ็ตการนับเผื่อให้มันหา gachafree1 ต่อได้โดยไม่หลุด loop
                     continue
                 # === Priority: เช็ค endswip.bmp ===
@@ -2438,9 +2459,10 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
     if GACHA_CHECK == 1:
         gui_log(serial, "GachaFree finished. Gacha+Check mode active: waiting for backhome...", step="GachaFree Done")
         
-        # 1. Wait for backhome.bmp indefinitely
+        # 1. Wait for backhome.bmp with a 45-second timeout to prevent infinite hanging
         clicked_home = False
-        while True:
+        deadline_home = time.time() + 45
+        while time.time() < deadline_home:
             check_device_reset(serial, cycle_start)
             img = get_screen_capture(device)
             if img is not None:
@@ -2455,10 +2477,11 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
             time.sleep(1)
         
         if clicked_home:
-            # 1b. Wait for backhome1.bmp indefinitely, click until gone
+            # 1b. Wait for backhome1.bmp with a 30-second timeout, click until gone
             gui_log(serial, "Waiting for backhome1.bmp...", step="Back Home 1 Wait")
             clicked_home1 = False
-            while True:
+            deadline_home1 = time.time() + 30
+            while time.time() < deadline_home1:
                 check_device_reset(serial, cycle_start)
                 img = get_screen_capture(device)
                 if img is not None:
@@ -3169,6 +3192,11 @@ def process_device_login(device):
                 device.shell("su -c 'sync && echo 3 > /proc/sys/vm/drop_caches'")
             except Exception:
                 pass
+            # Clear remote AUTH directory at the end of the cycle to keep the emulator completely clean and secure
+            try:
+                device.shell(f"su -c 'rm -rf {REMOTE_AUTH_DIR}/*'")
+            except Exception:
+                pass
             try:
                 import gc
                 gc.collect()
@@ -3193,11 +3221,14 @@ def main():
         global bot_running
         bot_running = True
         client = AdbClient(host="127.0.0.1", port=5037)
-        for serial in devices:
+        for i, serial in enumerate(devices):
             device = client.device(serial)
             threading.Thread(target=process_device_login,
                              args=(device,), daemon=True).start()
-            time.sleep(1)
+            # ค่อยๆ ทยอยเปิดทีละจอ โดยเว้นระยะ 10 วินาที เพื่อป้องกัน CPU ค้างจากการรันพร้อมกัน
+            if i < len(devices) - 1:
+                print("Waiting 10 seconds before starting the next device...")
+                time.sleep(10.0)
         try:
             while True:
                 time.sleep(1)
