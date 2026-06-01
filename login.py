@@ -194,6 +194,8 @@ if GUI_ENABLED:
             self.login_times      = []
             self._log_buffer      = []     # batch log lines
             self._prev_stats      = {}     # cache previous stat counts to skip no-op updates
+            self.current_filter   = ""
+            self._last_stats_data = (0, 0, 0, {}, 0)
             self.setup_ui()
             self.after(500,  self.connect_adb)
             self.after(2000, self.update_realtime_stats)
@@ -279,6 +281,21 @@ if GUI_ENABLED:
             ctk.CTkLabel(rhdr, text="   🏆 SUMMARY STATS",
                          font=ctk.CTkFont(size=11, weight="bold"),
                          text_color="#f2c94c", anchor="w").pack(side="left")
+            
+            # Search / Filter Bar for Summary Stats
+            search_bar = ctk.CTkFrame(right_frame, fg_color="transparent", height=32)
+            search_bar.pack(fill="x", padx=6, pady=4)
+            self.txt_filter = ctk.CTkEntry(search_bar, placeholder_text="ค้นหาฮีโร่... (เช่น Mbappe)",
+                                           font=ctk.CTkFont(size=11), height=24)
+            self.txt_filter.pack(side="left", fill="x", expand=True, padx=(0, 4))
+            self.txt_filter.bind("<KeyRelease>", lambda event: self.apply_current_filter())
+            
+            self.btn_clear_filter = ctk.CTkButton(search_bar, text="ล้าง", width=40, height=24,
+                                                  font=ctk.CTkFont(size=11), fg_color="#e53935",
+                                                  hover_color="#c62828",
+                                                  command=self.clear_stats_filter)
+            self.btn_clear_filter.pack(side="right")
+
             self.result_scroll = ctk.CTkScrollableFrame(right_frame, fg_color="transparent")
             self.result_scroll.pack(fill="both", expand=True, padx=3, pady=3)
 
@@ -324,6 +341,17 @@ if GUI_ENABLED:
             ctk.CTkLabel(bottom_bar, text="v1.0",
                          font=ctk.CTkFont(size=10), text_color="#888888"
                          ).pack(side="right", padx=8)
+
+        def apply_current_filter(self):
+            self.current_filter = self.txt_filter.get().strip().lower()
+            if hasattr(self, '_last_stats_data'):
+                self._apply_stats_ui(*self._last_stats_data)
+
+        def clear_stats_filter(self):
+            self.txt_filter.delete(0, 'end')
+            self.current_filter = ""
+            if hasattr(self, '_last_stats_data'):
+                self._apply_stats_ui(*self._last_stats_data)
 
         # ── Helpers ─────────────────────────────────────────────────
         def open_config_dialog(self):
@@ -616,7 +644,8 @@ if GUI_ENABLED:
             self.log("Searching for ADB...")
             def _thread():
                 if find_adb_executable():
-                    connect_known_ports()
+                    # DO NOT scan 101 ports on startup! Just check currently connected devices.
+                    # This prevents the CPU process storm and GUI freezing on startup.
                     devices = get_connected_devices()
                     _gui_queue.put(('adb_ready', devices))
                 else:
@@ -710,17 +739,15 @@ if GUI_ENABLED:
         def start_bot_threads(self):
             devices = list(self.device_monitors.keys())
             if not devices:
-                self.log("No devices loaded yet, connecting ADB...")
-                connect_known_ports(quiet=False, kill_server=False)
-                for i, serial in enumerate(get_connected_devices()):
-                    if serial not in self.device_monitors:
-                        m = DeviceMonitorWidget(self.dev_scroll, serial, i + 1)
-                        m.pack(fill="x", pady=1)
-                        self.device_monitors[serial] = m
-                self.lbl_status.configure(
-                    text=f"   ● ONLINE ({len(self.device_monitors)})",
-                    text_color="#4caf50")
-                devices = list(self.device_monitors.keys())
+                self.log("No devices loaded yet! Running ADB scan in background...")
+                def _bg():
+                    connect_known_ports(quiet=False, kill_server=False)
+                    devs = get_connected_devices()
+                    _gui_queue.put(('adb_ready', devs))
+                    # Schedule start_bot_threads on the main thread after a short delay
+                    self.after(1000, self.start_bot_threads)
+                threading.Thread(target=_bg, daemon=True).start()
+                return
 
             if not devices:
                 self.log("ERROR: Still no devices found!")
@@ -766,11 +793,20 @@ if GUI_ENABLED:
                     input_count   = len(glob.glob(os.path.join(INPUT_DIR, "*.dat")))
                     success_count = len(glob.glob(os.path.join(LOGIN_SUCCESS_DIR, "*.dat")))
                     
-                    found_files = (glob.glob(os.path.join(FOUND_HERO_DIR, "**", "*.dat"), recursive=True) +
-                                   glob.glob(os.path.join(BACKUP_ID_DIR, "**", "*.dat"), recursive=True))
+                    # Scan all subfolders inside found-hero and backup-id recursively using os.walk
+                    found_files = []
+                    for root, dirs, files in os.walk(FOUND_HERO_DIR):
+                        for file in files:
+                            if file.lower().endswith(".dat"):
+                                found_files.append(os.path.join(root, file))
+                                
+                    for root, dirs, files in os.walk(BACKUP_ID_DIR):
+                        for file in files:
+                            if file.lower().endswith(".dat"):
+                                found_files.append(os.path.join(root, file))
+
                     hero_count  = len(found_files)
-                    
-                    fail_count = len(glob.glob(os.path.join(FILE_ERROR_DIR, "*.dat")))
+                    fail_count  = len(glob.glob(os.path.join(FILE_ERROR_DIR, "*.dat")))
                     
                     hero_counts = {}
                     for fpath in found_files:
@@ -791,6 +827,11 @@ if GUI_ENABLED:
 
         def _apply_stats_ui(self, input_count, success_count, hero_count, hero_counts, fail_count=0):
             try:
+                self._last_stats_data = (input_count, success_count, hero_count, hero_counts, fail_count)
+                
+                # Check for active search filter
+                filt = getattr(self, 'current_filter', "")
+
                 # อัปเดตเฉพาะค่าที่เปลี่ยน — ไม่ destroy/recreate widget ทุกรอบ
                 prev = self._prev_stats
                 if prev.get('input') != input_count:
@@ -806,12 +847,13 @@ if GUI_ENABLED:
                     self.lbl_fail_count.configure(text=f"❌ {fail_count}")
                     prev['fail'] = fail_count
 
-                # Build desired stat rows
+                # Build desired stat rows with filter applied
                 desired = {}
-                if success_count:
+                if success_count and (not filt or "login" in filt or "สำเร็จ" in filt):
                     desired["✅ login สำเร็จ"] = (success_count, False)
                 for h_name, count in hero_counts.items():
-                    desired[f"⭐ {h_name}"] = (count, False)
+                    if not filt or filt in h_name.lower():
+                        desired[f"⭐ {h_name}"] = (count, False)
 
                 # Remove rows no longer needed
                 stale = [k for k in self.stat_rows if k not in desired]
@@ -949,7 +991,7 @@ def find_adb_executable():
         return True
     return False
 
-def connect_known_ports(quiet=False, kill_server=True):
+def connect_known_ports(quiet=False, kill_server=False):
     try:
         if kill_server:
             subprocess.run([adb_path, "kill-server"],  capture_output=True, timeout=5, shell=(os.name == 'nt'))
