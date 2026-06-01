@@ -86,7 +86,10 @@ HERO_LIST_FREE = [
     "Casemiro",
     "Erling Haaland",
     "Hugo Ekitike",
-    "Declan Rice"
+    "Declan Rice",
+    "Hidetoshi Nakata",
+    "Seigo Narazaki",
+    "Shunsuke Nakamura"
 ]
 
 list_find_hero = [
@@ -116,7 +119,10 @@ list_find_hero = [
     "Casemiro",
     "Erling Haaland",
     "Hugo Ekitike",
-    "Declan Rice"
+    "Declan Rice",
+    "Hidetoshi Nakata",
+    "Seigo Narazaki",
+    "Shunsuke Nakamura"
 ]
 
 

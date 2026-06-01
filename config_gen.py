@@ -22,8 +22,38 @@ GACHA_FREE = 0
 GACHA_FREE_LOOPS = 3
 
 # รายชื่อนักเตะที่ต้องการเก็บ (Gacha Free → found-hero)
-HERO_LIST_FREE = ['Fabio Cannavaro', 'Paolo Maldini', 'Daniele De Rossi', 'Didier Drogba', 'Mohamed Salah', 'Nico Paz', 'Federico Dimarco', 'Luka', 'rgson', 'Arribas', 'Ramedhan Saifullah', 'Chrigor', 'Lamine', 'Mbappe', 'Joan Garcia', 'Martin Odegaard', 'Atep', 'Gareth Bale', 'Aubameyang', 'Marcelo', 'Peter Schmeichel', 'Leonardo Bonucci', 'Ronald Koeman', 'Casemiro', 'Erling Haaland', 'Hugo Ekitike', 'Declan Rice']
-
+HERO_LIST_FREE = [
+    "Fabio Cannavaro",
+    "Paolo Maldini",
+    "Daniele De Rossi",
+    "Didier Drogba",
+    "Mohamed Salah",
+    "Nico Paz",
+    "Federico Dimarco",
+    "Luka",
+    "rgson",
+    "Arribas",
+    "Ramedhan Saifullah",
+    "Chrigor",
+    "Lamine",
+    "Mbappe",
+    "Joan Garcia",
+    "Martin Odegaard",
+    "Atep",
+    "Gareth Bale",
+    "Aubameyang",
+    "Marcelo",
+    "Peter Schmeichel",
+    "Leonardo Bonucci",
+    "Ronald Koeman",
+    "Casemiro",
+    "Erling Haaland",
+    "Hugo Ekitike",
+    "Declan Rice",
+    "Hidetoshi Nakata",
+    "Seigo Narazaki",
+    "Shunsuke Nakamura"
+]
 # ── Path ──────────────────────────────────────────
 IMG_DIR = "img"
 

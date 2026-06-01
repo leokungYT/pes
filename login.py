@@ -283,19 +283,23 @@ if GUI_ENABLED:
                          font=ctk.CTkFont(size=11, weight="bold"),
                          text_color="#f2c94c", anchor="w").pack(side="left")
             
-            # Search / Filter Bar for Summary Stats
+            # Search / Filter Bar for Summary Stats (Multi-tag enabled)
             search_bar = ctk.CTkFrame(right_frame, fg_color="transparent", height=32)
             search_bar.pack(fill="x", padx=6, pady=4)
-            self.txt_filter = ctk.CTkEntry(search_bar, placeholder_text="ค้นหาฮีโร่... (เช่น Mbappe)",
+            self.txt_filter = ctk.CTkEntry(search_bar, placeholder_text="พิมพ์ชื่อนักเตะแล้วกด Enter...",
                                            font=ctk.CTkFont(size=11), height=24)
             self.txt_filter.pack(side="left", fill="x", expand=True, padx=(0, 4))
-            self.txt_filter.bind("<KeyRelease>", lambda event: self.apply_current_filter())
+            self.txt_filter.bind("<Return>", lambda event: self.add_filter_tag())
             
-            self.btn_clear_filter = ctk.CTkButton(search_bar, text="ล้าง", width=40, height=24,
+            self.btn_clear_filter = ctk.CTkButton(search_bar, text="ล้างทั้งหมด", width=65, height=24,
                                                   font=ctk.CTkFont(size=11), fg_color="#e53935",
                                                   hover_color="#c62828",
                                                   command=self.clear_stats_filter)
             self.btn_clear_filter.pack(side="right")
+
+            # Sub-frame to display active search pills/tags
+            self.tags_frame = ctk.CTkFrame(right_frame, fg_color="transparent")
+            self.tags_frame.pack(fill="x", padx=6, pady=(0, 4))
 
             self.result_scroll = ctk.CTkScrollableFrame(right_frame, fg_color="transparent")
             self.result_scroll.pack(fill="both", expand=True, padx=3, pady=3)
@@ -343,16 +347,51 @@ if GUI_ENABLED:
                          font=ctk.CTkFont(size=10), text_color="#888888"
                          ).pack(side="right", padx=8)
 
-        def apply_current_filter(self):
-            self.current_filter = self.txt_filter.get().strip().lower()
+        def add_filter_tag(self):
+            val = self.txt_filter.get().strip().lower()
+            if val:
+                if not hasattr(self, 'active_filters'):
+                    self.active_filters = []
+                if val not in self.active_filters:
+                    self.active_filters.append(val)
+                self.txt_filter.delete(0, 'end')
+                self.render_filter_tags()
+                if hasattr(self, '_last_stats_data'):
+                    self._apply_stats_ui(*self._last_stats_data)
+
+        def remove_filter_tag(self, tag):
+            if hasattr(self, 'active_filters') and tag in self.active_filters:
+                self.active_filters.remove(tag)
+            self.render_filter_tags()
             if hasattr(self, '_last_stats_data'):
                 self._apply_stats_ui(*self._last_stats_data)
 
         def clear_stats_filter(self):
             self.txt_filter.delete(0, 'end')
-            self.current_filter = ""
+            self.active_filters = []
+            self.render_filter_tags()
             if hasattr(self, '_last_stats_data'):
                 self._apply_stats_ui(*self._last_stats_data)
+
+        def render_filter_tags(self):
+            for widget in self.tags_frame.winfo_children():
+                widget.destroy()
+            filters = getattr(self, 'active_filters', [])
+            if not filters:
+                self.tags_frame.pack_forget()
+                return
+            self.tags_frame.pack(fill="x", padx=6, pady=(0, 4))
+            for tag in filters:
+                pill = ctk.CTkFrame(self.tags_frame, fg_color="#1565c0", corner_radius=12, height=20)
+                pill.pack(side="left", padx=2, pady=1)
+                ctk.CTkLabel(pill, text=f" {tag} ", font=ctk.CTkFont(size=10, weight="bold"),
+                             text_color="white").pack(side="left", padx=(4, 2))
+                btn_del = ctk.CTkButton(pill, text="×", width=14, height=14,
+                                        font=ctk.CTkFont(size=9, weight="bold"),
+                                        fg_color="#e53935", hover_color="#c62828",
+                                        corner_radius=7,
+                                        command=lambda t=tag: self.remove_filter_tag(t))
+                btn_del.pack(side="right", padx=(2, 4), pady=2)
 
         # ── Helpers ─────────────────────────────────────────────────
         def open_config_dialog(self):
@@ -831,8 +870,14 @@ if GUI_ENABLED:
             try:
                 self._last_stats_data = (input_count, success_count, hero_count, hero_counts, fail_count)
                 
-                # Check for active search filter
-                filt = getattr(self, 'current_filter', "")
+                # Check for active search filters
+                active_filts = getattr(self, 'active_filters', [])
+                
+                def is_matched(name):
+                    if not active_filts:
+                        return True
+                    name_lower = name.lower()
+                    return any(f in name_lower for f in active_filts)
 
                 # อัปเดตเฉพาะค่าที่เปลี่ยน — ไม่ destroy/recreate widget ทุกรอบ
                 prev = self._prev_stats
@@ -849,12 +894,12 @@ if GUI_ENABLED:
                     self.lbl_fail_count.configure(text=f"❌ {fail_count}")
                     prev['fail'] = fail_count
 
-                # Build desired stat rows with filter applied
+                # Build desired stat rows with multi-tag filter applied
                 desired = {}
-                if success_count and (not filt or "login" in filt or "สำเร็จ" in filt):
+                if success_count and is_matched("login สำเร็จ"):
                     desired["✅ login สำเร็จ"] = (success_count, False)
                 for h_name, count in hero_counts.items():
-                    if not filt or filt in h_name.lower():
+                    if is_matched(h_name):
                         desired[f"⭐ {h_name}"] = (count, False)
 
                 # Remove rows no longer needed
