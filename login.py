@@ -81,6 +81,10 @@ try:
     from config import AUTORUN
 except ImportError:
     AUTORUN = 0
+try:
+    from config import SILENT_UPDATE_MODE
+except ImportError:
+    SILENT_UPDATE_MODE = "keep"
 
 REMOTE_AUTH_DIR   = "/data/data/jp.konami.pesam/files/SaveData/AUTH"
 REMOTE_DAT_FILE   = f"{REMOTE_AUTH_DIR}/online_user_id_data.dat"
@@ -533,9 +537,18 @@ if GUI_ENABLED:
             ctk.CTkSwitch(row11, text="", variable=var_autorun,
                           onvalue=1, offvalue=0).pack(side="right")
 
+            # ── SILENT_UPDATE_MODE segmented button ────────────────────────
+            row_update = ctk.CTkFrame(win, fg_color="transparent")
+            row_update.pack(fill="x", padx=20, pady=4)
+            ctk.CTkLabel(row_update, text="Silent Update Mode",
+                         font=ctk.CTkFont(size=12)).pack(side="left")
+            var_update_mode = ctk.StringVar(value=getattr(cfg, 'SILENT_UPDATE_MODE', 'keep'))
+            ctk.CTkSegmentedButton(row_update, values=["keep", "clean"],
+                                   variable=var_update_mode).pack(side="right")
+
             # ── Save button ───────────────────────────────
             def _save():
-                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, AUTORUN
+                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, AUTORUN, SILENT_UPDATE_MODE
                 new_event = var_event.get()
                 new_box   = var_box.get()
                 new_gacha = var_gacha.get()
@@ -621,6 +634,13 @@ if GUI_ENABLED:
                 else:
                     content += f"\nAUTORUN = {new_autorun}\n"
 
+                new_update_mode = var_update_mode.get()
+                if re.search(r"^SILENT_UPDATE_MODE\s*=\s*['\"].*['\"]", content, flags=re.MULTILINE):
+                    content = re.sub(r"^SILENT_UPDATE_MODE\s*=\s*['\"].*['\"]", f"SILENT_UPDATE_MODE = '{new_update_mode}'",
+                                     content, flags=re.MULTILINE)
+                else:
+                    content += f"\nSILENT_UPDATE_MODE = '{new_update_mode}'\n"
+
                 with open(cfg_path, "w", encoding="utf-8") as f:
                     f.write(content)
                 # อัปเดต runtime ด้วย
@@ -634,10 +654,11 @@ if GUI_ENABLED:
                 NOSCAN     = new_noscan
                 GACHA_CHECK = new_gacha_check
                 AUTORUN    = new_autorun
+                SILENT_UPDATE_MODE = new_update_mode
                 importlib.reload(cfg)
                 label_status.configure(text=f"✅ Saved!",
                                        text_color="#4caf50")
-                self.log(f"Config saved: EVENT={new_event}, BOX={new_box}, GACHA={new_gacha}, HERO={new_find}, GFREE={new_gfree}({new_gfree_loops} loops), COIN={new_ccoin}, NOSCAN={new_noscan}, GACHACHECK={new_gacha_check}, AUTORUN={new_autorun}")
+                self.log(f"Config saved: EVENT={new_event}, BOX={new_box}, GACHA={new_gacha}, HERO={new_find}, GFREE={new_gfree}({new_gfree_loops} loops), COIN={new_ccoin}, NOSCAN={new_noscan}, GACHACHECK={new_gacha_check}, AUTORUN={new_autorun}, SILENT_UPDATE_MODE={new_update_mode}")
 
             ctk.CTkButton(win, text="💾 Save", fg_color="#2cc985",
                           hover_color="#229f69", command=_save).pack(pady=8)

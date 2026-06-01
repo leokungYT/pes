@@ -216,8 +216,13 @@ def update(silent=False):
     print(f"[Updater] New version found: {latest_version}.")
     
     if silent:
-        # ในโหมดเงียบ: เลือกเก็บข้อมูลเดิมไว้เพื่อความปลอดภัยเสมอ
-        mode = "keep"
+        # ในโหมดเงียบ: อ่านค่าโหมดจาก config.py (หากมีค่า clean/keep) หรือดีฟอลต์เป็น keep เพื่อความปลอดภัย
+        try:
+            from config import SILENT_UPDATE_MODE
+            mode = SILENT_UPDATE_MODE if SILENT_UPDATE_MODE in ["keep", "clean"] else "keep"
+        except Exception:
+            mode = "keep"
+        print(f"[Updater] Running silent update with mode: {mode}")
     else:
         # 🌟 เรียกใช้หน้าจอเตือนอัปเดตขนาดใหญ่
         mode = ask_custom_update_ui(latest_version)
