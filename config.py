@@ -150,3 +150,8 @@ TIMEOUT_ENABLE = 1
 
 # Timeout duration in minutes
 TIMEOUT_MINUTES = 10
+
+# ── Autorun on Launch ──────────────────────────────
+# 1 = เปิดโปรแกรมแล้วสแกนและรันบอทอัตโนมัติทันที
+# 0 = ปิดการทำงานอัตโนมัติ (ต้องกดปุ่ม START เอง)
+AUTORUN = 1

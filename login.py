@@ -76,6 +76,10 @@ try:
     from config import list_find_hero
 except ImportError:
     list_find_hero = HERO_LIST
+try:
+    from config import AUTORUN
+except ImportError:
+    AUTORUN = 0
 
 REMOTE_AUTH_DIR   = "/data/data/jp.konami.pesam/files/SaveData/AUTH"
 REMOTE_DAT_FILE   = f"{REMOTE_AUTH_DIR}/online_user_id_data.dat"
@@ -443,9 +447,18 @@ if GUI_ENABLED:
             entry_timeout.insert(0, str(getattr(cfg, 'TIMEOUT_MINUTES', 10)))
             entry_timeout.pack(side="right")
 
+            # ── AUTORUN toggle ──────────────────────────────
+            row11 = ctk.CTkFrame(win, fg_color="transparent")
+            row11.pack(fill="x", padx=20, pady=4)
+            ctk.CTkLabel(row11, text="Auto Run on Launch (รันอัตโนมัติเมื่อเปิด)",
+                         font=ctk.CTkFont(size=12)).pack(side="left")
+            var_autorun = ctk.IntVar(value=getattr(cfg, 'AUTORUN', 0))
+            ctk.CTkSwitch(row11, text="", variable=var_autorun,
+                          onvalue=1, offvalue=0).pack(side="right")
+
             # ── Save button ───────────────────────────────
             def _save():
-                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK
+                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, AUTORUN
                 new_event = var_event.get()
                 new_box   = var_box.get()
                 new_gacha = var_gacha.get()
@@ -456,6 +469,7 @@ if GUI_ENABLED:
                 new_skipanim = var_skipanim.get()
                 new_gacha_check = var_gacha_check.get()
                 new_timeout = var_timeout.get()
+                new_autorun = var_autorun.get()
                 try:
                     new_timeout_mins = int(entry_timeout.get())
                 except ValueError:
@@ -523,6 +537,13 @@ if GUI_ENABLED:
                                      content, flags=re.MULTILINE)
                 else:
                     content += f"\nTIMEOUT_MINUTES = {new_timeout_mins}\n"
+
+                if re.search(r"^AUTORUN\s*=\s*\d", content, flags=re.MULTILINE):
+                    content = re.sub(r"^AUTORUN\s*=\s*\d", f"AUTORUN = {new_autorun}",
+                                     content, flags=re.MULTILINE)
+                else:
+                    content += f"\nAUTORUN = {new_autorun}\n"
+
                 with open(cfg_path, "w", encoding="utf-8") as f:
                     f.write(content)
                 # อัปเดต runtime ด้วย
@@ -535,10 +556,11 @@ if GUI_ENABLED:
                 CHECK_COIN = new_ccoin
                 NOSCAN     = new_noscan
                 GACHA_CHECK = new_gacha_check
+                AUTORUN    = new_autorun
                 importlib.reload(cfg)
                 label_status.configure(text=f"✅ Saved!",
                                        text_color="#4caf50")
-                self.log(f"Config saved: EVENT={new_event}, BOX={new_box}, GACHA={new_gacha}, HERO={new_find}, GFREE={new_gfree}({new_gfree_loops} loops), COIN={new_ccoin}, NOSCAN={new_noscan}, GACHACHECK={new_gacha_check}")
+                self.log(f"Config saved: EVENT={new_event}, BOX={new_box}, GACHA={new_gacha}, HERO={new_find}, GFREE={new_gfree}({new_gfree_loops} loops), COIN={new_ccoin}, NOSCAN={new_noscan}, GACHACHECK={new_gacha_check}, AUTORUN={new_autorun}")
 
             ctk.CTkButton(win, text="💾 Save", fg_color="#2cc985",
                           hover_color="#229f69", command=_save).pack(pady=8)
@@ -613,6 +635,12 @@ if GUI_ENABLED:
                 text=f"   ● ONLINE ({len(self.device_monitors)})",
                 text_color="#4caf50")
             self.log(f"Found {len(devices)} devices.")
+
+            # Trigger auto-run if enabled and devices are connected
+            global AUTORUN
+            if AUTORUN == 1 and devices:
+                self.log("🚀 [AUTORUN] Auto-start enabled! Starting bot in 3 seconds...")
+                self.after(3000, self.toggle_bot)
 
         def connect_missing_devices(self):
             self.log("Scanning for missing emulators...")
