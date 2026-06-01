@@ -204,7 +204,8 @@ if GUI_ENABLED:
             self.after(2000, self.update_realtime_stats)
             self.after(10000, self.auto_scan_devices)
             self.after(100,  self._process_gui_queue)   # centralized GUI queue poller
-            self.after(60000, self.check_background_updates)  # Check for updates 1 minute after launching
+            self.update_check_seconds = 5  # Check update in 5 seconds on startup
+            self.after(1000, self.tick_update_timer)
             self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         # ── UI build ──────────────────────────────────────────────────────
@@ -346,6 +347,9 @@ if GUI_ENABLED:
             ctk.CTkLabel(bottom_bar, text="v1.0",
                          font=ctk.CTkFont(size=10), text_color="#888888"
                          ).pack(side="right", padx=8)
+            self.lbl_update_timer = ctk.CTkLabel(bottom_bar, text="🔄 ตรวจอัปเดตใน: --:--",
+                                                 font=ctk.CTkFont(size=10), text_color="#aaaaaa")
+            self.lbl_update_timer.pack(side="right", padx=15)
 
             # Pack the main frames in the correct order to prevent layout clipping
             bottom_bar.pack(side="bottom", fill="x")
@@ -967,8 +971,8 @@ if GUI_ENABLED:
                 try:
                     import auto_update
                     latest_version, zip_url = auto_update.get_latest_release()
-                    local_version = auto_update.get_local_version()
-                    if latest_version and local_version and latest_version != local_version:
+                    local_version = auto_update.get_local_version() or ""
+                    if latest_version and latest_version != local_version:
                         self.log(f"🔔 [UPDATE] New version {latest_version} detected! Auto-updating silently...")
                         time.sleep(5)
                         global bot_running
@@ -978,7 +982,24 @@ if GUI_ENABLED:
                     print(f"[Update Checker] Error: {e}")
 
             threading.Thread(target=_thread, daemon=True).start()
-            self.after(1800000, self.check_background_updates) # Check every 30 minutes (1800000 ms)
+
+        def tick_update_timer(self):
+            if not hasattr(self, 'update_check_seconds'):
+                self.update_check_seconds = 600
+            
+            if self.update_check_seconds <= 0:
+                self.update_check_seconds = 600
+                self.check_background_updates()
+            
+            mins = self.update_check_seconds // 60
+            secs = self.update_check_seconds % 60
+            try:
+                self.lbl_update_timer.configure(text=f"🔄 ตรวจอัปเดตใน: {mins:02d}:{secs:02d}")
+            except Exception:
+                pass
+            
+            self.update_check_seconds -= 1
+            self.after(1000, self.tick_update_timer)
 
         def perform_silent_update(self):
             self.log("🚀 Running silent auto-updater...")
