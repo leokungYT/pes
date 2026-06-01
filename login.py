@@ -184,7 +184,8 @@ if GUI_ENABLED:
             global gui_instance
             gui_instance = self
             self.title("🔑 loginสะสม PES")
-            self.geometry("780x550")
+            self.geometry("790x620")
+            self.minsize(790, 620)
             self.adb_connected = False
             self.device_monitors  = {}
             self.threads          = []
@@ -202,6 +203,7 @@ if GUI_ENABLED:
             self.after(2000, self.update_realtime_stats)
             self.after(10000, self.auto_scan_devices)
             self.after(100,  self._process_gui_queue)   # centralized GUI queue poller
+            self.after(60000, self.check_background_updates)  # Check for updates 1 minute after launching
             self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         # ── UI build ──────────────────────────────────────────────────────
@@ -260,7 +262,6 @@ if GUI_ENABLED:
 
             # Main content
             main_frame = ctk.CTkFrame(self, fg_color="transparent")
-            main_frame.pack(fill="both", expand=True, padx=6, pady=4)
             main_frame.grid_columnconfigure(0, weight=3)
             main_frame.grid_columnconfigure(1, weight=2)
             main_frame.grid_rowconfigure(0, weight=1)
@@ -306,7 +307,6 @@ if GUI_ENABLED:
 
             # Log
             log_frame = ctk.CTkFrame(self, fg_color="#1e1e1e", corner_radius=6, height=80)
-            log_frame.pack(fill="x", padx=6, pady=(0, 4))
             log_frame.pack_propagate(False)
             self.log_text = ctk.CTkTextbox(log_frame,
                                            font=ctk.CTkFont(family="Consolas", size=10),
@@ -317,7 +317,6 @@ if GUI_ENABLED:
             # Bottom bar
             base_path  = os.path.dirname(os.path.abspath(__file__))
             bottom_bar = ctk.CTkFrame(self, height=32, fg_color="#333333", corner_radius=0)
-            bottom_bar.pack(fill="x")
 
             ctk.CTkButton(bottom_bar, text="🔌 Connect Missing", width=100, height=22,
                           font=ctk.CTkFont(size=10), fg_color="#4caf50",
@@ -346,6 +345,11 @@ if GUI_ENABLED:
             ctk.CTkLabel(bottom_bar, text="v1.0",
                          font=ctk.CTkFont(size=10), text_color="#888888"
                          ).pack(side="right", padx=8)
+
+            # Pack the main frames in the correct order to prevent layout clipping
+            bottom_bar.pack(side="bottom", fill="x")
+            log_frame.pack(side="bottom", fill="x", padx=6, pady=(0, 4))
+            main_frame.pack(side="top", fill="both", expand=True, padx=6, pady=4)
 
         def add_filter_tag(self):
             val = self.txt_filter.get().strip().lower()
@@ -945,6 +949,8 @@ if GUI_ENABLED:
                         self._on_adb_ready(data)
                     elif kind == 'auto_scan':
                         self._on_auto_scan_result(data)
+                    elif kind == 'silent_update':
+                        self.perform_silent_update()
 
                 # Flush any pending log buffer
                 self._flush_log_buffer()
@@ -954,6 +960,36 @@ if GUI_ENABLED:
                 pass
             finally:
                 self.after(30, self._process_gui_queue)
+
+        def check_background_updates(self):
+            def _thread():
+                try:
+                    import auto_update
+                    latest_version, zip_url = auto_update.get_latest_release()
+                    local_version = auto_update.get_local_version()
+                    if latest_version and local_version and latest_version != local_version:
+                        self.log(f"🔔 [UPDATE] New version {latest_version} detected! Auto-updating silently...")
+                        time.sleep(5)
+                        global bot_running
+                        bot_running = False
+                        _gui_queue.put(('silent_update', None))
+                except Exception as e:
+                    print(f"[Update Checker] Error: {e}")
+
+            threading.Thread(target=_thread, daemon=True).start()
+            self.after(1800000, self.check_background_updates) # Check every 30 minutes (1800000 ms)
+
+        def perform_silent_update(self):
+            self.log("🚀 Running silent auto-updater...")
+            self.destroy() # Close GUI
+            
+            # Spawn auto_update.py in silent mode
+            base = os.path.dirname(os.path.abspath(__file__))
+            updater_script = os.path.join(base, "auto_update.py")
+            
+            kwargs = {'creationflags': 0x08000000} if os.name == 'nt' else {}
+            subprocess.Popen([sys.executable, updater_script, "--silent"], **kwargs)
+            os._exit(0)
 
         def on_closing(self):
             from tkinter import messagebox

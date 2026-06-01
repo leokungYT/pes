@@ -200,7 +200,7 @@ def show_custom_info_popup(title, message):
     
     root.mainloop()
 
-def update():
+def update(silent=False):
     print("[Updater] Checking for latest release on GitHub...")
     latest_version, zip_url = get_latest_release()
     
@@ -215,11 +215,15 @@ def update():
         
     print(f"[Updater] New version found: {latest_version}.")
     
-    # 🌟 เรียกใช้หน้าจอเตือนอัปเดตขนาดใหญ่
-    mode = ask_custom_update_ui(latest_version)
-    if not mode:
-        print("[Updater] User skipped the update.")
-        sys.exit(0)
+    if silent:
+        # ในโหมดเงียบ: เลือกเก็บข้อมูลเดิมไว้เพื่อความปลอดภัยเสมอ
+        mode = "keep"
+    else:
+        # 🌟 เรียกใช้หน้าจอเตือนอัปเดตขนาดใหญ่
+        mode = ask_custom_update_ui(latest_version)
+        if not mode:
+            print("[Updater] User skipped the update.")
+            sys.exit(0)
         
     # 🌟 Kill adb.exe ก่อนเพื่อคลายการล็อกไฟล์ในโฟลเดอร์ adb/ (แก้ Permission Denied บน Windows)
     print("[Updater] Terminating active ADB server to unlock dll files...")
@@ -293,20 +297,30 @@ def update():
             for folder in folders_to_ensure:
                 os.makedirs(folder, exist_ok=True)
 
-        # 🌟 แจ้งเตือนเมื่ออัปเดตเสร็จแบบ Custom UI
-        detail_msg = "บอทได้รับการอัปเดตและเก็บรักษาข้อมูลเดิมเรียบร้อยแล้ว!" if mode == "keep" else "บอทได้รับการอัปเดตและล้างข้อมูลเก่าทั้งหมดเรียบร้อยแล้ว!"
-        show_custom_info_popup(
-            "อัปเดตเสร็จสมบูรณ์! ✅",
-            f"บอทได้รับการอัปเดตเป็นเวอร์ชัน {latest_version} เรียบร้อยแล้ว!\n{detail_msg}\nกรุณากดเปิด login.bat ใหม่อีกครั้งเพื่อเริ่มทำงาน"
-        )
-        
-        # ส่ง Exit Code 10 เพื่อบอกให้ batch ไฟล์หยุดการรันบอท (ให้ผู้ใช้เปิดใหม่เอง)
-        sys.exit(10)
+        if not silent:
+            # 🌟 แจ้งเตือนเมื่ออัปเดตเสร็จแบบ Custom UI
+            detail_msg = "บอทได้รับการอัปเดตและเก็บรักษาข้อมูลเดิมเรียบร้อยแล้ว!" if mode == "keep" else "บอทได้รับการอัปเดตและล้างข้อมูลเก่าทั้งหมดเรียบร้อยแล้ว!"
+            show_custom_info_popup(
+                "อัปเดตเสร็จสมบูรณ์! ✅",
+                f"บอทได้รับการอัปเดตเป็นเวอร์ชัน {latest_version} เรียบร้อยแล้ว!\n{detail_msg}\nกรุณากดเปิด login.bat ใหม่อีกครั้งเพื่อเริ่มทำงาน"
+            )
+            # ส่ง Exit Code 10 เพื่อบอกให้ batch ไฟล์หยุดการรันบอท (ให้ผู้ใช้เปิดใหม่เอง)
+            sys.exit(10)
+        else:
+            print("[Updater] Silent update completed! Re-launching login.bat...")
+            os.chdir(os.path.dirname(os.path.abspath(__file__)))
+            if os.name == 'nt':
+                os.system("start cmd /c login.bat")
+            else:
+                subprocess.Popen(["bash", "login.sh"])
+            sys.exit(0)
         
     except Exception as e:
         print(f"[Updater] Update failed: {e}")
-        show_custom_info_popup("อัปเดตล้มเหลว ❌", f"เกิดข้อผิดพลาดในการอัปเดต: {e}")
+        if not silent:
+            show_custom_info_popup("อัปเดตล้มเหลว ❌", f"เกิดข้อผิดพลาดในการอัปเดต: {e}")
         sys.exit(0)
 
 if __name__ == "__main__":
-    update()
+    is_silent = "--silent" in sys.argv or "-s" in sys.argv
+    update(silent=is_silent)
