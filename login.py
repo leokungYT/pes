@@ -196,6 +196,7 @@ if GUI_ENABLED:
             self._prev_stats      = {}     # cache previous stat counts to skip no-op updates
             self.current_filter   = ""
             self._last_stats_data = (0, 0, 0, {}, 0)
+            self.autorun_triggered = False
             self.setup_ui()
             self.after(500,  self.connect_adb)
             self.after(2000, self.update_realtime_stats)
@@ -665,9 +666,10 @@ if GUI_ENABLED:
                 text_color="#4caf50")
             self.log(f"Found {len(devices)} devices.")
 
-            # Trigger auto-run if enabled and devices are connected
+            # Trigger auto-run if enabled (only once on startup, even if 0 devices are found at first)
             global AUTORUN
-            if AUTORUN == 1 and devices:
+            if AUTORUN == 1 and not getattr(self, 'autorun_triggered', False):
+                self.autorun_triggered = True
                 self.log("🚀 [AUTORUN] Auto-start enabled! Starting bot in 3 seconds...")
                 self.after(3000, self.toggle_bot)
 
