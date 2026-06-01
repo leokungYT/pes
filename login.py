@@ -728,6 +728,8 @@ if GUI_ENABLED:
                                    glob.glob(os.path.join(BACKUP_ID_DIR, "**", "*.dat"), recursive=True))
                     hero_count  = len(found_files)
                     
+                    fail_count = len(glob.glob(os.path.join(FILE_ERROR_DIR, "*.dat")))
+                    
                     hero_counts = {}
                     for fpath in found_files:
                         fname = os.path.basename(fpath)
@@ -737,7 +739,7 @@ if GUI_ENABLED:
                             if h_key:
                                 hero_counts[h_key] = hero_counts.get(h_key, 0) + 1
                     
-                    _gui_queue.put(('stats', (input_count, success_count, hero_count, hero_counts)))
+                    _gui_queue.put(('stats', (input_count, success_count, hero_count, hero_counts, fail_count)))
                 except Exception:
                     pass
 
@@ -745,7 +747,7 @@ if GUI_ENABLED:
             t.start()
             self.after(15000, self.update_realtime_stats)
 
-        def _apply_stats_ui(self, input_count, success_count, hero_count, hero_counts):
+        def _apply_stats_ui(self, input_count, success_count, hero_count, hero_counts, fail_count=0):
             try:
                 # อัปเดตเฉพาะค่าที่เปลี่ยน — ไม่ destroy/recreate widget ทุกรอบ
                 prev = self._prev_stats
@@ -758,6 +760,9 @@ if GUI_ENABLED:
                 if hasattr(self, 'lbl_hero_count') and prev.get('hero') != hero_count:
                     self.lbl_hero_count.configure(text=f"⭐ {hero_count}")
                     prev['hero'] = hero_count
+                if hasattr(self, 'lbl_fail_count') and prev.get('fail') != fail_count:
+                    self.lbl_fail_count.configure(text=f"❌ {fail_count}")
+                    prev['fail'] = fail_count
 
                 # Build desired stat rows
                 desired = {}
@@ -864,9 +869,6 @@ def gui_log(serial, msg, step=None, status=None):
     if status or (now - last >= _GUI_LOG_INTERVAL):
         _gui_last_update[serial] = now
         update_gui(serial, log=msg, step=step, status=status)
-        # Queue log text to GUI (will be batched by _process_gui_queue)
-        if gui_instance:
-            _gui_queue.put(('log', f"[{serial}] {msg}"))
     elif step:
         # step สำคัญ ส่งทุกครั้ง แต่ไม่ส่ง log text
         update_gui(serial, step=step)
