@@ -89,7 +89,10 @@ HERO_LIST_FREE = [
     "Declan Rice",
     "Hidetoshi Nakata",
     "Seigo Narazaki",
-    "Shunsuke Nakamura"
+    "Shunsuke Nakamura",
+    "Vitinha",
+    "David Raya",
+    "Kvaratskhelia"
 ]
 
 list_find_hero = [
@@ -122,7 +125,10 @@ list_find_hero = [
     "Declan Rice",
     "Hidetoshi Nakata",
     "Seigo Narazaki",
-    "Shunsuke Nakamura"
+    "Shunsuke Nakamura",
+    "Vitinha",
+    "David Raya",
+    "Kvaratskhelia"
 ]
 
 
