@@ -85,6 +85,10 @@ try:
     from config import SILENT_UPDATE_MODE
 except ImportError:
     SILENT_UPDATE_MODE = "keep"
+try:
+    from config import OVERWRITE_CONFIG_ON_UPDATE
+except ImportError:
+    OVERWRITE_CONFIG_ON_UPDATE = True
 
 REMOTE_AUTH_DIR   = "/data/data/jp.konami.pesam/files/SaveData/AUTH"
 REMOTE_DAT_FILE   = f"{REMOTE_AUTH_DIR}/online_user_id_data.dat"
@@ -546,9 +550,18 @@ if GUI_ENABLED:
             ctk.CTkSegmentedButton(row_update, values=["keep", "clean"],
                                    variable=var_update_mode).pack(side="right")
 
+            # ── OVERWRITE_CONFIG_ON_UPDATE toggle ──────────────────────────────
+            row_overwrite_cfg = ctk.CTkFrame(win, fg_color="transparent")
+            row_overwrite_cfg.pack(fill="x", padx=20, pady=4)
+            ctk.CTkLabel(row_overwrite_cfg, text="Sync Config (อัปเดตตั้งค่าตามเครื่องแม่)",
+                         font=ctk.CTkFont(size=12)).pack(side="left")
+            var_overwrite_cfg = ctk.IntVar(value=1 if getattr(cfg, 'OVERWRITE_CONFIG_ON_UPDATE', True) else 0)
+            ctk.CTkSwitch(row_overwrite_cfg, text="", variable=var_overwrite_cfg,
+                          onvalue=1, offvalue=0).pack(side="right")
+
             # ── Save button ───────────────────────────────
             def _save():
-                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, AUTORUN, SILENT_UPDATE_MODE
+                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE
                 new_event = var_event.get()
                 new_box   = var_box.get()
                 new_gacha = var_gacha.get()
@@ -641,6 +654,13 @@ if GUI_ENABLED:
                 else:
                     content += f"\nSILENT_UPDATE_MODE = '{new_update_mode}'\n"
 
+                new_overwrite_cfg = True if var_overwrite_cfg.get() == 1 else False
+                if re.search(r"^OVERWRITE_CONFIG_ON_UPDATE\s*=\s*(True|False)", content, flags=re.MULTILINE):
+                    content = re.sub(r"^OVERWRITE_CONFIG_ON_UPDATE\s*=\s*(True|False)", f"OVERWRITE_CONFIG_ON_UPDATE = {new_overwrite_cfg}",
+                                     content, flags=re.MULTILINE)
+                else:
+                    content += f"\nOVERWRITE_CONFIG_ON_UPDATE = {new_overwrite_cfg}\n"
+
                 with open(cfg_path, "w", encoding="utf-8") as f:
                     f.write(content)
                 # อัปเดต runtime ด้วย
@@ -655,10 +675,11 @@ if GUI_ENABLED:
                 GACHA_CHECK = new_gacha_check
                 AUTORUN    = new_autorun
                 SILENT_UPDATE_MODE = new_update_mode
+                OVERWRITE_CONFIG_ON_UPDATE = new_overwrite_cfg
                 importlib.reload(cfg)
                 label_status.configure(text=f"✅ Saved!",
                                        text_color="#4caf50")
-                self.log(f"Config saved: EVENT={new_event}, BOX={new_box}, GACHA={new_gacha}, HERO={new_find}, GFREE={new_gfree}({new_gfree_loops} loops), COIN={new_ccoin}, NOSCAN={new_noscan}, GACHACHECK={new_gacha_check}, AUTORUN={new_autorun}, SILENT_UPDATE_MODE={new_update_mode}")
+                self.log(f"Config saved: EVENT={new_event}, BOX={new_box}, GACHA={new_gacha}, HERO={new_find}, GFREE={new_gfree}({new_gfree_loops} loops), COIN={new_ccoin}, NOSCAN={new_noscan}, GACHACHECK={new_gacha_check}, AUTORUN={new_autorun}, SILENT_UPDATE_MODE={new_update_mode}, OVERWRITE_CONFIG={new_overwrite_cfg}")
 
             ctk.CTkButton(win, text="💾 Save", fg_color="#2cc985",
                           hover_color="#229f69", command=_save).pack(pady=8)

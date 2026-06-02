@@ -166,3 +166,8 @@ AUTORUN = 1
 # 'keep'  = สั่งอัปเดตแบบไม่ลบไฟล์เดิม (รักษาข้อมูลรหัสไอดีและฮีโร่ทั้งหมด)
 # 'clean' = สั่งอัปเดตแบบล้างข้อมูลทั้งหมด (ลบไฟล์เก่าในระบบออกทั้งหมด)
 SILENT_UPDATE_MODE = 'keep'
+
+# ── Overwrite Config on Update ─────────────────────
+# True  = อนุญาตให้อัปเดตไฟล์ config.py ตามเครื่องแม่ (GitHub Release)
+# False = ห้ามเขียนทับไฟล์ config.py (เก็บการตั้งค่าเดิมของเครื่องลูกไว้)
+OVERWRITE_CONFIG_ON_UPDATE = True

@@ -240,6 +240,11 @@ def update(silent=False):
     print(f"[Updater] Downloading update {latest_version}...")
     
     try:
+        from config import OVERWRITE_CONFIG_ON_UPDATE
+    except Exception:
+        OVERWRITE_CONFIG_ON_UPDATE = True
+
+    try:
         req = urllib.request.Request(zip_url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=30) as response:
             with zipfile.ZipFile(io.BytesIO(response.read())) as zip_ref:
@@ -257,8 +262,11 @@ def update(silent=False):
                         
                     # ข้ามการเขียนทับไฟล์ config.py เพื่อป้องกันการตั้งค่าของคุณหาย
                     if target_path.endswith("config.py") and os.path.exists(target_path):
-                        print(f"[Updater] Skipping {target_path} to preserve your settings.")
-                        continue
+                        if not OVERWRITE_CONFIG_ON_UPDATE:
+                            print(f"[Updater] Skipping {target_path} to preserve your settings.")
+                            continue
+                        else:
+                            print(f"[Updater] Overwriting {target_path} to synchronize with mother machine.")
                         
                     target_full_path = os.path.join(os.getcwd(), target_path)
                     
