@@ -323,6 +323,10 @@ def update(silent=False):
             print("[Updater] Silent update completed! Re-launching login.bat...")
             os.chdir(os.path.dirname(os.path.abspath(__file__)))
             if os.name == 'nt':
+                try:
+                    subprocess.run(["taskkill", "/f", "/fi", "WINDOWTITLE eq PES Bot Runner*"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=0x08000000)
+                except Exception:
+                    pass
                 os.system("start cmd /c login.bat")
             else:
                 subprocess.Popen(["bash", "login.sh"])
