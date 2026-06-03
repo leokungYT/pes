@@ -360,7 +360,8 @@ if GUI_ENABLED:
                 version_file = os.path.join(base_path, "version.txt")
                 if os.path.exists(version_file):
                     with open(version_file, "r", encoding="utf-8") as f:
-                        version_str = f.read().strip()
+                        raw_ver = f.read().strip()
+                        version_str = raw_ver if raw_ver.lower().startswith("v") else f"v{raw_ver}"
             except Exception:
                 pass
 
@@ -2464,7 +2465,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                     break
             miss_count += 1
             gui_log(serial, f"[Loop {loop_num}] gachafree1 not here, swiping... ({miss_count}/{max_miss})", step="Swipe")
-            device.shell("input swipe 618 308 54 306 1500")
+            device.shell("input swipe 618 308 54 306 3500")
             time.sleep(2.0)
 
         if not found_free:
