@@ -14,15 +14,25 @@ REPO = "leokungYT/pes"
 VERSION_FILE = "version.txt"
 
 def get_latest_release():
-    url = f"https://api.github.com/repos/{REPO}/releases/latest"
+    # 🌟 หลีกเลี่ยง GitHub API Rate Limit โดยการดึงผ่าน raw content แทน
+    url = f"https://raw.githubusercontent.com/{REPO}/main/version.txt"
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=10) as response:
-            data = json.loads(response.read().decode())
-            return data.get('tag_name'), data.get('zipball_url')
+            tag_name = response.read().decode().strip()
+            zip_url = f"https://github.com/{REPO}/archive/refs/tags/{tag_name}.zip"
+            return tag_name, zip_url
     except Exception as e:
-        print(f"[Updater] Failed to check for updates: {e}")
-        return None, None
+        try:
+            url_alt = f"https://raw.githubusercontent.com/{REPO}/master/version.txt"
+            req = urllib.request.Request(url_alt, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=10) as response:
+                tag_name = response.read().decode().strip()
+                zip_url = f"https://github.com/{REPO}/archive/refs/tags/{tag_name}.zip"
+                return tag_name, zip_url
+        except Exception as e_alt:
+            print(f"[Updater] Failed to check for updates (Raw Content): {e_alt}")
+            return None, None
 
 def get_local_version():
     if os.path.exists(VERSION_FILE):
