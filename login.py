@@ -1109,9 +1109,10 @@ def check_device_reset(serial, cycle_start=None):
         if TIMEOUT_ENABLE == 1 and cycle_start is not None:
             if time.time() - cycle_start > TIMEOUT_MINUTES * 60:
                 raise DeviceTimeoutException(serial)
-    except Exception:
+    except (ImportError, AttributeError):
+        # Config not found — use fallback 10 min timeout
         if cycle_start is not None:
-            if time.time() - cycle_start > 600:  # 10 mins fallback
+            if time.time() - cycle_start > 600:
                 raise DeviceTimeoutException(serial)
 
 def update_gui(serial, **kwargs):
