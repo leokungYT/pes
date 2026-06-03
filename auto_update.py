@@ -14,13 +14,15 @@ REPO = "leokungYT/pes"
 VERSION_FILE = "version.txt"
 
 def get_latest_release():
-    # 🌟 หลีกเลี่ยง GitHub API Rate Limit โดยการดึงผ่าน raw content แทน
+    # 🌟 ดึงข้อมูลเวอร์ชันผ่าน Raw Content ของกิ่งหลัก (main) และใช้ ZIP ล่าสุดของกิ่งนั้นโดยตรง
+    # ข้อดี: พี่เพียงแค่แก้เลขเวอร์ชันใน version.txt แล้ว push ขึ้น GitHub บอตเครื่องลูกจะอัปเดตทันที (ไม่ต้องกดสร้าง Release/Tag บนเว็บ)
     url = f"https://raw.githubusercontent.com/{REPO}/main/version.txt"
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=10) as response:
             tag_name = response.read().decode().strip()
-            zip_url = f"https://github.com/{REPO}/archive/refs/tags/{tag_name}.zip"
+            # ใช้ไฟล์ ZIP ล่าสุดจากกิ่ง main
+            zip_url = f"https://github.com/{REPO}/archive/refs/heads/main.zip"
             return tag_name, zip_url
     except Exception as e:
         try:
@@ -28,7 +30,8 @@ def get_latest_release():
             req = urllib.request.Request(url_alt, headers={'User-Agent': 'Mozilla/5.0'})
             with urllib.request.urlopen(req, timeout=10) as response:
                 tag_name = response.read().decode().strip()
-                zip_url = f"https://github.com/{REPO}/archive/refs/tags/{tag_name}.zip"
+                # ใช้ไฟล์ ZIP ล่าสุดจากกิ่ง master
+                zip_url = f"https://github.com/{REPO}/archive/refs/heads/master.zip"
                 return tag_name, zip_url
         except Exception as e_alt:
             print(f"[Updater] Failed to check for updates (Raw Content): {e_alt}")
