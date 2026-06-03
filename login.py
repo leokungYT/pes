@@ -1,5 +1,7 @@
 import os
 import sys
+import socket
+socket.setdefaulttimeout(15.0)  # ป้องกันปัญหาระบบค้างใน socket ระดับล่างแบบถาวร
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -1082,8 +1084,10 @@ def check_device_reset(serial, cycle_start=None):
         if TIMEOUT_ENABLE == 1 and cycle_start is not None:
             if time.time() - cycle_start > TIMEOUT_MINUTES * 60:
                 raise DeviceTimeoutException(serial)
-    except ImportError:
-        pass
+    except Exception:
+        if cycle_start is not None:
+            if time.time() - cycle_start > 600:  # 10 mins fallback
+                raise DeviceTimeoutException(serial)
 
 def update_gui(serial, **kwargs):
     """Queue a device update — never call GUI directly from worker threads."""
