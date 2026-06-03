@@ -354,7 +354,17 @@ if GUI_ENABLED:
                           command=lambda: subprocess.Popen(
                               f'explorer "{os.path.join(base_path, LOG_DIR)}"')
                           ).pack(side="left", padx=3, pady=4)
-            ctk.CTkLabel(bottom_bar, text="v1.0",
+            # Read version dynamically from version.txt
+            version_str = "v1.0"
+            try:
+                version_file = os.path.join(base_path, "version.txt")
+                if os.path.exists(version_file):
+                    with open(version_file, "r", encoding="utf-8") as f:
+                        version_str = f.read().strip()
+            except Exception:
+                pass
+
+            ctk.CTkLabel(bottom_bar, text=version_str,
                          font=ctk.CTkFont(size=10), text_color="#888888"
                          ).pack(side="right", padx=8)
             self.lbl_update_timer = ctk.CTkLabel(bottom_bar, text="🔄 ตรวจอัปเดตใน: --:--",
@@ -1013,16 +1023,30 @@ if GUI_ENABLED:
         def check_background_updates(self):
             def _thread():
                 try:
+                    # Ensure script directory is in sys.path for background imports
+                    base = os.path.dirname(os.path.abspath(__file__))
+                    if base not in sys.path:
+                        sys.path.insert(0, base)
+                    
                     import auto_update
+                    _gui_queue.put(('log', "🔍 [Update Checker] Checking for new updates..."))
                     latest_version, zip_url = auto_update.get_latest_release()
                     local_version = auto_update.get_local_version() or ""
-                    if latest_version and latest_version != local_version:
-                        self.log(f"🔔 [UPDATE] New version {latest_version} detected! Auto-updating silently...")
+                    
+                    if not latest_version:
+                        _gui_queue.put(('log', "⚠️ [Update Checker] Could not fetch latest version (GitHub error or offline)."))
+                        return
+
+                    _gui_queue.put(('log', f"🔍 [Update Checker] Check complete. Local: {local_version}, Latest: {latest_version}"))
+                    
+                    if latest_version != local_version:
+                        _gui_queue.put(('log', f"🔔 [UPDATE] New version {latest_version} detected! Auto-updating silently in 5s..."))
                         time.sleep(5)
                         global bot_running
                         bot_running = False
                         _gui_queue.put(('silent_update', None))
                 except Exception as e:
+                    _gui_queue.put(('log', f"❌ [Update Checker] Error: {e}"))
                     print(f"[Update Checker] Error: {e}")
 
             threading.Thread(target=_thread, daemon=True).start()
@@ -1055,7 +1079,7 @@ if GUI_ENABLED:
             
             kwargs = {'creationflags': 0x08000000} if os.name == 'nt' else {}
             subprocess.Popen([sys.executable, updater_script, "--silent"], **kwargs)
-            os._exit(0)
+            os._exit(12)
 
         def on_closing(self):
             from tkinter import messagebox

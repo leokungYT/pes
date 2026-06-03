@@ -23,4 +23,10 @@ echo ------------------------------------------
 echo        STEP 2: Starting PES Bot...
 echo ------------------------------------------
 py login.py
+
+:: If login.py exits with code 12, it means it is triggering a background silent update.
+:: Exit immediately to close the CMD window and prevent it from staying paused.
+if %errorlevel% equ 12 (
+    exit
+)
 pause
