@@ -430,16 +430,21 @@ if GUI_ENABLED:
 
             win = ctk.CTkToplevel(self)
             win.title("⚙️ Config")
-            win.geometry("380x600")
-            win.resizable(False, False)
+            win.geometry("420x650")
+            win.minsize(380, 400)
+            win.resizable(True, True)
             win.grab_set()   # modal
 
             ctk.CTkLabel(win, text="Bot Configuration",
                          font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(16, 8))
 
+            # ── Scrollable frame for all config rows ──────
+            scroll_cfg = ctk.CTkScrollableFrame(win, fg_color="transparent")
+            scroll_cfg.pack(fill="both", expand=True, padx=6, pady=(0, 4))
+
             # ── EVENT_IMG toggle ────────────────────────────
-            row = ctk.CTkFrame(win, fg_color="transparent")
-            row.pack(fill="x", padx=20, pady=4)
+            row = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
+            row.pack(fill="x", padx=14, pady=4)
             ctk.CTkLabel(row, text="Event Image (play22→play31)",
                          font=ctk.CTkFont(size=12)).pack(side="left")
             var_event = ctk.IntVar(value=cfg.EVENT_IMG)
@@ -447,8 +452,8 @@ if GUI_ENABLED:
                           onvalue=1, offvalue=0).pack(side="right")
 
             # ── DO_BOX toggle ──────────────────────────────
-            row2 = ctk.CTkFrame(win, fg_color="transparent")
-            row2.pack(fill="x", padx=20, pady=4)
+            row2 = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
+            row2.pack(fill="x", padx=14, pady=4)
             ctk.CTkLabel(row2, text="Open Box Sequence (1-4)",
                          font=ctk.CTkFont(size=12)).pack(side="left")
             var_box = ctk.IntVar(value=cfg.DO_BOX)
@@ -456,8 +461,8 @@ if GUI_ENABLED:
                           onvalue=1, offvalue=0).pack(side="right")
 
             # ── DO_GACHA toggle ────────────────────────────
-            row3 = ctk.CTkFrame(win, fg_color="transparent")
-            row3.pack(fill="x", padx=20, pady=4)
+            row3 = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
+            row3.pack(fill="x", padx=14, pady=4)
             ctk.CTkLabel(row3, text="Gacha Mode",
                          font=ctk.CTkFont(size=12)).pack(side="left")
             var_gacha = ctk.IntVar(value=cfg.DO_GACHA)
@@ -465,8 +470,8 @@ if GUI_ENABLED:
                           onvalue=1, offvalue=0).pack(side="right")
 
             # ── FIND_HERO toggle ───────────────────────────
-            row4 = ctk.CTkFrame(win, fg_color="transparent")
-            row4.pack(fill="x", padx=20, pady=4)
+            row4 = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
+            row4.pack(fill="x", padx=14, pady=4)
             ctk.CTkLabel(row4, text="Find Hero Mode",
                          font=ctk.CTkFont(size=12)).pack(side="left")
             var_find_hero = ctk.IntVar(value=getattr(cfg, 'FIND_HERO', 0))
@@ -474,8 +479,8 @@ if GUI_ENABLED:
                           onvalue=1, offvalue=0).pack(side="right")
 
             # ── GACHA_FREE toggle ──────────────────────────
-            row5 = ctk.CTkFrame(win, fg_color="transparent")
-            row5.pack(fill="x", padx=20, pady=4)
+            row5 = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
+            row5.pack(fill="x", padx=14, pady=4)
             ctk.CTkLabel(row5, text="Gacha Free Mode",
                          font=ctk.CTkFont(size=12)).pack(side="left")
             var_gacha_free = ctk.IntVar(value=getattr(cfg, 'GACHA_FREE', 0))
@@ -483,8 +488,8 @@ if GUI_ENABLED:
                           onvalue=1, offvalue=0).pack(side="right")
 
             # ── GACHA_FREE_LOOPS entry ─────────────────────
-            row5_loops = ctk.CTkFrame(win, fg_color="transparent")
-            row5_loops.pack(fill="x", padx=20, pady=4)
+            row5_loops = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
+            row5_loops.pack(fill="x", padx=14, pady=4)
             ctk.CTkLabel(row5_loops, text="  └─ Loops count",
                          font=ctk.CTkFont(size=11, slant="italic")).pack(side="left", padx=(10, 0))
             entry_gfree_loops = ctk.CTkEntry(row5_loops, width=50, height=20, justify="center")
@@ -492,8 +497,8 @@ if GUI_ENABLED:
             entry_gfree_loops.pack(side="right")
 
             # ── CHECK_COIN toggle ──────────────────────────
-            row6 = ctk.CTkFrame(win, fg_color="transparent")
-            row6.pack(fill="x", padx=20, pady=4)
+            row6 = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
+            row6.pack(fill="x", padx=14, pady=4)
             ctk.CTkLabel(row6, text="Check Coin Mode",
                          font=ctk.CTkFont(size=12)).pack(side="left")
             var_check_coin = ctk.IntVar(value=getattr(cfg, 'CHECK_COIN', 0))
@@ -501,8 +506,8 @@ if GUI_ENABLED:
                           onvalue=1, offvalue=0).pack(side="right")
 
             # ── NOSCAN toggle ─────────────────────────────
-            row7 = ctk.CTkFrame(win, fg_color="transparent")
-            row7.pack(fill="x", padx=20, pady=4)
+            row7 = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
+            row7.pack(fill="x", padx=14, pady=4)
             ctk.CTkLabel(row7, text="No Scan Mode (ข้ามสแกน → fast-random)",
                          font=ctk.CTkFont(size=12)).pack(side="left")
             var_noscan = ctk.IntVar(value=getattr(cfg, 'NOSCAN', 0))
@@ -510,8 +515,8 @@ if GUI_ENABLED:
                           onvalue=1, offvalue=0).pack(side="right")
 
             # ── SKIPANIMATION toggle ─────────────────────────────
-            row8 = ctk.CTkFrame(win, fg_color="transparent")
-            row8.pack(fill="x", padx=20, pady=4)
+            row8 = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
+            row8.pack(fill="x", padx=14, pady=4)
             ctk.CTkLabel(row8, text="Skip Animation (Fast Taps)",
                          font=ctk.CTkFont(size=12)).pack(side="left")
             var_skipanim = ctk.IntVar(value=getattr(cfg, 'SKIPANIMATION', 0))
@@ -519,8 +524,8 @@ if GUI_ENABLED:
                           onvalue=1, offvalue=0).pack(side="right")
 
             # ── GACHA_CHECK toggle ─────────────────────────────
-            row9 = ctk.CTkFrame(win, fg_color="transparent")
-            row9.pack(fill="x", padx=20, pady=4)
+            row9 = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
+            row9.pack(fill="x", padx=14, pady=4)
             ctk.CTkLabel(row9, text="Gachafree + check mode",
                          font=ctk.CTkFont(size=12)).pack(side="left")
             var_gacha_check = ctk.IntVar(value=getattr(cfg, 'GACHA_CHECK', 0))
@@ -528,8 +533,8 @@ if GUI_ENABLED:
                           onvalue=1, offvalue=0).pack(side="right")
 
             # ── TIMEOUT toggle ──────────────────────────────
-            row10 = ctk.CTkFrame(win, fg_color="transparent")
-            row10.pack(fill="x", padx=20, pady=4)
+            row10 = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
+            row10.pack(fill="x", padx=14, pady=4)
             ctk.CTkLabel(row10, text="Timeout Mode (กันค้าง)",
                          font=ctk.CTkFont(size=12)).pack(side="left")
             var_timeout = ctk.IntVar(value=getattr(cfg, 'TIMEOUT_ENABLE', 1))
@@ -537,8 +542,8 @@ if GUI_ENABLED:
                           onvalue=1, offvalue=0).pack(side="right")
 
             # ── TIMEOUT_MINUTES entry ──────────────────────
-            row10_time = ctk.CTkFrame(win, fg_color="transparent")
-            row10_time.pack(fill="x", padx=20, pady=4)
+            row10_time = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
+            row10_time.pack(fill="x", padx=14, pady=4)
             ctk.CTkLabel(row10_time, text="  ↳ เวลาสูงสุด (Minutes)",
                          font=ctk.CTkFont(size=11, slant="italic")).pack(side="left", padx=(10, 0))
             entry_timeout = ctk.CTkEntry(row10_time, width=50, height=20, justify="center")
@@ -546,8 +551,8 @@ if GUI_ENABLED:
             entry_timeout.pack(side="right")
 
             # ── AUTORUN toggle ──────────────────────────────
-            row11 = ctk.CTkFrame(win, fg_color="transparent")
-            row11.pack(fill="x", padx=20, pady=4)
+            row11 = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
+            row11.pack(fill="x", padx=14, pady=4)
             ctk.CTkLabel(row11, text="Auto Run on Launch (รันอัตโนมัติเมื่อเปิด)",
                          font=ctk.CTkFont(size=12)).pack(side="left")
             var_autorun = ctk.IntVar(value=getattr(cfg, 'AUTORUN', 0))
@@ -555,8 +560,8 @@ if GUI_ENABLED:
                           onvalue=1, offvalue=0).pack(side="right")
 
             # ── SILENT_UPDATE_MODE segmented button ────────────────────────
-            row_update = ctk.CTkFrame(win, fg_color="transparent")
-            row_update.pack(fill="x", padx=20, pady=4)
+            row_update = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
+            row_update.pack(fill="x", padx=14, pady=4)
             ctk.CTkLabel(row_update, text="Silent Update Mode",
                          font=ctk.CTkFont(size=12)).pack(side="left")
             var_update_mode = ctk.StringVar(value=getattr(cfg, 'SILENT_UPDATE_MODE', 'keep'))
@@ -564,15 +569,15 @@ if GUI_ENABLED:
                                    variable=var_update_mode).pack(side="right")
 
             # ── OVERWRITE_CONFIG_ON_UPDATE toggle ──────────────────────────────
-            row_overwrite_cfg = ctk.CTkFrame(win, fg_color="transparent")
-            row_overwrite_cfg.pack(fill="x", padx=20, pady=4)
+            row_overwrite_cfg = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
+            row_overwrite_cfg.pack(fill="x", padx=14, pady=4)
             ctk.CTkLabel(row_overwrite_cfg, text="Sync Config (อัปเดตตั้งค่าตามเครื่องแม่)",
                          font=ctk.CTkFont(size=12)).pack(side="left")
             var_overwrite_cfg = ctk.IntVar(value=1 if getattr(cfg, 'OVERWRITE_CONFIG_ON_UPDATE', True) else 0)
             ctk.CTkSwitch(row_overwrite_cfg, text="", variable=var_overwrite_cfg,
                           onvalue=1, offvalue=0).pack(side="right")
 
-            # ── Save button ───────────────────────────────
+            # ── Save button (pinned at bottom, outside scrollable area) ───
             def _save():
                 global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE
                 new_event = var_event.get()
