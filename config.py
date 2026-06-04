@@ -21,7 +21,7 @@ DO_GACHA = 0
 # ── Gacha + Check Mode ──────────────────────────────
 # 1 = สุ่มกาชาเสร็จแล้วกด backhome ต่อด้วยค้นหาฮีโร่ทันที
 # 0 = ข้าม
-GACHA_CHECK = 1
+GACHA_CHECK = 0
 
 # รายชื่อนักเตะที่ต้องการเก็บ (Backup-id)
 HERO_LIST = [
@@ -53,7 +53,7 @@ HERO_IMG_MAP = {
 # ── Gacha Free Sequence ───────────────────────────
 # 1 = ทำ gacha free หลังจบ box (gacha1 → gacha2 → เลื่อนหา gachafree1)
 # 0 = ข้าม
-GACHA_FREE = 0
+GACHA_FREE = 1
 
 # จำนวนลูปย่อยที่ต้องการสุ่มกาชาฟรี (เช่น 2, 3, 5)
 GACHA_FREE_LOOPS = 10
@@ -92,7 +92,14 @@ HERO_LIST_FREE = [
     "Shunsuke Nakamura",
     "Vitinha",
     "David Raya",
-    "Kvaratskhelia"
+    "Kvaratskhelia",
+    "Johan Cruyff",
+    "Filippo Inzaghi",
+    "Jordi Alba",
+    "Oliver Kahn",
+    "David Beckham",
+    "Rivaldo",
+    ""
 ]
 
 list_find_hero = [
@@ -128,7 +135,14 @@ list_find_hero = [
     "Shunsuke Nakamura",
     "Vitinha",
     "David Raya",
-    "Kvaratskhelia"
+    "Kvaratskhelia",
+    "Johan Cruyff",
+    "Filippo Inzaghi",
+    "Jordi Alba",
+    "Oliver Kahn",
+    "David Beckham",
+    "Rivaldo",
+    ""
 ]
 
 
@@ -171,9 +185,17 @@ AUTORUN = 1
 # ── Silent Update Mode ─────────────────────────────
 # 'keep'  = สั่งอัปเดตแบบไม่ลบไฟล์เดิม (รักษาข้อมูลรหัสไอดีและฮีโร่ทั้งหมด)
 # 'clean' = สั่งอัปเดตแบบล้างข้อมูลทั้งหมด (ลบไฟล์เก่าในระบบออกทั้งหมด)
-SILENT_UPDATE_MODE = 'keep'
+SILENT_UPDATE_MODE = 'clean'
 
 # ── Overwrite Config on Update ─────────────────────
 # True  = อนุญาตให้อัปเดตไฟล์ config.py ตามเครื่องแม่ (GitHub Release)
 # False = ห้ามเขียนทับไฟล์ config.py (เก็บการตั้งค่าเดิมของเครื่องลูกไว้)
 OVERWRITE_CONFIG_ON_UPDATE = True
+
+# ── Get Code Sequence ─────────────────────────────
+# 1 = ทำขั้นตอน getcode (getcode1→getcode6 + พิมพ์โค้ด) ก่อน Box
+# 0 = ข้าม
+GETCODE = 1
+
+# ข้อความที่จะพิมพ์ในช่อง code (สามารถเปลี่ยนได้ตามต้องการ)
+GETCODE_TEXT = "eFCONNECT"

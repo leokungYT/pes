@@ -52,7 +52,17 @@ HERO_LIST_FREE = [
     "Declan Rice",
     "Hidetoshi Nakata",
     "Seigo Narazaki",
-    "Shunsuke Nakamura"
+    "Shunsuke Nakamura",
+    "Vitinha",
+    "David Raya",
+    "Kvaratskhelia",
+    "Johan Cruyff",
+    "Filippo Inzaghi",
+    "Jordi Alba",
+    "Oliver Kahn",
+    "David Beckham",
+    "Rivaldo",
+    ""
 ]
 # ── Path ──────────────────────────────────────────
 IMG_DIR = "img"

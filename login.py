@@ -91,6 +91,14 @@ try:
     from config import OVERWRITE_CONFIG_ON_UPDATE
 except ImportError:
     OVERWRITE_CONFIG_ON_UPDATE = True
+try:
+    from config import GETCODE
+except ImportError:
+    GETCODE = 0
+try:
+    from config import GETCODE_TEXT
+except ImportError:
+    GETCODE_TEXT = "eFCONNECT"
 
 REMOTE_AUTH_DIR   = "/data/data/jp.konami.pesam/files/SaveData/AUTH"
 REMOTE_DAT_FILE   = f"{REMOTE_AUTH_DIR}/online_user_id_data.dat"
@@ -577,9 +585,27 @@ if GUI_ENABLED:
             ctk.CTkSwitch(row_overwrite_cfg, text="", variable=var_overwrite_cfg,
                           onvalue=1, offvalue=0).pack(side="right")
 
+            # ── GETCODE toggle ──────────────────────────────
+            row_getcode = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
+            row_getcode.pack(fill="x", padx=14, pady=4)
+            ctk.CTkLabel(row_getcode, text="Get Code Mode (ใส่โค้ดก่อน Box)",
+                         font=ctk.CTkFont(size=12)).pack(side="left")
+            var_getcode = ctk.IntVar(value=getattr(cfg, 'GETCODE', 0))
+            ctk.CTkSwitch(row_getcode, text="", variable=var_getcode,
+                          onvalue=1, offvalue=0).pack(side="right")
+
+            # ── GETCODE_TEXT entry ──────────────────────────
+            row_getcode_txt = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
+            row_getcode_txt.pack(fill="x", padx=14, pady=4)
+            ctk.CTkLabel(row_getcode_txt, text="  └─ Code Text",
+                         font=ctk.CTkFont(size=11, slant="italic")).pack(side="left", padx=(10, 0))
+            entry_getcode_txt = ctk.CTkEntry(row_getcode_txt, width=120, height=20, justify="center")
+            entry_getcode_txt.insert(0, str(getattr(cfg, 'GETCODE_TEXT', 'eFCONNECT')))
+            entry_getcode_txt.pack(side="right")
+
             # ── Save button (pinned at bottom, outside scrollable area) ───
             def _save():
-                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE
+                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT
                 new_event = var_event.get()
                 new_box   = var_box.get()
                 new_gacha = var_gacha.get()
@@ -679,6 +705,19 @@ if GUI_ENABLED:
                 else:
                     content += f"\nOVERWRITE_CONFIG_ON_UPDATE = {new_overwrite_cfg}\n"
 
+                new_getcode = var_getcode.get()
+                new_getcode_txt = entry_getcode_txt.get().strip() or "eFCONNECT"
+                if re.search(r"^GETCODE\s*=\s*\d", content, flags=re.MULTILINE):
+                    content = re.sub(r"^GETCODE\s*=\s*\d", f"GETCODE = {new_getcode}",
+                                     content, flags=re.MULTILINE)
+                else:
+                    content += f"\nGETCODE = {new_getcode}\n"
+                if re.search(r'^GETCODE_TEXT\s*=\s*["\'].*["\']', content, flags=re.MULTILINE):
+                    content = re.sub(r'^GETCODE_TEXT\s*=\s*["\'].*["\']', f'GETCODE_TEXT = "{new_getcode_txt}"',
+                                     content, flags=re.MULTILINE)
+                else:
+                    content += f'\nGETCODE_TEXT = "{new_getcode_txt}"\n'
+
                 with open(cfg_path, "w", encoding="utf-8") as f:
                     f.write(content)
                 # อัปเดต runtime ด้วย
@@ -694,10 +733,12 @@ if GUI_ENABLED:
                 AUTORUN    = new_autorun
                 SILENT_UPDATE_MODE = new_update_mode
                 OVERWRITE_CONFIG_ON_UPDATE = new_overwrite_cfg
+                GETCODE = new_getcode
+                GETCODE_TEXT = new_getcode_txt
                 importlib.reload(cfg)
                 label_status.configure(text=f"✅ Saved!",
                                        text_color="#4caf50")
-                self.log(f"Config saved: EVENT={new_event}, BOX={new_box}, GACHA={new_gacha}, HERO={new_find}, GFREE={new_gfree}({new_gfree_loops} loops), COIN={new_ccoin}, NOSCAN={new_noscan}, GACHACHECK={new_gacha_check}, AUTORUN={new_autorun}, SILENT_UPDATE_MODE={new_update_mode}, OVERWRITE_CONFIG={new_overwrite_cfg}")
+                self.log(f"Config saved: EVENT={new_event}, BOX={new_box}, GACHA={new_gacha}, HERO={new_find}, GFREE={new_gfree}({new_gfree_loops} loops), COIN={new_ccoin}, NOSCAN={new_noscan}, GACHACHECK={new_gacha_check}, AUTORUN={new_autorun}, GETCODE={new_getcode}, GETCODE_TEXT={new_getcode_txt}")
 
             ctk.CTkButton(win, text="💾 Save", fg_color="#2cc985",
                           hover_color="#229f69", command=_save).pack(pady=8)
@@ -3099,6 +3140,151 @@ def process_device_login(device):
                             gui_log(serial, "cancel.bmp gone for 5s, moving on", step="Cancel OK")
                             break
 
+            # 6.5 Get Code Sequence (Optional — ก่อน Box)
+            if GETCODE == 1:
+                gui_log(serial, "Get Code sequence started...", step="GetCode", status="working")
+                # Navigate getcode1 → getcode5 (click each, wait for next to appear)
+                getcode_nav = [
+                    ("getcode1.bmp", "getcode2.bmp"),
+                    ("getcode2.bmp", "getcode3.bmp"),
+                    ("getcode3.bmp", "getcode4.bmp"),
+                    ("getcode4.bmp", "getcode5.bmp"),
+                ]
+                for gc_curr, gc_next in getcode_nav:
+                    gui_log(serial, f"Waiting for {gc_curr}...", step=f"{gc_curr} Wait")
+                    last_gc_click = 0
+                    while True:
+                        check_device_reset(serial, cycle_start)
+                        img = get_screen_capture(device)
+                        if img is not None:
+                            if img_search(img, os.path.join(IMG_DIR, gc_next), threshold=0.9):
+                                gui_log(serial, f"{gc_next} detected! Next step.", step=f"{gc_next} Seen")
+                                break
+                            pts_gc = img_search(img, os.path.join(IMG_DIR, gc_curr), threshold=0.9)
+                            if pts_gc:
+                                now = time.time()
+                                if now - last_gc_click >= 3.0:
+                                    x, y = pts_gc[0]
+                                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                    gui_log(serial, f"Clicked {gc_curr}", step=f"{gc_curr} Click")
+                                    last_gc_click = now
+                        time.sleep(0.5)
+
+                # Wait and click getcode5.bmp (click same position 2 extra times before typing)
+                gui_log(serial, "Waiting for getcode5.bmp...", step="getcode5 Wait")
+                gc5_pos = None
+                while True:
+                    check_device_reset(serial, cycle_start)
+                    img = get_screen_capture(device)
+                    if img is not None:
+                        pts_gc5 = img_search(img, os.path.join(IMG_DIR, "getcode5.bmp"), threshold=0.9)
+                        if pts_gc5:
+                            x, y = pts_gc5[0]
+                            gc5_pos = (x, y)
+                            device.shell(f"input swipe {x} {y} {x} {y} 100")
+                            gui_log(serial, f"Clicked getcode5.bmp at ({x},{y})", step="getcode5 Click")
+                            time.sleep(1.5)
+                            break
+                    time.sleep(0.5)
+
+                # Click same position 2 more times (to ensure text field is focused)
+                if gc5_pos:
+                    for tap_i in range(2):
+                        device.shell(f"input swipe {gc5_pos[0]} {gc5_pos[1]} {gc5_pos[0]} {gc5_pos[1]} 100")
+                        gui_log(serial, f"Extra tap {tap_i+1}/2 at ({gc5_pos[0]},{gc5_pos[1]})", step="getcode5 ExtraTap")
+                        time.sleep(1.0)
+
+                # Type the code text from config
+                code_text = GETCODE_TEXT
+                gui_log(serial, f"Typing code: {code_text}", step="Type Code")
+                device.shell(f"input text '{code_text}'")
+                time.sleep(1.5)
+
+                # Click getcode6.bmp
+                gui_log(serial, "Waiting for getcode6.bmp...", step="getcode6 Wait")
+                while True:
+                    check_device_reset(serial, cycle_start)
+                    img = get_screen_capture(device)
+                    if img is not None:
+                        pts_gc6 = img_search(img, os.path.join(IMG_DIR, "getcode6.bmp"), threshold=0.9)
+                        if pts_gc6:
+                            x, y = pts_gc6[0]
+                            device.shell(f"input swipe {x} {y} {x} {y} 100")
+                            gui_log(serial, f"Clicked getcode6.bmp at ({x},{y})", step="getcode6 Click")
+                            time.sleep(2.0)
+                            break
+                    time.sleep(0.5)
+
+                # Wait for result: okcode.bmp or codesom.bmp
+                gui_log(serial, "Waiting for okcode or codesom result...", step="Code Result")
+                while True:
+                    check_device_reset(serial, cycle_start)
+                    img = get_screen_capture(device)
+                    if img is not None:
+                        # Check okcode.bmp first
+                        pts_ok = img_search(img, os.path.join(IMG_DIR, "okcode.bmp"), threshold=0.9)
+                        if pts_ok:
+                            x, y = pts_ok[0]
+                            gui_log(serial, f"okcode.bmp found! Clicking ({x},{y})", step="OK Code")
+                            device.shell(f"input swipe {x} {y} {x} {y} 100")
+                            time.sleep(1.0)
+                            break
+                        # Check codesom.bmp
+                        pts_som = img_search(img, os.path.join(IMG_DIR, "codesom.bmp"), threshold=0.9)
+                        if pts_som:
+                            gui_log(serial, "codesom.bmp found! Code already used.", step="Code Som")
+                            break
+                    time.sleep(0.5)
+
+                # Spam Back until cancel.bmp appears, then click cancel (2 rounds)
+                for cancel_round in range(1, 3):
+                    gui_log(serial, f"Spamming Back until cancel.bmp (round {cancel_round}/2)...", step=f"GetCode Back R{cancel_round}")
+                    while True:
+                        check_device_reset(serial, cycle_start)
+                        device.shell("input keyevent 4")
+                        time.sleep(0.4)
+                        img = get_screen_capture(device)
+                        if img is not None:
+                            pts_cancel = img_search(img, os.path.join(IMG_DIR, "cancel.bmp"))
+                            if pts_cancel:
+                                x, y = pts_cancel[0]
+                                gui_log(serial, f"cancel.bmp found (round {cancel_round}) — clicking ({x},{y})", step=f"GetCode Cancel R{cancel_round}")
+                                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                time.sleep(1)
+                                # Click until cancel disappears for 5s
+                                last_seen_gc = time.time()
+                                while time.time() - last_seen_gc < 5:
+                                    check_device_reset(serial, cycle_start)
+                                    img2 = get_screen_capture(device)
+                                    if img2 is not None:
+                                        pts2 = img_search(img2, os.path.join(IMG_DIR, "cancel.bmp"))
+                                        if pts2:
+                                            x2, y2 = pts2[0]
+                                            device.shell(f"input swipe {x2} {y2} {x2} {y2} 100")
+                                            time.sleep(1)
+                                            last_seen_gc = time.time()
+                                    time.sleep(0.5)
+                                gui_log(serial, f"cancel.bmp gone (round {cancel_round}) — done!", step=f"GetCode Cancel R{cancel_round} OK")
+                                break
+
+                # Wait and click fixcode.bmp before proceeding to Box
+                gui_log(serial, "Waiting for fixcode.bmp...", step="fixcode Wait")
+                while True:
+                    check_device_reset(serial, cycle_start)
+                    img = get_screen_capture(device)
+                    if img is not None:
+                        pts_fc = img_search(img, os.path.join(IMG_DIR, "fixcode.bmp"), threshold=0.9)
+                        if pts_fc:
+                            x, y = pts_fc[0]
+                            device.shell(f"input swipe {x} {y} {x} {y} 100")
+                            gui_log(serial, f"Clicked fixcode.bmp at ({x},{y})", step="fixcode Click")
+                            time.sleep(2.0)
+                            break
+                    time.sleep(0.5)
+
+                gui_log(serial, "GetCode completed!", step="GetCode Done")
+
+
             # 7. Box Sequence (Optional)
             if DO_BOX == 1:
                 gui_log(serial, "Box sequence started...", step="Box Mode", status="working")
@@ -3146,15 +3332,36 @@ def process_device_login(device):
                     # box2
                     gui_log(serial, "Waiting box2.bmp...", step="box2")
                     start_box = time.time()
-                    while time.time() - start_box < 15:
+                    while time.time() - start_box < 25:  # Increased timeout slightly to account for retries
                         check_device_reset(serial, cycle_start)
                         img = get_screen_capture(device)
                         if img is not None:
                             pts = img_search(img, os.path.join(IMG_DIR, "box2.bmp"))
                             if pts:
                                 x, y = pts[0]
-                                device.shell(f"input swipe {x} {y} {x} {y} 100")
-                                time.sleep(4)
+                                gui_log(serial, f"box2.bmp found at ({x},{y}) — clicking...", step="box2")
+                                # Keep clicking if still visible
+                                retry_start = time.time()
+                                while True:
+                                    check_device_reset(serial, cycle_start)
+                                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                    time.sleep(1.5)
+                                    img_check = get_screen_capture(device)
+                                    if img_check is not None:
+                                        pts_check = img_search(img_check, os.path.join(IMG_DIR, "box2.bmp"))
+                                        if not pts_check:
+                                            gui_log(serial, "box2.bmp gone!", step="box2 OK")
+                                            break
+                                        else:
+                                            if time.time() - retry_start > 5.0:
+                                                gui_log(serial, "box2 still visible after 5s — forcing box3", step="box2 Timeout")
+                                                break
+                                            gui_log(serial, "box2.bmp still visible — clicking again...", step="box2 Retry")
+                                    else:
+                                        # Capture failed, wait a bit and break/continue
+                                        time.sleep(1.0)
+                                        break
+                                time.sleep(2.5)
                                 box2_found = True
                                 break
                         time.sleep(1.2)
