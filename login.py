@@ -3502,6 +3502,37 @@ def process_device_login(device):
 
                 gui_log(serial, "GetQuest completed!", step="GetQuest Done")
 
+                # ── ถ้าเปิดแค่ GETQUEST โดยไม่มี DO_BOX/GACHA/อื่นๆ → จบรอบเลย ──
+                if DO_BOX == 0 and DO_GACHA == 0 and GACHA_FREE == 0 and CHECK_COIN == 0 and FIND_HERO == 0 and GACHA_CHECK == 0:
+                    gui_log(serial, "GETQUEST only mode — clearing app and finishing cycle.", step="Quest Only Done", status="working")
+                    device.shell("am force-stop jp.konami.pesam")
+                    time.sleep(1)
+
+                    clean_orig = original_name
+                    if "+" in clean_orig: clean_orig = clean_orig.split("+")[-1]
+                    elif "-" in clean_orig: clean_orig = clean_orig.split("-")[-1]
+
+                    dest_dir = LOGIN_SUCCESS_DIR
+                    dest = os.path.join(dest_dir, clean_orig)
+                    if os.path.exists(file_path):
+                        time.sleep(2)
+                        try:
+                            if os.path.exists(dest):
+                                os.remove(dest)
+                            shutil.copy2(file_path, dest)
+                            os.remove(file_path)
+                            gui_log(serial, f"✅ Sorted: {original_name} -> {dest_dir}", step="Sorted", status="working")
+                        except Exception as me:
+                            gui_log(serial, f"⚠️ Sort failed: {me}", step="Sort Error")
+
+                        dur = time.time() - cycle_start
+                        dur_s = f"{dur/60:.1f}m" if dur >= 60 else f"{dur:.0f}s"
+                        if gui_instance:
+                            gui_instance.login_times.append(dur)
+
+                    release_file(original_name)
+                    continue  # ไปไฟล์ถัดไปทันที
+
             # 7. Box Sequence (Optional)
             if DO_BOX == 1:
                 gui_log(serial, "Box sequence started...", step="Box Mode", status="working")
