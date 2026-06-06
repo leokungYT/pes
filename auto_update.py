@@ -300,7 +300,7 @@ def update(silent=False):
             print("[Updater] Resetting folders (Clean Update)...")
             folders_to_delete = [
                 "backup-id", "backup", "file-error", "found-hero",
-                "input-id", "login-success", "random-fail", "run-file", "no-hero"
+                "input-id", "login-success", "random-fail", "run-file", "no-hero", "fast-random"
             ]
             for folder in folders_to_delete:
                 if os.path.exists(folder):
@@ -318,7 +318,7 @@ def update(silent=False):
             print("[Updater] Keeping all old folders (Data Preserved)...")
             folders_to_ensure = [
                 "input-id", "backup", "backup-id", "file-error",
-                "found-hero", "login-success", "random-fail", "run-file", "no-hero"
+                "found-hero", "login-success", "random-fail", "run-file", "no-hero", "fast-random"
             ]
             for folder in folders_to_ensure:
                 os.makedirs(folder, exist_ok=True)

@@ -99,6 +99,14 @@ try:
     from config import GETCODE_TEXT
 except ImportError:
     GETCODE_TEXT = "eFCONNECT"
+try:
+    from config import GETQUEST
+except ImportError:
+    GETQUEST = 0
+try:
+    from config import GETQUEST_IMG_DIR
+except ImportError:
+    GETQUEST_IMG_DIR = "img/getquest"
 
 REMOTE_AUTH_DIR   = "/data/data/jp.konami.pesam/files/SaveData/AUTH"
 REMOTE_DAT_FILE   = f"{REMOTE_AUTH_DIR}/online_user_id_data.dat"
@@ -603,9 +611,18 @@ if GUI_ENABLED:
             entry_getcode_txt.insert(0, str(getattr(cfg, 'GETCODE_TEXT', 'eFCONNECT')))
             entry_getcode_txt.pack(side="right")
 
+            # ── GETQUEST toggle ──────────────────────────────
+            row_getquest = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
+            row_getquest.pack(fill="x", padx=14, pady=4)
+            ctk.CTkLabel(row_getquest, text="Get Quest Mode (เก็บเควสก่อน Box)",
+                         font=ctk.CTkFont(size=12)).pack(side="left")
+            var_getquest = ctk.IntVar(value=getattr(cfg, 'GETQUEST', 0))
+            ctk.CTkSwitch(row_getquest, text="", variable=var_getquest,
+                          onvalue=1, offvalue=0).pack(side="right")
+
             # ── Save button (pinned at bottom, outside scrollable area) ───
             def _save():
-                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT
+                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST
                 new_event = var_event.get()
                 new_box   = var_box.get()
                 new_gacha = var_gacha.get()
@@ -718,6 +735,13 @@ if GUI_ENABLED:
                 else:
                     content += f'\nGETCODE_TEXT = "{new_getcode_txt}"\n'
 
+                new_getquest = var_getquest.get()
+                if re.search(r"^GETQUEST\s*=\s*\d", content, flags=re.MULTILINE):
+                    content = re.sub(r"^GETQUEST\s*=\s*\d", f"GETQUEST = {new_getquest}",
+                                     content, flags=re.MULTILINE)
+                else:
+                    content += f"\nGETQUEST = {new_getquest}\n"
+
                 with open(cfg_path, "w", encoding="utf-8") as f:
                     f.write(content)
                 # อัปเดต runtime ด้วย
@@ -735,10 +759,11 @@ if GUI_ENABLED:
                 OVERWRITE_CONFIG_ON_UPDATE = new_overwrite_cfg
                 GETCODE = new_getcode
                 GETCODE_TEXT = new_getcode_txt
+                GETQUEST = new_getquest
                 importlib.reload(cfg)
                 label_status.configure(text=f"✅ Saved!",
                                        text_color="#4caf50")
-                self.log(f"Config saved: EVENT={new_event}, BOX={new_box}, GACHA={new_gacha}, HERO={new_find}, GFREE={new_gfree}({new_gfree_loops} loops), COIN={new_ccoin}, NOSCAN={new_noscan}, GACHACHECK={new_gacha_check}, AUTORUN={new_autorun}, GETCODE={new_getcode}, GETCODE_TEXT={new_getcode_txt}")
+                self.log(f"Config saved: EVENT={new_event}, BOX={new_box}, GACHA={new_gacha}, HERO={new_find}, GFREE={new_gfree}({new_gfree_loops} loops), COIN={new_ccoin}, NOSCAN={new_noscan}, GACHACHECK={new_gacha_check}, AUTORUN={new_autorun}, GETCODE={new_getcode}, GETCODE_TEXT={new_getcode_txt}, GETQUEST={new_getquest}")
 
             ctk.CTkButton(win, text="💾 Save", fg_color="#2cc985",
                           hover_color="#229f69", command=_save).pack(pady=8)
@@ -3034,19 +3059,24 @@ def process_device_login(device):
             
             time.sleep(8)
 
-            # 4. Wait for play8 — คลิกซ้ำจนหาย
-            gui_log(serial, "Waiting play8...", step="play8")
+            # 4. Wait for play8 or play8fix — คลิกซ้ำจนหาย (เจออันไหนก็ได้ถือว่าเจอ)
+            gui_log(serial, "Waiting play8 or play8fix...", step="play8")
             play8_clicked = False
             while True:
                 check_device_reset(serial, cycle_start)
                 img = get_screen_capture(device)
                 if img is not None:
+                    # ลองหา play8.bmp ก่อน ถ้าไม่เจอลองหา play8fix.bmp
                     pts = img_search(img, os.path.join(IMG_DIR, "play8.bmp"))
+                    matched_name = "play8"
+                    if not pts:
+                        pts = img_search(img, os.path.join(IMG_DIR, "play8fix.bmp"))
+                        matched_name = "play8fix"
                     if pts:
                         # Prioritize fixlg3 if both are present
                         pts_lg3 = img_search(img, os.path.join(IMG_DIR, "fixlg3.bmp"))
                         if pts_lg3:
-                            gui_log(serial, "play8 and fixlg3 found! Clicking fixlg3 first", step="play8")
+                            gui_log(serial, f"{matched_name} and fixlg3 found! Clicking fixlg3 first", step="play8")
                             x, y = pts_lg3[0]
                             device.shell(f"input swipe {x} {y} {x} {y} 100")
                             time.sleep(2)
@@ -3054,6 +3084,7 @@ def process_device_login(device):
                             
                         x, y = pts[0]
                         device.shell(f"input swipe {x} {y} {x} {y} 100")
+                        gui_log(serial, f"Found {matched_name}! Clicked.", step="play8")
                         play8_clicked = True
                         time.sleep(5)
                     elif play8_clicked:
@@ -3284,6 +3315,192 @@ def process_device_login(device):
 
                 gui_log(serial, "GetCode completed!", step="GetCode Done")
 
+
+            # 6.7 Get Quest Sequence (Optional — ก่อน Box)
+            if GETQUEST == 1:
+                gui_log(serial, "Get Quest sequence started...", step="GetQuest", status="working")
+                GQ_DIR = GETQUEST_IMG_DIR  # img/getquest
+
+                # ── Phase 1: getquest1 → getquest5 (คลิกทีละภาพ) ──
+                for gq_i in range(1, 6):
+                    gq_name = f"getquest{gq_i}.bmp"
+                    gui_log(serial, f"Waiting {gq_name}...", step=f"gq{gq_i}")
+                    gq_deadline = time.time() + 10 if gq_i == 5 else None  # getquest5 timeout 10s
+                    gq_found = False
+                    while True:
+                        if gq_deadline and time.time() > gq_deadline:
+                            gui_log(serial, f"{gq_name} timeout 10s — skip", step=f"gq{gq_i} Skip")
+                            break
+                        check_device_reset(serial, cycle_start)
+                        img = get_screen_capture(device)
+                        if img is not None:
+                            pts = img_search(img, os.path.join(GQ_DIR, gq_name))
+                            if pts:
+                                x, y = pts[0]
+                                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                gui_log(serial, f"Clicked {gq_name} ({x},{y})", step=f"gq{gq_i} Click")
+                                gq_found = True
+                                time.sleep(2.0)
+                                break
+                        time.sleep(0.8)
+
+                # ── Phase 2: หลังกด getquest5 → กดตำแหน่งเดิมซ้ำๆ จนกว่าเจอ getquest6 (timeout 10s) ──
+                gui_log(serial, "Spam-clicking last position until getquest6...", step="gq5→gq6")
+                # ใช้ตำแหน่งสุดท้ายที่กด getquest5
+                gq5_x, gq5_y = x, y
+                gq6_deadline = time.time() + 10
+                gq6_found = False
+                while time.time() < gq6_deadline:
+                    check_device_reset(serial, cycle_start)
+                    img = get_screen_capture(device)
+                    if img is not None:
+                        pts6 = img_search(img, os.path.join(GQ_DIR, "getquest6.bmp"))
+                        if pts6:
+                            gui_log(serial, "getquest6 found!", step="gq6 Found")
+                            gq6_found = True
+                            break
+                    device.shell(f"input swipe {gq5_x} {gq5_y} {gq5_x} {gq5_y} 100")
+                    time.sleep(0.5)
+                if not gq6_found:
+                    gui_log(serial, "getquest6 timeout 10s — skip", step="gq6 Skip")
+
+                # ── Phase 3: กด getquest6 ซ้ำๆ จนกว่าจะหายไป ──
+                gui_log(serial, "Clicking getquest6 until gone...", step="gq6 Click")
+                last_seen_gq6 = time.time()
+                while time.time() - last_seen_gq6 < 8:
+                    check_device_reset(serial, cycle_start)
+                    img = get_screen_capture(device)
+                    if img is not None:
+                        pts6 = img_search(img, os.path.join(GQ_DIR, "getquest6.bmp"))
+                        if pts6:
+                            x6, y6 = pts6[0]
+                            device.shell(f"input swipe {x6} {y6} {x6} {y6} 100")
+                            last_seen_gq6 = time.time()
+                            time.sleep(0.5)
+                            continue
+                    time.sleep(0.5)
+                gui_log(serial, "getquest6 gone!", step="gq6 Done")
+
+                # ── Phase 4: getquest7 → กด แล้ว Back รัวๆ จนเจอ cancel (timeout 10s) ──
+                gui_log(serial, "Waiting getquest7...", step="gq7")
+                gq7_deadline = time.time() + 10
+                gq7_found = False
+                while time.time() < gq7_deadline:
+                    check_device_reset(serial, cycle_start)
+                    img = get_screen_capture(device)
+                    if img is not None:
+                        pts7 = img_search(img, os.path.join(GQ_DIR, "getquest7.bmp"))
+                        if pts7:
+                            x7, y7 = pts7[0]
+                            device.shell(f"input swipe {x7} {y7} {x7} {y7} 100")
+                            gui_log(serial, f"Clicked getquest7 ({x7},{y7})", step="gq7 Click")
+                            gq7_found = True
+                            time.sleep(1.5)
+                            break
+                    time.sleep(0.8)
+                if not gq7_found:
+                    gui_log(serial, "getquest7 timeout 10s — skip", step="gq7 Skip")
+
+                # Back รัวๆ จนเจอ cancel แล้วกด
+                gui_log(serial, "Spamming Back until cancel (after gq7)...", step="gq7 Back")
+                while True:
+                    check_device_reset(serial, cycle_start)
+                    device.shell("input keyevent 4")
+                    time.sleep(0.4)
+                    img = get_screen_capture(device)
+                    if img is not None:
+                        pts_c = img_search(img, os.path.join(IMG_DIR, "cancel.bmp"))
+                        if pts_c:
+                            xc, yc = pts_c[0]
+                            gui_log(serial, f"cancel found — clicking ({xc},{yc})", step="gq7 Cancel")
+                            device.shell(f"input swipe {xc} {yc} {xc} {yc} 100")
+                            time.sleep(1.5)
+                            break
+
+                # ── Phase 5: getquest8 → getquest11 (คลิกทีละภาพ) ──
+                for gq_i in range(8, 12):
+                    gq_name = f"getquest{gq_i}.bmp"
+                    gui_log(serial, f"Waiting {gq_name}...", step=f"gq{gq_i}")
+                    while True:
+                        check_device_reset(serial, cycle_start)
+                        img = get_screen_capture(device)
+                        if img is not None:
+                            pts = img_search(img, os.path.join(GQ_DIR, gq_name))
+                            if pts:
+                                x, y = pts[0]
+                                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                gui_log(serial, f"Clicked {gq_name} ({x},{y})", step=f"gq{gq_i} Click")
+                                time.sleep(2.0)
+                                break
+                        time.sleep(0.8)
+
+                # ลาก swipe (93,136) → (662,200)
+                gui_log(serial, "Swiping 93,136 → 662,200...", step="gq Swipe")
+                device.shell("input swipe 93 136 662 200 800")
+                time.sleep(1.5)
+
+                # Back รัวๆ จนเจอ cancel แล้วกด
+                gui_log(serial, "Spamming Back until cancel (after gq8-11)...", step="gq11 Back")
+                while True:
+                    check_device_reset(serial, cycle_start)
+                    device.shell("input keyevent 4")
+                    time.sleep(0.4)
+                    img = get_screen_capture(device)
+                    if img is not None:
+                        pts_c = img_search(img, os.path.join(IMG_DIR, "cancel.bmp"))
+                        if pts_c:
+                            xc, yc = pts_c[0]
+                            gui_log(serial, f"cancel found — clicking ({xc},{yc})", step="gq11 Cancel")
+                            device.shell(f"input swipe {xc} {yc} {xc} {yc} 100")
+                            time.sleep(1.5)
+                            break
+
+                # ── Phase 6: getquest12 → getquest14 ──
+                for gq_i in range(12, 15):
+                    gq_name = f"getquest{gq_i}.bmp"
+                    gui_log(serial, f"Waiting {gq_name}...", step=f"gq{gq_i}")
+                    while True:
+                        check_device_reset(serial, cycle_start)
+                        img = get_screen_capture(device)
+                        if img is not None:
+                            pts = img_search(img, os.path.join(GQ_DIR, gq_name))
+                            if pts:
+                                x, y = pts[0]
+                                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                gui_log(serial, f"Clicked {gq_name} ({x},{y})", step=f"gq{gq_i} Click")
+                                time.sleep(2.0)
+                                break
+                        time.sleep(0.8)
+
+                # รอเจอ waitquest.bmp
+                gui_log(serial, "Waiting for waitquest.bmp...", step="waitquest")
+                while True:
+                    check_device_reset(serial, cycle_start)
+                    img = get_screen_capture(device)
+                    if img is not None:
+                        pts_wq = img_search(img, os.path.join(GQ_DIR, "waitquest.bmp"))
+                        if pts_wq:
+                            gui_log(serial, "waitquest found!", step="waitquest OK")
+                            time.sleep(1.0)
+                            break
+                    time.sleep(1.0)
+
+                # กด getquest15
+                gui_log(serial, "Waiting getquest15...", step="gq15")
+                while True:
+                    check_device_reset(serial, cycle_start)
+                    img = get_screen_capture(device)
+                    if img is not None:
+                        pts15 = img_search(img, os.path.join(GQ_DIR, "getquest15.bmp"))
+                        if pts15:
+                            x15, y15 = pts15[0]
+                            device.shell(f"input swipe {x15} {y15} {x15} {y15} 100")
+                            gui_log(serial, f"Clicked getquest15 ({x15},{y15})", step="gq15 Click")
+                            time.sleep(2.0)
+                            break
+                    time.sleep(0.8)
+
+                gui_log(serial, "GetQuest completed!", step="GetQuest Done")
 
             # 7. Box Sequence (Optional)
             if DO_BOX == 1:
