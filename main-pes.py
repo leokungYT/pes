@@ -680,7 +680,7 @@ def get_screen_capture(device):
                 raise RestartFromQuest8Exception("backquest3 detected")
 
         # === fixclear floating check ===
-        pts_fc = ImgSearchADB(img, os.path.join(IMG_DIR, "fixclear.bmp"), threshold=0.99)
+        pts_fc = ImgSearchADB(img, os.path.join(GETQUEST_IMG_DIR, "fixclear1.bmp"), threshold=0.99)
         if pts_fc:
             if device.serial not in FIXCLEAR_FIRST_SEEN:
                 FIXCLEAR_FIRST_SEEN[device.serial] = time.time()
