@@ -441,7 +441,7 @@ class DeviceResetException(Exception):
 class RestartFromQuest8Exception(Exception):
     pass
 
-GQ_ACTIVE = False
+GQ_ACTIVE = {}
 
 class CycleTimeoutException(Exception):
     pass
@@ -646,7 +646,7 @@ def get_screen_capture(device):
                     return None
 
         # === backquest3 floating check ===
-        if GQ_ACTIVE and img is not None:
+        if GQ_ACTIVE.get(device.serial, False) and img is not None:
             bq_pts = ImgSearchADB(img, os.path.join(GETQUEST_IMG_DIR, "backquest3.bmp"))
             if bq_pts:
                 gui_log(device.serial, "backquest3 detected! Performing back-spam rescue...", step="Back Rescue")
@@ -1260,8 +1260,19 @@ def backup_uid_file(device, adb_full_path, remote_path, local_path):
     except Exception:
         return False
 
-def process_device(device):
-    serial = device.serial
+def process_device(serial_or_device):
+    if hasattr(serial_or_device, 'serial'):
+        serial = serial_or_device.serial
+    else:
+        serial = str(serial_or_device)
+    
+    # Create thread-local AdbClient to prevent socket/data sharing between threads
+    client = AdbClient(host="127.0.0.1", port=5037)
+    device = client.device(serial)
+    if device is None:
+        gui_log(serial, "ERROR: Thread failed to initialize private AdbClient device", status="stuck")
+        return
+        
     gui_log(serial, "Starting automation...", step="Initializing", status="working")
     
     while bot_running: # Respect global bot_running flag
@@ -1538,8 +1549,7 @@ def process_device(device):
                     gui_log(serial, "Get Quest sequence started...", step="GetQuest", status="working")
                     GQ_DIR = GETQUEST_IMG_DIR  # img/getquest
                     
-                    global GQ_ACTIVE
-                    GQ_ACTIVE = True
+                    GQ_ACTIVE[serial] = True
                     try:
                         start_from_gq8 = False
                         while True:
@@ -2058,7 +2068,7 @@ def process_device(device):
                                 start_from_gq8 = True
                                 time.sleep(1.0)
                     finally:
-                        GQ_ACTIVE = False
+                        GQ_ACTIVE[serial] = False
 
                 # ── Box Sequence (เอาระบบในไฟล์ login.py มาทดแทนทั้งหมด) ──
                 if DO_BOX == 1:
