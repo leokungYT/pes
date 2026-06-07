@@ -617,6 +617,8 @@ def fast_screencap(device):
         pass
     return None
 
+FIXCLEAR_FIRST_SEEN = {}
+
 def get_screen_capture(device):
     """Screencap with global floating checks (namesom, download, fixgoogle)"""
     try:
@@ -676,6 +678,24 @@ def get_screen_capture(device):
                     time.sleep(0.5)
                     
                 raise RestartFromQuest8Exception("backquest3 detected")
+
+        # === fixclear floating check ===
+        pts_fc = ImgSearchADB(img, os.path.join(IMG_DIR, "fixclear.bmp"))
+        if pts_fc:
+            if device.serial not in FIXCLEAR_FIRST_SEEN:
+                FIXCLEAR_FIRST_SEEN[device.serial] = time.time()
+                gui_log(device.serial, "fixclear.bmp detected! Starting 15s persistent timer...", step="Fix Clear")
+            else:
+                elapsed = time.time() - FIXCLEAR_FIRST_SEEN[device.serial]
+                gui_log(device.serial, f"fixclear.bmp detected for {elapsed:.1f}s / 15s...", step="Fix Clear")
+                if elapsed >= 15:
+                    gui_log(device.serial, "⚠️ fixclear.bmp persistent for 15s! Clearing app and restarting...", status="stuck")
+                    FIXCLEAR_FIRST_SEEN.pop(device.serial, None)
+                    device.shell("pm clear jp.konami.pesam")
+                    DEVICE_RESET_FLAGS[device.serial] = True
+                    raise DeviceResetException("fixclear persistent reset")
+        else:
+            FIXCLEAR_FIRST_SEEN.pop(device.serial, None)
 
         # Global floating checks for download and fixgoogle
         dl_pts = ImgSearchADB(img, os.path.join(IMG_DIR, "download.bmp"))

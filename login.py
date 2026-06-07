@@ -1354,6 +1354,8 @@ def is_game_running(device):
     except Exception:
         return True  # ADB error ถือว่าออนอยู่ (ไม่ relaunch มั่ว)
 
+FIXCLEAR_FIRST_SEEN = {}
+
 def get_screen_capture(device):
     try:
         # เช็คเกมออนอยู่หรือไม่ (ทุก 30 วิ)
@@ -1476,21 +1478,31 @@ def get_screen_capture(device):
 
             fc_pts = img_search(img, os.path.join(IMG_DIR, "fixclear.bmp"))
             if fc_pts:
-                gui_log(device.serial, "Floating: fixclear.bmp found! Clearing app and moving file to file-error", step="Fix Clear")
-                device.shell("pm clear jp.konami.pesam")
-                
-                original_name = DEVICE_FILE_ASSIGNMENTS.get(device.serial)
-                if original_name:
-                    file_path = os.path.join(INPUT_DIR, original_name)
-                    dest_path = os.path.join(FILE_ERROR_DIR, original_name)
-                    if os.path.exists(file_path):
-                        if os.path.exists(dest_path):
-                            os.remove(dest_path)
-                        shutil.copy2(file_path, dest_path)
-                        os.remove(file_path)
-                        gui_log(device.serial, f"Moved {original_name} to file-error", step="Fix Clear")
-                
-                raise DeviceResetException("fixclear.bmp detected")
+                if device.serial not in FIXCLEAR_FIRST_SEEN:
+                    FIXCLEAR_FIRST_SEEN[device.serial] = time.time()
+                    gui_log(device.serial, "fixclear.bmp detected! Starting 15s persistent timer...", step="Fix Clear")
+                else:
+                    elapsed = time.time() - FIXCLEAR_FIRST_SEEN[device.serial]
+                    gui_log(device.serial, f"fixclear.bmp detected for {elapsed:.1f}s / 15s...", step="Fix Clear")
+                    if elapsed >= 15:
+                        gui_log(device.serial, "Floating: fixclear.bmp found! Clearing app and moving file to file-error", step="Fix Clear")
+                        FIXCLEAR_FIRST_SEEN.pop(device.serial, None)
+                        device.shell("pm clear jp.konami.pesam")
+                        
+                        original_name = DEVICE_FILE_ASSIGNMENTS.get(device.serial)
+                        if original_name:
+                            file_path = os.path.join(INPUT_DIR, original_name)
+                            dest_path = os.path.join(FILE_ERROR_DIR, original_name)
+                            if os.path.exists(file_path):
+                                if os.path.exists(dest_path):
+                                    os.remove(dest_path)
+                                shutil.copy2(file_path, dest_path)
+                                os.remove(file_path)
+                                gui_log(device.serial, f"Moved {original_name} to file-error", step="Fix Clear")
+                        
+                        raise DeviceResetException("fixclear.bmp detected")
+            else:
+                FIXCLEAR_FIRST_SEEN.pop(device.serial, None)
 
             flg1_pts = img_search(img, os.path.join(IMG_DIR, "fixlg1.bmp"))
             if flg1_pts:
