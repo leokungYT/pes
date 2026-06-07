@@ -1476,7 +1476,7 @@ def get_screen_capture(device):
                 
                 raise SellScreenException("sell.bmp detected")
 
-            fc_pts = img_search(img, os.path.join(IMG_DIR, "fixclear.bmp"))
+            fc_pts = img_search(img, os.path.join(IMG_DIR, "fixclear.bmp"), threshold=0.99)
             if fc_pts:
                 if device.serial not in FIXCLEAR_FIRST_SEEN:
                     FIXCLEAR_FIRST_SEEN[device.serial] = time.time()
