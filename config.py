@@ -172,7 +172,7 @@ SKIPANIMATION = 1
 
 # ── Timeout ───────────────────────────────────────
 # 1 = Enable, 0 = Disable
-TIMEOUT_ENABLE = 1
+TIMEOUT_ENABLE = 0
 
 # Timeout duration in minutes
 TIMEOUT_MINUTES = 10
@@ -195,7 +195,7 @@ OVERWRITE_CONFIG_ON_UPDATE = True
 # ── Get Code Sequence ─────────────────────────────
 # 1 = ทำขั้นตอน getcode (getcode1→getcode6 + พิมพ์โค้ด) ก่อน Box
 # 0 = ข้าม
-GETCODE = 1
+GETCODE = 0
 
 # ข้อความที่จะพิมพ์ในช่อง code (สามารถเปลี่ยนได้ตามต้องการ)
 GETCODE_TEXT = "eFCONNECT"
@@ -203,7 +203,7 @@ GETCODE_TEXT = "eFCONNECT"
 # ── Get Quest Sequence ─────────────────────────────
 # 1 = ทำขั้นตอน getquest (เก็บรางวัลเควส) ก่อน Box
 # 0 = ข้าม
-GETQUEST = 0
+GETQUEST = 1
 
 # โฟลเดอร์รูป getquest (อยู่ใน img/getquest/)
 GETQUEST_IMG_DIR = "img/getquest"

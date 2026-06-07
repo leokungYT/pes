@@ -190,6 +190,13 @@ if GUI_ENABLED:
             var_event = ctk.IntVar(value=cfg.EVENT_IMG)
             ctk.CTkSwitch(row_event, text="", variable=var_event, onvalue=1, offvalue=0).pack(side="right")
 
+            # 0.5 GETQUEST Switch
+            row_gq = ctk.CTkFrame(form_frame, fg_color="transparent")
+            row_gq.pack(fill="x", pady=4)
+            ctk.CTkLabel(row_gq, text="Get Quest Sequence (เก็บรางวัลเควส)", font=ctk.CTkFont(size=12)).pack(side="left")
+            var_getquest = ctk.IntVar(value=getattr(cfg, 'GETQUEST', 0))
+            ctk.CTkSwitch(row_gq, text="", variable=var_getquest, onvalue=1, offvalue=0).pack(side="right")
+
             # 1. DO_BOX Switch
             row_box = ctk.CTkFrame(form_frame, fg_color="transparent")
             row_box.pack(fill="x", pady=4)
@@ -243,7 +250,7 @@ if GUI_ENABLED:
             txt_heroes.insert("1.0", current_heroes)
 
             def _save():
-                global DO_BOX, GACHA_FREE, GACHA_FREE_LOOPS, HERO_LIST_FREE, DEBUG_OCR, EVENT_IMG, NOSCAN, SKIPANIMATION
+                global DO_BOX, GACHA_FREE, GACHA_FREE_LOOPS, HERO_LIST_FREE, DEBUG_OCR, EVENT_IMG, NOSCAN, SKIPANIMATION, GETQUEST
                 
                 val_event = var_event.get()
                 val_box = var_box.get()
@@ -255,6 +262,7 @@ if GUI_ENABLED:
                     val_loops = 6
                     
                 val_debug = var_debug.get()
+                val_getquest = var_getquest.get()
                 val_noscan = var_noscan.get()
                 val_skipanim = var_skipanim.get()
                 
@@ -302,6 +310,14 @@ IMG_DIR = "img"
 # 0 = ไม่บันทึก
 DEBUG_OCR = {val_debug}
 
+# ── Get Quest Sequence ─────────────────────────────
+# 1 = ทำขั้นตอน getquest (เก็บรางวัลเควส) ก่อน Box
+# 0 = ข้าม
+GETQUEST = {val_getquest}
+
+# โฟลเดอร์รูป getquest (อยู่ใน img/getquest/)
+GETQUEST_IMG_DIR = "img/getquest"
+
 # ── No Scan Mode ──────────────────────────────────
 # 1 = ข้ามขั้นตอน checkpointgacha (ไม่สแกน OCR)
 #     ข้ามไปหา next.bmp ต่อเลย
@@ -328,10 +344,11 @@ SKIPANIMATION = {val_skipanim}
                     DEBUG_OCR = val_debug
                     NOSCAN = val_noscan
                     SKIPANIMATION = val_skipanim
+                    GETQUEST = val_getquest
                     
                     importlib.reload(cfg)
                     label_status.configure(text="✅ Saved settings successfully!", text_color="#2cc985")
-                    self.log(f"Config updated: EVENT={val_event}, BOX={val_box}, FREE={val_free}, LOOPS={val_loops}, NOSCAN={val_noscan}, SKIP={val_skipanim}, HEROES={len(parsed_heroes)}")
+                    self.log(f"Config updated: EVENT={val_event}, BOX={val_box}, FREE={val_free}, LOOPS={val_loops}, NOSCAN={val_noscan}, SKIP={val_skipanim}, GETQUEST={val_getquest}, HEROES={len(parsed_heroes)}")
                 except Exception as ex:
                     label_status.configure(text=f"❌ Save error: {ex}", text_color="#ff5555")
 
@@ -421,6 +438,11 @@ def trigger_manual_reset(serial):
 class DeviceResetException(Exception):
     pass
 
+class RestartFromQuest8Exception(Exception):
+    pass
+
+GQ_ACTIVE = False
+
 class CycleTimeoutException(Exception):
     pass
 
@@ -442,7 +464,7 @@ def gui_log(serial, msg, step=None, status=None):
     update_gui(serial, log=msg, step=step, status=status)
 
 # --- Configuration ---
-from config_gen import DO_BOX, IMG_DIR, GACHA_FREE, GACHA_FREE_LOOPS, HERO_LIST_FREE, DEBUG_OCR, EVENT_IMG, NOSCAN, SKIPANIMATION
+from config_gen import DO_BOX, IMG_DIR, GACHA_FREE, GACHA_FREE_LOOPS, HERO_LIST_FREE, DEBUG_OCR, EVENT_IMG, NOSCAN, SKIPANIMATION, GETQUEST, GETQUEST_IMG_DIR
 IMAGE_CACHE = {}
 
 BACKUP_ID_DIR = "backup-id"
@@ -607,6 +629,54 @@ def get_screen_capture(device):
             gui_log(device.serial, "⚠️ NAMESOM DETECTED! Restarting bot...", status="stuck")
             DEVICE_RESET_FLAGS[device.serial] = True
 
+        # === fixtip floating check ===
+        pts1 = ImgSearchADB(img, os.path.join(GETQUEST_IMG_DIR, "fixtip1.bmp"))
+        if pts1:
+            gui_log(device.serial, "fixtip1.bmp detected! Looking for fixtip2.bmp...", step="Fix Tip")
+            pts2 = ImgSearchADB(img, os.path.join(GETQUEST_IMG_DIR, "fixtip2.bmp"))
+            if pts2:
+                x2, y2 = pts2[0]
+                device.shell(f"input swipe {x2} {y2} {x2} {y2} 100")
+                gui_log(device.serial, f"Clicked fixtip2 at ({x2}, {y2})", step="Fix Tip")
+                time.sleep(1.5)
+                img = fast_screencap(device)
+                if img is None:
+                    return None
+
+        # === backquest3 floating check ===
+        if GQ_ACTIVE and img is not None:
+            bq_pts = ImgSearchADB(img, os.path.join(GETQUEST_IMG_DIR, "backquest3.bmp"))
+            if bq_pts:
+                gui_log(device.serial, "backquest3 detected! Performing back-spam rescue...", step="Back Rescue")
+                # Spam back until cancel found
+                while True:
+                    device.shell("input keyevent 4")
+                    time.sleep(0.4)
+                    img_back = fast_screencap(device)
+                    if img_back is not None:
+                        pts_c = ImgSearchADB(img_back, os.path.join(IMG_DIR, "cancel.bmp"))
+                        if pts_c:
+                            xc, yc = pts_c[0]
+                            device.shell(f"input swipe {xc} {yc} {xc} {yc} 100")
+                            gui_log(device.serial, f"cancel found — clicking ({xc},{yc})", step="Back Rescue")
+                            time.sleep(1.5)
+                            break
+                # After cancel clicked, wait/click fixbackquest1
+                gui_log(device.serial, "Waiting/Clicking fixbackquest1.bmp...", step="Back Rescue")
+                while True:
+                    img_fb = fast_screencap(device)
+                    if img_fb is not None:
+                        pts_fb = ImgSearchADB(img_fb, os.path.join(GETQUEST_IMG_DIR, "fixbackquest1.bmp"))
+                        if pts_fb:
+                            xf, yf = pts_fb[0]
+                            device.shell(f"input swipe {xf} {yf} {xf} {yf} 100")
+                            gui_log(device.serial, "Clicked fixbackquest1.bmp", step="Back Rescue")
+                            time.sleep(1.5)
+                            break
+                    time.sleep(0.5)
+                    
+                raise RestartFromQuest8Exception("backquest3 detected")
+
         # Global floating checks for download and fixgoogle
         dl_pts = ImgSearchADB(img, os.path.join(IMG_DIR, "download.bmp"))
         if dl_pts:
@@ -620,10 +690,10 @@ def get_screen_capture(device):
             x, y = fg_pts[0]
             device.shell(f"input swipe {x} {y} {x} {y} 100")
 
-        # Send to GUI for preview
-        update_gui(device.serial, screenshot=img)
+        # Send to GUI for preview (Disabled to prevent GUI lag/freeze)
+        # update_gui(device.serial, screenshot=img)
         return img
-    except (DeviceResetException, CycleTimeoutException):
+    except (DeviceResetException, CycleTimeoutException, RestartFromQuest8Exception):
         raise
     except Exception as e:
         return None
@@ -1415,6 +1485,558 @@ def process_device(device):
                                 time.sleep(5)
                                 break
                         time.sleep(0.05)   # Optimized sleep from 0.01 to 0.05 to save host CPU
+
+                # ── Get Quest Sequence (เอาระบบในไฟล์ login.py มาใส่ก่อน Box) ──
+                if GETQUEST == 1:
+                    # Spam Back until cancel.bmp to return to main menu
+                    gui_log(serial, "Spamming Back until cancel.bmp to return to main menu...", step="GQ Init Back")
+                    while True:
+                        check_device_reset(serial, cycle_start)
+                        device.shell("input keyevent 4")
+                        time.sleep(0.4)
+                        img = get_screen_capture(device)
+                        if img is not None:
+                            pts_cancel = ImgSearchADB(img, os.path.join(IMG_DIR, "cancel.bmp"))
+                            if pts_cancel:
+                                x_c, y_c = pts_cancel[0]
+                                device.shell(f"input swipe {x_c} {y_c} {x_c} {y_c} 100")
+                                gui_log(serial, f"cancel.bmp found — clicking ({x_c},{y_c})", step="GQ Init Cancel")
+                                time.sleep(1.5)
+                                # กดซ้ำจนกว่าจะหาย
+                                retry_end = time.time() + 8
+                                while time.time() < retry_end:
+                                    check_device_reset(serial, cycle_start)
+                                    img2 = get_screen_capture(device)
+                                    if img2 is not None and not ImgSearchADB(img2, os.path.join(IMG_DIR, "cancel.bmp")):
+                                        break
+                                    device.shell(f"input swipe {x_c} {y_c} {x_c} {y_c} 100")
+                                    time.sleep(1.0)
+                                break
+
+                    gui_log(serial, "Get Quest sequence started...", step="GetQuest", status="working")
+                    GQ_DIR = GETQUEST_IMG_DIR  # img/getquest
+                    
+                    global GQ_ACTIVE
+                    GQ_ACTIVE = True
+                    try:
+                        start_from_gq8 = False
+                        while True:
+                            try:
+                                if not start_from_gq8:
+                                    # ── Phase 1: getquest1 → getquest5 (คลิกทีละภาพ) ──
+                                    for gq_i in range(1, 6):
+                                        gq_name = f"getquest{gq_i}.bmp"
+                                        gui_log(serial, f"Waiting {gq_name}...", step=f"gq{gq_i}")
+                                        gq_deadline = time.time() + 10 if gq_i == 5 else None  # getquest5 timeout 10s
+                                        gq_found = False
+                                        while True:
+                                            if gq_deadline and time.time() > gq_deadline:
+                                                gui_log(serial, f"{gq_name} timeout 10s — skip", step=f"gq{gq_i} Skip")
+                                                break
+                                            check_device_reset(serial, cycle_start)
+                                            img = get_screen_capture(device)
+                                            if img is not None:
+                                                pts = ImgSearchADB(img, os.path.join(GQ_DIR, gq_name))
+                                                if pts:
+                                                    x, y = pts[0]
+                                                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                                    gui_log(serial, f"Clicked {gq_name} ({x},{y})", step=f"gq{gq_i} Click")
+                                                    gq_found = True
+                                                    time.sleep(1.5)
+                                                    # กดซ้ำจนรูปหาย (กันกดไม่ติด)
+                                                    retry_end = time.time() + 8
+                                                    while time.time() < retry_end:
+                                                        img2 = get_screen_capture(device)
+                                                        if img2 is not None and not ImgSearchADB(img2, os.path.join(GQ_DIR, gq_name)):
+                                                            break
+                                                        device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                                        gui_log(serial, f"Re-click {gq_name}", step=f"gq{gq_i} Retry")
+                                                        time.sleep(1.0)
+                                                    break
+                                            time.sleep(0.8)
+
+                                    # ── Phase 2: หลังกด getquest5 → กดตำแหน่งเดิมซ้ำๆ จนกว่าเจอ getquest6 (timeout 10s) ──
+                                    gui_log(serial, "Spam-clicking last position until getquest6...", step="gq5→gq6")
+                                    gq5_x, gq5_y = x, y
+                                    gq6_deadline = time.time() + 10
+                                    gq6_found = False
+                                    while time.time() < gq6_deadline:
+                                        check_device_reset(serial, cycle_start)
+                                        img = get_screen_capture(device)
+                                        if img is not None:
+                                            pts6 = ImgSearchADB(img, os.path.join(GQ_DIR, "getquest6.bmp"))
+                                            if pts6:
+                                                gui_log(serial, "getquest6 found!", step="gq6 Found")
+                                                gq6_found = True
+                                                break
+                                        device.shell(f"input swipe {gq5_x} {gq5_y} {gq5_x} {gq5_y} 100")
+                                        time.sleep(0.5)
+                                    if not gq6_found:
+                                        gui_log(serial, "getquest6 timeout 10s — skip", step="gq6 Skip")
+
+                                    # ── Phase 3: กด getquest6 ซ้ำๆ จนกว่าจะหายไป ──
+                                    gui_log(serial, "Clicking getquest6 until gone...", step="gq6 Click")
+                                    last_seen_gq6 = time.time()
+                                    while time.time() - last_seen_gq6 < 8:
+                                        check_device_reset(serial, cycle_start)
+                                        img = get_screen_capture(device)
+                                        if img is not None:
+                                            pts6 = ImgSearchADB(img, os.path.join(GQ_DIR, "getquest6.bmp"))
+                                            if pts6:
+                                                x6, y6 = pts6[0]
+                                                device.shell(f"input swipe {x6} {y6} {x6} {y6} 100")
+                                                last_seen_gq6 = time.time()
+                                                time.sleep(0.5)
+                                                continue
+                                        time.sleep(0.5)
+                                    gui_log(serial, "getquest6 gone!", step="gq6 Done")
+
+                                    # ── Phase 4: getquest7 → กด แล้ว Back รัวๆ จนเจอ cancel (timeout 10s) ──
+                                    gui_log(serial, "Waiting getquest7...", step="gq7")
+                                    gq7_deadline = time.time() + 10
+                                    gq7_found = False
+                                    while time.time() < gq7_deadline:
+                                        check_device_reset(serial, cycle_start)
+                                        img = get_screen_capture(device)
+                                        if img is not None:
+                                            pts7 = ImgSearchADB(img, os.path.join(GQ_DIR, "getquest7.bmp"))
+                                            if pts7:
+                                                x7, y7 = pts7[0]
+                                                device.shell(f"input swipe {x7} {y7} {x7} {y7} 100")
+                                                gui_log(serial, f"Clicked getquest7 ({x7},{y7})", step="gq7 Click")
+                                                gq7_found = True
+                                                time.sleep(1.5)
+                                                # กดซ้ำจนรูปหาย (กันกดไม่ติด)
+                                                retry_end = time.time() + 8
+                                                while time.time() < retry_end:
+                                                    img2 = get_screen_capture(device)
+                                                    if img2 is not None and not ImgSearchADB(img2, os.path.join(GQ_DIR, "getquest7.bmp")):
+                                                        break
+                                                    device.shell(f"input swipe {x7} {y7} {x7} {y7} 100")
+                                                    gui_log(serial, "Re-click getquest7", step="gq7 Retry")
+                                                    time.sleep(1.0)
+                                                break
+                                        time.sleep(0.8)
+                                    if not gq7_found:
+                                        gui_log(serial, "getquest7 timeout 10s — skip", step="gq7 Skip")
+
+                                    # Back รัวๆ จนเจอ cancel แล้วกด
+                                    gui_log(serial, "Spamming Back until cancel (after gq7)...", step="gq7 Back")
+                                    while True:
+                                        check_device_reset(serial, cycle_start)
+                                        device.shell("input keyevent 4")
+                                        time.sleep(0.4)
+                                        img = get_screen_capture(device)
+                                        if img is not None:
+                                            pts_c = ImgSearchADB(img, os.path.join(IMG_DIR, "cancel.bmp"))
+                                            if pts_c:
+                                                xc, yc = pts_c[0]
+                                                gui_log(serial, f"cancel found — clicking ({xc},{yc})", step="gq7 Cancel")
+                                                device.shell(f"input swipe {xc} {yc} {xc} {yc} 100")
+                                                time.sleep(1.5)
+                                                break
+
+                                # ── Phase 5: getquest8 → getquest11 (คลิกทีละภาพ) ──
+                                p5_start = 8
+                                for gq_i in range(p5_start, 12):
+                                    gq_name = f"getquest{gq_i}.bmp"
+                                    gui_log(serial, f"Waiting {gq_name}...", step=f"gq{gq_i}")
+                                    thresh = 0.99 if gq_i == 10 else 0.8
+                                    while True:
+                                        check_device_reset(serial, cycle_start)
+                                        img = get_screen_capture(device)
+                                        if img is not None:
+                                            pts = ImgSearchADB(img, os.path.join(GQ_DIR, gq_name), threshold=thresh)
+                                            if pts:
+                                                x, y = pts[0]
+                                                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                                gui_log(serial, f"Clicked {gq_name} ({x},{y})", step=f"gq{gq_i} Click")
+                                                time.sleep(1.5)
+                                                # กดซ้ำจนรูปหาย (กันกดไม่ติด)
+                                                retry_end = time.time() + 8
+                                                while time.time() < retry_end:
+                                                    img2 = get_screen_capture(device)
+                                                    if img2 is not None and not ImgSearchADB(img2, os.path.join(GQ_DIR, gq_name), threshold=thresh):
+                                                        break
+                                                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                                    gui_log(serial, f"Re-click {gq_name}", step=f"gq{gq_i} Retry")
+                                                    time.sleep(1.0)
+                                                break
+                                        time.sleep(0.8)
+
+                                # วิธีที่ 1: ใช้ draganddrop (กดค้างแล้วลาก)
+                                # draganddrop จะกดค้างที่จุดแรกสักครู่ แล้วค่อยลากไปยังจุดที่สอง
+                                # โดยตัวเลข 5000 คือระยะเวลาในการลาก (5 วินาที)
+                                cmd_drag = "input draganddrop 96 124 691 205 5000"
+                                gui_log(serial, "Dragging from 96 124 to 691 205...", step="gq Drag")
+                                device.shell(cmd_drag)
+                                time.sleep(1.5)
+
+                                # Back รัวๆ จนเจอ cancel แล้วกด
+                                gui_log(serial, "Spamming Back until cancel (after gq8-11)...", step="gq11 Back")
+                                while True:
+                                    check_device_reset(serial, cycle_start)
+                                    device.shell("input keyevent 4")
+                                    time.sleep(0.4)
+                                    img = get_screen_capture(device)
+                                    if img is not None:
+                                        pts_c = ImgSearchADB(img, os.path.join(IMG_DIR, "cancel.bmp"))
+                                        if pts_c:
+                                            xc, yc = pts_c[0]
+                                            gui_log(serial, f"cancel found — clicking ({xc},{yc})", step="gq11 Cancel")
+                                            device.shell(f"input swipe {xc} {yc} {xc} {yc} 100")
+                                            time.sleep(1.5)
+                                            break
+
+                                # ── Phase 6: getquest12 → getquest14 ──
+                                for gq_i in range(12, 15):
+                                    gq_name = f"getquest{gq_i}.bmp"
+                                    gui_log(serial, f"Waiting {gq_name}...", step=f"gq{gq_i}")
+                                    while True:
+                                        check_device_reset(serial, cycle_start)
+                                        img = get_screen_capture(device)
+                                        if img is not None:
+                                            pts = ImgSearchADB(img, os.path.join(GQ_DIR, gq_name))
+                                            if pts:
+                                                x, y = pts[0]
+                                                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                                gui_log(serial, f"Clicked {gq_name} ({x},{y})", step=f"gq{gq_i} Click")
+                                                time.sleep(1.5)
+                                                # กดซ้ำจนรูปหาย (กันกดไม่ติด)
+                                                retry_end = time.time() + 8
+                                                while time.time() < retry_end:
+                                                    img2 = get_screen_capture(device)
+                                                    if img2 is not None and not ImgSearchADB(img2, os.path.join(GQ_DIR, gq_name)):
+                                                        break
+                                                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                                    gui_log(serial, f"Re-click {gq_name}", step=f"gq{gq_i} Retry")
+                                                    time.sleep(1.0)
+                                                break
+                                        time.sleep(0.8)
+
+                                # รอเจอ waitquest.bmp
+                                gui_log(serial, "Waiting for waitquest.bmp...", step="waitquest")
+                                while True:
+                                    check_device_reset(serial, cycle_start)
+                                    img = get_screen_capture(device)
+                                    if img is not None:
+                                        pts_wq = ImgSearchADB(img, os.path.join(GQ_DIR, "waitquest.bmp"))
+                                        if pts_wq:
+                                            gui_log(serial, "waitquest found!", step="waitquest OK")
+                                            time.sleep(1.0)
+                                            break
+                                    time.sleep(1.0)
+
+                                # กด getquest15
+                                gui_log(serial, "Waiting getquest15...", step="gq15")
+                                while True:
+                                    check_device_reset(serial, cycle_start)
+                                    img = get_screen_capture(device)
+                                    if img is not None:
+                                        pts15 = ImgSearchADB(img, os.path.join(GQ_DIR, "getquest15.bmp"))
+                                        if pts15:
+                                            x15, y15 = pts15[0]
+                                            device.shell(f"input swipe {x15} {y15} {x15} {y15} 100")
+                                            gui_log(serial, f"Clicked getquest15 ({x15},{y15})", step="gq15 Click")
+                                            time.sleep(1.5)
+                                            # กดซ้ำจนรูปหาย (กันกดไม่ติด)
+                                            retry_end = time.time() + 8
+                                            while time.time() < retry_end:
+                                                img2 = get_screen_capture(device)
+                                                if img2 is not None and not ImgSearchADB(img2, os.path.join(GQ_DIR, "getquest15.bmp")):
+                                                    break
+                                                device.shell(f"input swipe {x15} {y15} {x15} {y15} 100")
+                                                gui_log(serial, "Re-click getquest15", step="gq15 Retry")
+                                                time.sleep(1.0)
+                                            break
+                                    time.sleep(0.8)
+
+                                # ── Phase 7: Post-GQ15 Quest Five Sequence ──
+                                gui_log(serial, "Starting Quest Five sequence...", step="QuestFive Start")
+                                
+                                def click_until_gone(img_path, label, threshold=0.8):
+                                    gui_log(serial, f"Waiting for {label}...", step=label)
+                                    while True:
+                                        check_device_reset(serial, cycle_start)
+                                        img = get_screen_capture(device)
+                                        if img is not None:
+                                            pts = ImgSearchADB(img, img_path, threshold=threshold)
+                                            if pts:
+                                                x, y = pts[0]
+                                                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                                gui_log(serial, f"Clicked {label} at ({x}, {y})", step=f"{label} Click")
+                                                time.sleep(1.5)
+                                                # กดซ้ำจนกว่าจะหาย
+                                                retry_end = time.time() + 8
+                                                while time.time() < retry_end:
+                                                    check_device_reset(serial, cycle_start)
+                                                    img2 = get_screen_capture(device)
+                                                    if img2 is not None and not ImgSearchADB(img2, img_path, threshold=threshold):
+                                                        break
+                                                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                                    gui_log(serial, f"Re-clicked {label}", step=f"{label} Retry")
+                                                    time.sleep(1.0)
+                                                break
+                                        time.sleep(0.8)
+
+                                while True:
+                                    check_device_reset(serial, cycle_start)
+                                    # 1. Delay 10 วินาทีก่อนเริ่มลาก จากนั้นกดค้างที่ 96 124 แล้วลากไป 691 205 (ใช้เวลาลาก 5 วินาที)
+                                    gui_log(serial, "Waiting 10 seconds delay before dragging...", step="Q5 Drag Delay")
+                                    time.sleep(10.0)
+                                    
+                                    drag_cmd = "input draganddrop 96 124 691 205 5000"
+                                    gui_log(serial, "Dragging from 96 124 to 691 205...", step="Q5 Drag")
+                                    device.shell(drag_cmd)
+                                    time.sleep(0.2) # เริ่มค้นหาต่อทันที
+                                    
+                                    # 2. กด questfive1
+                                    gui_log(serial, "Searching for questfive1.bmp...", step="Q5_1 Search")
+                                    q5_1_found = False
+                                    search_start = time.time()
+                                    while time.time() - search_start < 10: # ให้เวลารอ 10 วิ
+                                        check_device_reset(serial, cycle_start)
+                                        img = get_screen_capture(device)
+                                        if img is not None:
+                                            pts = ImgSearchADB(img, os.path.join(GQ_DIR, "questfive1.bmp"))
+                                            if pts:
+                                                x, y = pts[0]
+                                                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                                gui_log(serial, f"Clicked questfive1 at ({x}, {y})", step="Q5_1 Click")
+                                                q5_1_found = True
+                                                time.sleep(1.5)
+                                                # กดซ้ำจนกว่าจะหาย
+                                                retry_end = time.time() + 8
+                                                while time.time() < retry_end:
+                                                    check_device_reset(serial, cycle_start)
+                                                    img2 = get_screen_capture(device)
+                                                    if img2 is not None and not ImgSearchADB(img2, os.path.join(GQ_DIR, "questfive1.bmp")):
+                                                        break
+                                                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                                    gui_log(serial, "Re-clicked questfive1", step="Q5_1 Retry")
+                                                    time.sleep(1.0)
+                                                break
+                                        time.sleep(0.8)
+                                        
+                                    if not q5_1_found:
+                                        gui_log(serial, "questfive1.bmp not found! Retrying from drag...", step="Q5_1 Fail")
+                                        continue
+                                        
+                                    # 3. เช็ค checkpointquest1
+                                    gui_log(serial, "Verifying checkpointquest1.bmp...", step="Q5 CP1 Check")
+                                    time.sleep(2.0) # ให้เวลาโหลดหน้าจอ
+                                    checkpoint_found = False
+                                    img = get_screen_capture(device)
+                                    if img is not None:
+                                        pts = ImgSearchADB(img, os.path.join(GQ_DIR, "checkpointquest1.bmp"))
+                                        if pts:
+                                            gui_log(serial, "checkpointquest1.bmp FOUND!", step="Q5 CP1 OK")
+                                            checkpoint_found = True
+                                        else:
+                                            gui_log(serial, "checkpointquest1.bmp NOT FOUND!", step="Q5 CP1 Missing")
+                                            
+                                    if not checkpoint_found:
+                                        gui_log(serial, "Checkpoint not found, looping back to drag...", step="Q5 CP1 Retry")
+                                        continue # กลับไปลากใหม่
+                                        
+                                    # 4. ถ้าเจอ checkpointquest1 -> ไป questfive2 -> questfive3
+                                    gui_log(serial, "Proceeding to questfive2 -> questfive3...", step="Q5_2->3")
+                                    for i in range(2, 4):
+                                        q_name = f"questfive{i}.bmp"
+                                        click_until_gone(os.path.join(GQ_DIR, q_name), q_name)
+                                        
+                                    # 5. วนกด questfive4 -> questfive5 จนกว่าจะเจอ checkpointquest2
+                                    gui_log(serial, "Loop clicking questfive4 -> questfive5...", step="Q5_4->5 Loop")
+                                    while True:
+                                        check_device_reset(serial, cycle_start)
+                                        # เช็ค checkpointquest2 ก่อนเริ่มรอบ
+                                        img = get_screen_capture(device)
+                                        if img is not None and ImgSearchADB(img, os.path.join(GQ_DIR, "checkpointquest2.bmp")):
+                                            gui_log(serial, "checkpointquest2.bmp FOUND! Breaking loop...", step="Q5 CP2 OK")
+                                            break
+                                            
+                                        # รอ/กด questfive4
+                                        q4_break = False
+                                        while True:
+                                            check_device_reset(serial, cycle_start)
+                                            img = get_screen_capture(device)
+                                            if img is not None:
+                                                if ImgSearchADB(img, os.path.join(GQ_DIR, "checkpointquest2.bmp")):
+                                                    gui_log(serial, "checkpointquest2.bmp FOUND! Breaking loop...", step="Q5 CP2 OK")
+                                                    q4_break = True
+                                                    break
+                                                
+                                                pts4 = ImgSearchADB(img, os.path.join(GQ_DIR, "questfive4.bmp"))
+                                                if pts4:
+                                                    x, y = pts4[0]
+                                                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                                    gui_log(serial, f"Clicked questfive4 at ({x}, {y})", step="Q5_4 Click")
+                                                    time.sleep(1.5)
+                                                    # กดซ้ำจนกว่าจะหาย
+                                                    retry_end = time.time() + 8
+                                                    while time.time() < retry_end:
+                                                        check_device_reset(serial, cycle_start)
+                                                        img2 = get_screen_capture(device)
+                                                        if img2 is not None and not ImgSearchADB(img2, os.path.join(GQ_DIR, "questfive4.bmp")):
+                                                            break
+                                                        device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                                        gui_log(serial, "Re-clicked questfive4", step="Q5_4 Retry")
+                                                        time.sleep(1.0)
+                                                    break
+                                            time.sleep(0.8)
+                                            
+                                        if q4_break:
+                                            break
+                                            
+                                        # เช็ค checkpointquest2 อีกรอบก่อนกด questfive5
+                                        img = get_screen_capture(device)
+                                        if img is not None and ImgSearchADB(img, os.path.join(GQ_DIR, "checkpointquest2.bmp")):
+                                            gui_log(serial, "checkpointquest2.bmp FOUND before questfive5! Breaking loop...", step="Q5 CP2 OK")
+                                            break
+                                            
+                                        # รอ/กด questfive5
+                                        q5_break = False
+                                        while True:
+                                            check_device_reset(serial, cycle_start)
+                                            img = get_screen_capture(device)
+                                            if img is not None:
+                                                if ImgSearchADB(img, os.path.join(GQ_DIR, "checkpointquest2.bmp")):
+                                                    gui_log(serial, "checkpointquest2.bmp FOUND! Breaking loop...", step="Q5 CP2 OK")
+                                                    q5_break = True
+                                                    break
+                                                
+                                                pts5 = ImgSearchADB(img, os.path.join(GQ_DIR, "questfive5.bmp"))
+                                                if pts5:
+                                                    x, y = pts5[0]
+                                                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                                    gui_log(serial, f"Clicked questfive5 at ({x}, {y})", step="Q5_5 Click")
+                                                    time.sleep(1.5)
+                                                    # กดซ้ำจนกว่าจะหาย
+                                                    retry_end = time.time() + 8
+                                                    while time.time() < retry_end:
+                                                        check_device_reset(serial, cycle_start)
+                                                        img2 = get_screen_capture(device)
+                                                        if img2 is not None and not ImgSearchADB(img2, os.path.join(GQ_DIR, "questfive5.bmp")):
+                                                            break
+                                                        device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                                        gui_log(serial, "Re-clicked questfive5", step="Q5_5 Retry")
+                                                        time.sleep(1.0)
+                                                    break
+                                            time.sleep(0.8)
+                                            
+                                        if q5_break:
+                                            break
+                                            
+                                    # 6. ถ้าเจอ checkpointquest2 -> กด questfive6 -> questfive9
+                                    gui_log(serial, "Proceeding to questfive6 -> questfive9...", step="Q5_6->9")
+                                    for i in range(6, 10):
+                                        q_name = f"questfive{i}.bmp"
+                                        click_until_gone(os.path.join(GQ_DIR, q_name), q_name)
+                                        
+                                    # 7. วนกดเช็ค questfive10 กดค้าง 5วิ ไปเรื่อยๆ จนกว่าจะเจอ chekcpointquest3
+                                    gui_log(serial, "Loop checking questfive10...", step="Q5_10 Loop")
+                                    while True:
+                                        check_device_reset(serial, cycle_start)
+                                        img = get_screen_capture(device)
+                                        if img is not None:
+                                            # เช็ค chekcpointquest3.bmp
+                                            if ImgSearchADB(img, os.path.join(GQ_DIR, "chekcpointquest3.bmp")):
+                                                gui_log(serial, "chekcpointquest3.bmp FOUND!", step="Q5 CP3 OK")
+                                                break
+                                            
+                                            # ค้นหา questfive10.bmp
+                                            pts10 = ImgSearchADB(img, os.path.join(GQ_DIR, "questfive10.bmp"))
+                                            if pts10:
+                                                x, y = pts10[0]
+                                                gui_log(serial, f"Long pressing questfive10 at ({x}, {y})...", step="Q5_10 Click")
+                                                device.shell(f"input swipe {x} {y} {x} {y} 5000")
+                                                time.sleep(5.5) # รอให้กดค้างเสร็จ
+                                                
+                                                # เช็ค chekcpointquest3 อีกรอบหลังกดค้างเสร็จ
+                                                img_after = get_screen_capture(device)
+                                                if img_after is not None and ImgSearchADB(img_after, os.path.join(GQ_DIR, "chekcpointquest3.bmp")):
+                                                    gui_log(serial, "chekcpointquest3.bmp FOUND after long press!", step="Q5 CP3 OK")
+                                                    break
+                                            else:
+                                                gui_log(serial, "questfive10.bmp not found, waiting...", step="Q5_10 Wait")
+                                        time.sleep(0.1)
+                                        
+                                    # 8. หลังจากเจอ chekcpointquest3 -> กด questfive11 -> questfive12
+                                    gui_log(serial, "Proceeding to questfive11 -> questfive12...", step="Q5_11->12")
+                                    for i in range(11, 13):
+                                        q_name = f"questfive{i}.bmp"
+                                        click_until_gone(os.path.join(GQ_DIR, q_name), q_name)
+                                        
+                                    # 9. กดรูปค้าง questfive13 7วิ รอให้เจอ checkpointquest4
+                                    gui_log(serial, "Loop checking questfive13...", step="Q5_13 Loop")
+                                    while True:
+                                        check_device_reset(serial, cycle_start)
+                                        img = get_screen_capture(device)
+                                        if img is not None:
+                                            # เช็ค checkpointquest4.bmp
+                                            if ImgSearchADB(img, os.path.join(GQ_DIR, "checkpointquest4.bmp")):
+                                                gui_log(serial, "checkpointquest4.bmp FOUND!", step="Q5 CP4 OK")
+                                                break
+                                                    
+                                            # ค้นหา questfive13.bmp
+                                            pts13 = ImgSearchADB(img, os.path.join(GQ_DIR, "questfive13.bmp"))
+                                            if pts13:
+                                                x, y = pts13[0]
+                                                gui_log(serial, f"Long pressing questfive13 at ({x}, {y})...", step="Q5_13 Click")
+                                                device.shell(f"input swipe {x} {y} {x} {y} 7000")
+                                                time.sleep(7.5) # รอให้กดค้างเสร็จ
+                                                
+                                                # เช็ค checkpointquest4 อีกรอบหลังกดค้างเสร็จ
+                                                img_after = get_screen_capture(device)
+                                                if img_after is not None and ImgSearchADB(img_after, os.path.join(GQ_DIR, "checkpointquest4.bmp")):
+                                                    gui_log(serial, "checkpointquest4.bmp FOUND after long press!", step="Q5 CP4 OK")
+                                                    break
+                                            else:
+                                                gui_log(serial, "questfive13.bmp not found, waiting...", step="Q5_13 Wait")
+                                        time.sleep(0.1)
+                                        
+                                    # 10. หลังจากเจอ checkpointquest4 -> กด questfive14 -> กด back รัวๆ จนกว่าจะเจอ cancel.bmp
+                                    gui_log(serial, "Proceeding to questfive14...", step="Q5_14")
+                                    click_until_gone(os.path.join(GQ_DIR, "questfive14.bmp"), "questfive14.bmp")
+                                    
+                                    gui_log(serial, "Spamming Back key until cancel.bmp...", step="Back Spam")
+                                    while True:
+                                        check_device_reset(serial, cycle_start)
+                                        img = get_screen_capture(device)
+                                        if img is not None:
+                                            pts_cancel = ImgSearchADB(img, "img/cancel.bmp")
+                                            if pts_cancel:
+                                                x, y = pts_cancel[0]
+                                                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                                gui_log(serial, f"Clicked cancel at ({x}, {y})", step="Cancel Click")
+                                                time.sleep(1.5)
+                                                # กดซ้ำจนกว่าจะหาย
+                                                retry_end = time.time() + 8
+                                                while time.time() < retry_end:
+                                                    check_device_reset(serial, cycle_start)
+                                                    img2 = get_screen_capture(device)
+                                                    if img2 is not None and not ImgSearchADB(img2, "img/cancel.bmp"):
+                                                        break
+                                                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                                    gui_log(serial, "Re-clicked cancel", step="Cancel Retry")
+                                                    time.sleep(1.0)
+                                                break
+                                        
+                                        # Send Back key
+                                        device.shell("input keyevent 4")
+                                        gui_log(serial, "Pressed Back key", step="Press Back")
+                                        time.sleep(1.0)
+                                        
+                                    break
+
+                                gui_log(serial, "GetQuest completed!", step="GetQuest Done")
+                                break
+                            except RestartFromQuest8Exception:
+                                gui_log(serial, "backquest3 detected! Restarting sequence from getquest8...", step="Restart GQ8")
+                                start_from_gq8 = True
+                                time.sleep(1.0)
+                    finally:
+                        GQ_ACTIVE = False
 
                 # ── Box Sequence (เอาระบบในไฟล์ login.py มาทดแทนทั้งหมด) ──
                 if DO_BOX == 1:

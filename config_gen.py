@@ -64,6 +64,15 @@ HERO_LIST_FREE = [
     "Rivaldo",
     ""
 ]
+
+# ── Get Quest Sequence ─────────────────────────────
+# 1 = ทำขั้นตอน getquest (เก็บรางวัลเควส) ก่อน Box
+# 0 = ข้าม
+GETQUEST = 1
+
+# โฟลเดอร์รูป getquest (อยู่ใน img/getquest/)
+GETQUEST_IMG_DIR = "img/getquest"
+
 # ── Path ──────────────────────────────────────────
 IMG_DIR = "img"
 
