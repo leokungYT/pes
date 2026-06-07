@@ -1854,6 +1854,55 @@ def is_hero_match(hero_name, ocr_text):
             
     return False
 
+def parse_hero_config(config_list):
+    """
+    Parses a list of hero configurations.
+    Each item can be a string, e.g. "Lamine=x2", "Lamine:2", "Lamine".
+    Also supports tuples or lists like ("Lamine", 2) or ["Lamine", "x2"].
+    Returns a dict: { hero_name_cleaned: required_count }
+    """
+    parsed = {}
+    for item in config_list:
+        if not item:
+            continue
+        
+        if isinstance(item, (list, tuple)):
+            if len(item) >= 2:
+                name = str(item[0]).strip()
+                val = str(item[1]).strip().lower()
+                if val.startswith('x'):
+                    val = val[1:]
+                if val.isdigit():
+                    req_count = int(val)
+                else:
+                    req_count = 1
+                parsed[name] = req_count
+            elif len(item) == 1:
+                name = str(item[0]).strip()
+                parsed[name] = 1
+            continue
+            
+        item_str = str(item).strip()
+        if not item_str:
+            continue
+        
+        name = item_str
+        req_count = 1
+        
+        for sep in [':', '=']:
+            if sep in item_str:
+                parts = item_str.split(sep)
+                name = parts[0].strip()
+                val = parts[1].strip().lower()
+                if val.startswith('x'):
+                    val = val[1:]
+                if val.isdigit():
+                    req_count = int(val)
+                break
+        
+        parsed[name] = req_count
+    return parsed
+
 # ═════════════════════════════════════════════════════════════════════════════
 # File management  ← แก้ตรงนี้
 # ═════════════════════════════════════════════════════════════════════════════
@@ -2293,7 +2342,8 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
     last_lock2_text = ""
     last_lock3_text = ""
     target_list = list_find_hero if (list_find_hero and any(list_find_hero)) else HERO_LIST
-    target_heroes = [h.strip() for h in target_list if h and h.strip()]
+    target_config = parse_hero_config(target_list)
+    target_heroes = list(target_config.keys())
 
     for pass_num in range(1, 3):
         found_heroes.clear()
@@ -2301,6 +2351,10 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
         # Capture screen once for this pass (maximum speed, zero mismatch)
         img = get_screen_capture(device)
         if img is not None:
+            lock1_matches = set()
+            lock2_matches = set()
+            lock3_matches = set()
+
             # Lock 1 Scanning
             lock1_region = Region(154, 134, 679, 39)
             lock1_text = read_screen_text(img, region=lock1_region, serial=serial)
@@ -2308,9 +2362,8 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
             gui_log(serial, f"Lock 1 OCR: {lock1_text if lock1_text else '<EMPTY>'}", step="Scan Lock 1")
             for h in target_heroes:
                 if is_hero_match(h, lock1_text):
-                    if h not in found_heroes:
-                        found_heroes.append(h)
-                        gui_log(serial, f"Lock 1 Match: {h}", step=f"⭐ {h}")
+                    lock1_matches.add(h)
+                    gui_log(serial, f"Lock 1 Match: {h}", step=f"⭐ {h}")
 
             # Lock 2 Scanning
             lock2_region = Region(156, 249, 646, 34)
@@ -2319,9 +2372,8 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
             gui_log(serial, f"Lock 2 OCR: {lock2_text if lock2_text else '<EMPTY>'}", step="Scan Lock 2")
             for h in target_heroes:
                 if is_hero_match(h, lock2_text):
-                    if h not in found_heroes:
-                        found_heroes.append(h)
-                        gui_log(serial, f"Lock 2 Match: {h}", step=f"⭐ {h}")
+                    lock2_matches.add(h)
+                    gui_log(serial, f"Lock 2 Match: {h}", step=f"⭐ {h}")
 
             # Lock 3 Scanning
             lock3_region = Region(157, 360, 658, 34)
@@ -2330,13 +2382,26 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
             gui_log(serial, f"Lock 3 OCR: {lock3_text if lock3_text else '<EMPTY>'}", step="Scan Lock 3")
             for h in target_heroes:
                 if is_hero_match(h, lock3_text):
-                    if h not in found_heroes:
-                        found_heroes.append(h)
-                        gui_log(serial, f"Lock 3 Match: {h}", step=f"⭐ {h}")
-        
-        # If at least one hero matched, exit scanning successfully!
-        if found_heroes:
-            break
+                    lock3_matches.add(h)
+                    gui_log(serial, f"Lock 3 Match: {h}", step=f"⭐ {h}")
+
+            # Aggregate matches from the three locks
+            from collections import Counter
+            pass_matches = list(lock1_matches) + list(lock2_matches) + list(lock3_matches)
+            if pass_matches:
+                counts = Counter(pass_matches)
+                pass_valid_heroes = []
+                for h, count in counts.items():
+                    req = target_config.get(h, 1)
+                    if count >= req:
+                        if count > 1:
+                            pass_valid_heroes.append(f"{h}x{count}")
+                        else:
+                            pass_valid_heroes.append(h)
+                
+                if pass_valid_heroes:
+                    found_heroes.extend(pass_valid_heroes)
+                    break
             
         # If we failed to find any hero in Pass 1, wait 2s and scan one more time!
         if pass_num == 1:
@@ -2353,6 +2418,7 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
 
     if found_heroes:
         num_heroes = len(found_heroes)
+
         if num_heroes >= 3:
             subfolder = "hero3"
         elif num_heroes == 2:
@@ -2503,7 +2569,9 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
             time.sleep(0.3)
 
     # 2. ทำลูปสุ่มกาชาฟรีตามจำนวนที่กำหนดใน config
-    found_heroes = []  # เก็บชื่อฮีโร่ที่เจอจากทุก loop
+    target_config = parse_hero_config(HERO_LIST_FREE)
+    target_heroes = list(target_config.keys())
+    raw_found_heroes = []  # เก็บชื่อฮีโร่ที่เจอจากทุก loop
     end_swip_detected = False
 
     for loop_num in range(1, GACHA_FREE_LOOPS + 1):
@@ -2778,12 +2846,11 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                         gui_log(serial, f"[Loop {loop_num}] OCR Result: {display_text}", step="OCR Done")
                         print(f"[{serial}] GachaFree Loop{loop_num} OCR: {display_text}")
  
-                        for h in HERO_LIST_FREE:
+                        for h in target_heroes:
                             if is_hero_match(h, ocr_text):
                                 h_clean = h.strip()
-                                if h_clean not in found_heroes:
-                                    found_heroes.append(h_clean)
-                                    gui_log(serial, f"[Loop {loop_num}] ⭐ Match: {h_clean}", step=f"⭐ {h_clean}")
+                                raw_found_heroes.append(h_clean)
+                                gui_log(serial, f"[Loop {loop_num}] ⭐ Match: {h_clean}", step=f"⭐ {h_clean}")
                         break
                 time.sleep(0.3)
 
@@ -2896,24 +2963,37 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
         dest_dir = FAST_RANDOM_DIR
         final_name = clean_orig
         gui_log(serial, f"NOSCAN → {dest_dir}/{final_name}", step="Fast Random")
-    elif found_heroes:
-        num_heroes = len(found_heroes)
-        if num_heroes >= 3:
-            subfolder = "hero3"
-        elif num_heroes == 2:
-            subfolder = "hero2"
-        else:
-            subfolder = "hero1"
-        dest_dir = os.path.join(BACKUP_ID_DIR, subfolder)
-        os.makedirs(dest_dir, exist_ok=True)
+    elif raw_found_heroes:
+        from collections import Counter
+        counts = Counter(raw_found_heroes)
+        found_heroes = []
+        for h, count in counts.items():
+            req = target_config.get(h, 1)
+            if count >= req:
+                if count > 1:
+                    found_heroes.append(f"{h}x{count}")
+                else:
+                    found_heroes.append(h)
 
-        hero_prefix = "+".join(found_heroes)
-        final_name = f"{hero_prefix}+{clean_orig}"
-        gui_log(serial, f"⭐ GachaFree Match: {hero_prefix}", step=f"⭐ {hero_prefix}")
-    else:
-        dest_dir = RANDOM_FAIL_DIR
-        final_name = clean_orig
-        gui_log(serial, "GachaFree: No hero matched", step="No Match")
+        if found_heroes:
+            num_heroes = len(found_heroes)
+
+            if num_heroes >= 3:
+                subfolder = "hero3"
+            elif num_heroes == 2:
+                subfolder = "hero2"
+            else:
+                subfolder = "hero1"
+            dest_dir = os.path.join(BACKUP_ID_DIR, subfolder)
+            os.makedirs(dest_dir, exist_ok=True)
+
+            hero_prefix = "+".join(found_heroes)
+            final_name = f"{hero_prefix}+{clean_orig}"
+            gui_log(serial, f"⭐ GachaFree Match: {hero_prefix}", step=f"⭐ {hero_prefix}")
+        else:
+            dest_dir = RANDOM_FAIL_DIR
+            final_name = clean_orig
+            gui_log(serial, "GachaFree: No hero matched (required counts not met)", step="No Match")
 
     dest = os.path.join(dest_dir, final_name)
     if os.path.exists(file_path):

@@ -41,7 +41,7 @@ LOGIN_SUCCESS_DIR = "login-success"
 # ── Find Hero Sequence ─────────────────────────────
 # 1 = ทำงาน fin1-fin8 และค้นหาฮีโร่ตามภาพ
 # 0 = ข้าม
-FIND_HERO = 0
+FIND_HERO = 1
 
 # แมพไฟล์ภาพฮีโร่เข้ากับชื่อฮีโร่
 HERO_IMG_MAP = {
@@ -58,7 +58,7 @@ GACHA_FREE = 0
 # จำนวนลูปย่อยที่ต้องการสุ่มกาชาฟรี (เช่น 2, 3, 5)
 GACHA_FREE_LOOPS = 10
 
-# รายชื่อนักเตะที่ต้องการเก็บ (Gacha Free → backup-id)
+# รายชื่อนักเตะที่ต้องการเก็บ (Gacha Free → backup-id) (หากเจอชื่อซ้ำกัน ระบบจะตรวจจับและใส่ x2, x3 ต่อท้ายให้อัตโนมัติ)
 HERO_LIST_FREE = [
     "Fabio Cannavaro",
     "Paolo Maldini",
@@ -102,6 +102,7 @@ HERO_LIST_FREE = [
     ""
 ]
 
+# รายชื่อนักเตะที่ใช้สแกนหา (หากเจอชื่อซ้ำกัน ระบบจะตรวจจับและใส่ x2, x3 ต่อท้ายให้อัตโนมัติ)
 list_find_hero = [
     "Fabio Cannavaro",
     "Paolo Maldini",
@@ -115,7 +116,7 @@ list_find_hero = [
     "Arribas",
     "Ramedhan Saifullah",
     "Chrigor",
-    "Lamine",
+    "Lamine=x2",
     "Mbappe",
     "Joan Garcia",
     "Martin Odegaard",
@@ -203,7 +204,7 @@ GETCODE_TEXT = "eFCONNECT"
 # ── Get Quest Sequence ─────────────────────────────
 # 1 = ทำขั้นตอน getquest (เก็บรางวัลเควส) ก่อน Box
 # 0 = ข้าม
-GETQUEST = 1
+GETQUEST = 0
 
 # โฟลเดอร์รูป getquest (อยู่ใน img/getquest/)
 GETQUEST_IMG_DIR = "img/getquest"
