@@ -1485,9 +1485,11 @@ def get_screen_capture(device):
                     elapsed = time.time() - FIXCLEAR_FIRST_SEEN[device.serial]
                     gui_log(device.serial, f"fixclear.bmp detected for {elapsed:.1f}s / 15s...", step="Fix Clear")
                     if elapsed >= 15:
-                        gui_log(device.serial, "Floating: fixclear.bmp found! Clearing app and moving file to file-error", step="Fix Clear")
+                        gui_log(device.serial, "Floating: fixclear.bmp found! Deleting save data and moving file to file-error", step="Fix Clear")
                         FIXCLEAR_FIRST_SEEN.pop(device.serial, None)
-                        device.shell("pm clear jp.konami.pesam")
+                        device.shell("am force-stop jp.konami.pesam")
+                        device.shell("su -c 'rm -f /data/data/jp.konami.pesam/files/SaveData/AUTH/online_user_id_data.dat'")
+                        device.shell("su -c 'rm -rf /data/data/jp.konami.pesam/files/SaveData/AUTH/*'")
                         
                         original_name = DEVICE_FILE_ASSIGNMENTS.get(device.serial)
                         if original_name:
