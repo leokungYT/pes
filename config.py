@@ -206,5 +206,9 @@ GETCODE_TEXT = "eFCONNECT"
 # 0 = ข้าม
 GETQUEST = 0
 
+# ── Send Code (playcode.py) ────────────────────────
+# โค้ดที่จะกรอกในขั้นตอน sendcode (เปลี่ยนได้ตามต้องการ)
+SEND_CODE = "M-CBFTKHBALEF"
+
 # โฟลเดอร์รูป getquest (อยู่ใน img/getquest/)
 GETQUEST_IMG_DIR = "img/getquest"
