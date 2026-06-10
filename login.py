@@ -117,6 +117,26 @@ DEVICE_FILE_ASSIGNMENTS = {}
 DEVICE_DISABLE_FIXEVENT = {}
 DEVICE_LAST_GAME_CHECK  = {}  # throttle: เช็คเกมออนทุก 30 วิ
 
+# ── Performance ───────────────────────────────────────────────────────────────
+# ลด resolution ก่อน matchTemplate → 4x เร็วขึ้น (0.5 = 50%)
+SCREENCAP_SCALE = 0.5
+
+# Pre-compute paths — ไม่สร้าง string ใหม่ทุก frame
+_P = {
+    'fixnet':    os.path.join(IMG_DIR, "fixnet.bmp"),
+    'fixnet1':   os.path.join(IMG_DIR, "fixnet1.bmp"),
+    'fixload':   os.path.join(IMG_DIR, "fixloading.bmp"),
+    'fixload2':  os.path.join(IMG_DIR, "fixload2.bmp"),
+    'fixlg3':    os.path.join(IMG_DIR, "fixlg3.bmp"),
+    'fixclear':  os.path.join(IMG_DIR, "fixclear.bmp"),
+    'fixevent':  os.path.join(IMG_DIR, "fixevent.bmp"),
+    'fixalert1': os.path.join(IMG_DIR, "fixalert1.bmp"),
+    'fixalert2': os.path.join(IMG_DIR, "fixalert2.bmp"),
+    'fixalert3': os.path.join(IMG_DIR, "fixalert3.bmp"),
+    'cancel':    os.path.join(IMG_DIR, "cancel.bmp"),
+}
+_QUESTFIVE_PATHS = [os.path.join(IMG_DIR, f"questfive{i}.bmp") for i in range(1, 15)]
+
 file_pick_lock = threading.Lock()
 ocr_lock       = threading.Lock()   # ป้องกัน OCR หลาย device พร้อมกัน (ลด CPU spike)
 in_use_files   = set()   # filenames currently being processed
@@ -1313,16 +1333,21 @@ def fast_screencap(device):
         conn.send("shell:screencap")
         conn.check_status()
         raw = conn.read_all()
-        
+
         if len(raw) > 16:
             w = int.from_bytes(raw[0:4], byteorder='little')
             h = int.from_bytes(raw[4:8], byteorder='little')
-            # 12 bytes header
             expected_size = w * h * 4
             if len(raw) >= 12 + expected_size:
-                img_data = raw[12:12+expected_size]
-                img = np.frombuffer(img_data, dtype=np.uint8).reshape((h, w, 4))
-                return cv2.cvtColor(img, cv2.COLOR_RGBA2GRAY)
+                gray = cv2.cvtColor(
+                    np.frombuffer(raw, dtype=np.uint8, offset=12, count=expected_size).reshape((h, w, 4)),
+                    cv2.COLOR_RGBA2GRAY
+                )
+                if SCREENCAP_SCALE != 1.0:
+                    gray = cv2.resize(gray,
+                                      (int(w * SCREENCAP_SCALE), int(h * SCREENCAP_SCALE)),
+                                      interpolation=cv2.INTER_LINEAR)
+                return gray
     except Exception:
         pass
 
@@ -1330,8 +1355,12 @@ def fast_screencap(device):
     try:
         raw = device.screencap()
         if raw:
-            return cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_GRAYSCALE)
-    except:
+            gray = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_GRAYSCALE)
+            if gray is not None and SCREENCAP_SCALE != 1.0:
+                gray = cv2.resize(gray, None, fx=SCREENCAP_SCALE, fy=SCREENCAP_SCALE,
+                                  interpolation=cv2.INTER_LINEAR)
+            return gray
+    except Exception:
         pass
     return None
 
@@ -1371,20 +1400,19 @@ def get_screen_capture(device):
         
         if img is not None:
             # === fixnet floating check ===
-            fn_pts = img_search(img, os.path.join(IMG_DIR, "fixnet.bmp"))
+            fn_pts = img_search(img, _P['fixnet'])
             if fn_pts:
                 gui_log(device.serial, "Floating: fixnet.bmp found! Clicking...", step="Fix Net")
                 x, y = fn_pts[0]
                 device.shell(f"input swipe {x} {y} {x} {y} 100")
                 time.sleep(1)
-                
-                # Search for fixnet1.bmp for up to 10 seconds
+
                 gui_log(device.serial, "Waiting for fixnet1.bmp (up to 10s)...", step="Fix Net 1")
                 deadline_fn1 = time.time() + 10
                 while time.time() < deadline_fn1:
                     img_fn1 = fast_screencap(device)
                     if img_fn1 is not None:
-                        fn1_pts = img_search(img_fn1, os.path.join(IMG_DIR, "fixnet1.bmp"))
+                        fn1_pts = img_search(img_fn1, _P['fixnet1'])
                         if fn1_pts:
                             x_fn1, y_fn1 = fn1_pts[0]
                             device.shell(f"input swipe {x_fn1} {y_fn1} {x_fn1} {y_fn1} 100")
@@ -1393,7 +1421,7 @@ def get_screen_capture(device):
                             break
                     time.sleep(0.5)
 
-                img = fast_screencap(device)  # Re-capture fresh image after clicks
+                img = fast_screencap(device)
                 if img is None:
                     return None
 
@@ -1581,26 +1609,26 @@ def get_screen_capture(device):
 
             # fixevent.bmp floating check
             if not DEVICE_DISABLE_FIXEVENT.get(device.serial, False):
-                fe_pts = img_search(img, os.path.join(IMG_DIR, "fixevent.bmp"))
+                fe_pts = img_search(img, _P['fixevent'])
                 if fe_pts:
-                    gui_log(device.serial, "Floating: fixevent.bmp found! Checking if it persists for 8s...", step="Fix Event")
+                    gui_log(device.serial, "Floating: fixevent.bmp found! Checking if it persists for 5s...", step="Fix Event")
                     persisted = True
-                    for _ in range(8):
+                    for _ in range(5):
                         time.sleep(1)
                         img_check = fast_screencap(device)
                         if img_check is None:
                             persisted = False
                             break
-                        pts_check = img_search(img_check, os.path.join(IMG_DIR, "fixevent.bmp"))
+                        pts_check = img_search(img_check, _P['fixevent'])
                         if not pts_check:
                             persisted = False
                             break
-                    
+
                     if persisted:
-                        gui_log(device.serial, "fixevent.bmp persisted for 8s! Clicking...", step="Fix Event")
+                        gui_log(device.serial, "fixevent.bmp persisted for 5s! Clicking...", step="Fix Event")
                         img_click = fast_screencap(device)
                         if img_click is not None:
-                            pts_click = img_search(img_click, os.path.join(IMG_DIR, "fixevent.bmp"))
+                            pts_click = img_search(img_click, _P['fixevent'])
                             if pts_click:
                                 x, y = pts_click[0]
                                 device.shell(f"input swipe {x} {y} {x} {y} 100")
@@ -1609,45 +1637,66 @@ def get_screen_capture(device):
                         img = fast_screencap(device)
 
             # fixalert1.bmp floating check
-            fa_pts = img_search(img, os.path.join(IMG_DIR, "fixalert1.bmp"))
+            fa_pts = img_search(img, _P['fixalert1'])
             if fa_pts:
                 gui_log(device.serial, "Floating: fixalert1.bmp found! Executing fixalert2 -> fixalert3", step="Fix Alert")
-                # Wait up to 15 seconds for fixalert2 and click until gone
                 deadline_fa2 = time.time() + 15
                 clicked_fa2 = False
                 while time.time() < deadline_fa2:
                     img_fa2 = fast_screencap(device)
                     if img_fa2 is not None:
-                        pts_fa2 = img_search(img_fa2, os.path.join(IMG_DIR, "fixalert2.bmp"))
+                        pts_fa2 = img_search(img_fa2, _P['fixalert2'])
                         if pts_fa2:
                             x, y = pts_fa2[0]
                             device.shell(f"input swipe {x} {y} {x} {y} 100")
                             gui_log(device.serial, "Clicked fixalert2.bmp", step="Fix Alert")
                             time.sleep(2)
                             clicked_fa2 = True
-                            deadline_fa2 = time.time() + 10  # ต่อเวลารอหายไป
+                            deadline_fa2 = time.time() + 10
                         elif clicked_fa2:
-                            break  # เคยกดแล้ว + หายแล้ว → ไป fixalert3
+                            break
                     time.sleep(0.5)
 
                 if clicked_fa2:
-                    # Wait up to 15 seconds for fixalert3 and click until gone
                     deadline_fa3 = time.time() + 15
                     while time.time() < deadline_fa3:
                         img_fa3 = fast_screencap(device)
                         if img_fa3 is not None:
-                            pts_fa3 = img_search(img_fa3, os.path.join(IMG_DIR, "fixalert3.bmp"))
+                            pts_fa3 = img_search(img_fa3, _P['fixalert3'])
                             if pts_fa3:
                                 x, y = pts_fa3[0]
                                 device.shell(f"input swipe {x} {y} {x} {y} 100")
                                 gui_log(device.serial, "Clicked fixalert3.bmp", step="Fix Alert")
                                 time.sleep(2)
-                                deadline_fa3 = time.time() + 10  # ต่อเวลารอหายไป
+                                deadline_fa3 = time.time() + 10
                             else:
-                                break  # หายแล้ว → ไปต่อ
+                                break
                         time.sleep(0.5)
 
                 # Re-capture after fixing
+                img = fast_screencap(device)
+
+            # questfive1-14 floating check — click ทุกรูปจนกว่าจะหายไปทั้งหมด
+            _qf_hit_path = next((p for p in _QUESTFIVE_PATHS if img_search(img, p)), None)
+            if _qf_hit_path:
+                gui_log(device.serial, f"Floating: {os.path.basename(_qf_hit_path)} found! Clicking until gone...", step="QuestFive")
+                while True:
+                    img_qf = fast_screencap(device)
+                    if img_qf is None:
+                        break
+                    clicked_any = False
+                    for _qp in _QUESTFIVE_PATHS:
+                        _pts = img_search(img_qf, _qp)
+                        if _pts:
+                            x, y = _pts[0]
+                            device.shell(f"input swipe {x} {y} {x} {y} 100")
+                            gui_log(device.serial, f"Clicked {os.path.basename(_qp)} at ({x},{y})", step="QuestFive")
+                            time.sleep(0.5)
+                            clicked_any = True
+                            break
+                    if not clicked_any:
+                        gui_log(device.serial, "questfive: all gone — moving on", step="QuestFive")
+                        break
                 img = fast_screencap(device)
 
         # (screenshot preview removed — login.py ไม่มี preview widget, ลด GUI lag)
@@ -1659,41 +1708,47 @@ def get_screen_capture(device):
 
 def load_template(path):
     if path not in IMAGE_CACHE:
+        t = None
         if os.path.exists(path):
             t = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
-            if t is not None:
-                IMAGE_CACHE[path] = t
-                return t
-        
-        # Try alternate extension (.bmp <-> .png) if not found
-        base, ext = os.path.splitext(path)
-        alt_exts = [".bmp", ".png"]
-        alt_exts = [e for e in alt_exts if e.lower() != ext.lower()]
-        for alt in alt_exts:
-            alt_path = base + alt
-            if os.path.exists(alt_path):
-                t = cv2.imread(alt_path, cv2.IMREAD_GRAYSCALE)
-                if t is not None:
-                    IMAGE_CACHE[path] = t
-                    return t
-                    
-    return IMAGE_CACHE.get(path)
+        else:
+            base, ext = os.path.splitext(path)
+            for alt in (".bmp", ".png"):
+                if alt.lower() != ext.lower():
+                    alt_path = base + alt
+                    if os.path.exists(alt_path):
+                        t = cv2.imread(alt_path, cv2.IMREAD_GRAYSCALE)
+                        if t is not None:
+                            break
+        if t is not None and SCREENCAP_SCALE != 1.0:
+            t = cv2.resize(t,
+                           (max(1, int(t.shape[1] * SCREENCAP_SCALE)),
+                            max(1, int(t.shape[0] * SCREENCAP_SCALE))),
+                           interpolation=cv2.INTER_LINEAR)
+        IMAGE_CACHE[path] = t  # cache None too (avoid repeated disk checks)
+    return IMAGE_CACHE[path]
 
 def img_search(gray_img, find_path, threshold=0.8):
-    """Returns list of (cx, cy) match centers."""
+    """Returns list of (cx, cy) match centers in DEVICE coordinates."""
     if gray_img is None:
         return []
     tmpl = load_template(find_path)
     if tmpl is None:
         return []
-    h, w = tmpl.shape
+    th, tw = tmpl.shape
+    if gray_img.shape[0] < th or gray_img.shape[1] < tw:
+        return []
     res  = cv2.matchTemplate(gray_img, tmpl, cv2.TM_CCOEFF_NORMED)
     locs = list(zip(*np.where(res >= threshold)[::-1]))
     if not locs:
         return []
-    rects = [[x, y, w, h] for x, y in locs] * 2
+    rects = [[x, y, tw, th] for x, y in locs] * 2
     rects, _ = cv2.groupRectangles(rects, groupThreshold=1, eps=1)
-    return [(x + w // 2, y + h // 2) for x, y, w, h in rects] if len(rects) else []
+    if not len(rects):
+        return []
+    # scale coordinates back to real device space
+    inv = 1.0 / SCREENCAP_SCALE if SCREENCAP_SCALE != 1.0 else 1.0
+    return [(int((x + tw // 2) * inv), int((y + th // 2) * inv)) for x, y, tw, th in rects]
 
 # ═════════════════════════════════════════════════════════════════════════════
 # OCR Helper (Ref: find-gearname.py)
