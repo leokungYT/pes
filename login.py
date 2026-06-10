@@ -135,7 +135,10 @@ _P = {
     'fixalert3': os.path.join(IMG_DIR, "fixalert3.bmp"),
     'cancel':    os.path.join(IMG_DIR, "cancel.bmp"),
 }
-_QUESTFIVE_PATHS = [os.path.join(IMG_DIR, f"questfive{i}.bmp") for i in range(1, 15)]
+_QUESTFIVE_PATHS = (
+    [os.path.join(GETQUEST_IMG_DIR, f"questfive{i}.bmp") for i in range(1, 15) if i not in (4, 5, 10, 13)] +
+    [os.path.join(GETQUEST_IMG_DIR, f"getquest{i}.bmp") for i in range(11, 16)]
+)
 
 file_pick_lock = threading.Lock()
 ocr_lock       = threading.Lock()   # ป้องกัน OCR หลาย device พร้อมกัน (ลด CPU spike)
@@ -1684,19 +1687,37 @@ def get_screen_capture(device):
                     img_qf = fast_screencap(device)
                     if img_qf is None:
                         break
-                    clicked_any = False
+
+                    # หา questfive ที่เจอตอนนี้
+                    _cur_path = None
+                    _cur_pts  = None
                     for _qp in _QUESTFIVE_PATHS:
                         _pts = img_search(img_qf, _qp)
                         if _pts:
-                            x, y = _pts[0]
-                            device.shell(f"input swipe {x} {y} {x} {y} 100")
-                            gui_log(device.serial, f"Clicked {os.path.basename(_qp)} at ({x},{y})", step="QuestFive")
-                            time.sleep(0.5)
-                            clicked_any = True
+                            _cur_path = _qp
+                            _cur_pts  = _pts
                             break
-                    if not clicked_any:
+
+                    if _cur_path is None:
                         gui_log(device.serial, "questfive: all gone — moving on", step="QuestFive")
                         break
+
+                    # คลิก
+                    x, y = _cur_pts[0]
+                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                    gui_log(device.serial, f"Clicked {os.path.basename(_cur_path)} at ({x},{y})", step="QuestFive")
+
+                    # รอ 5 วิ ให้หน้าจอเปลี่ยน — ถ้าไม่เปลี่ยนให้กดซ้ำ
+                    _deadline = time.time() + 15
+                    while time.time() < _deadline:
+                        time.sleep(0.4)
+                        _chk = fast_screencap(device)
+                        if _chk is None or not img_search(_chk, _cur_path):
+                            break  # หน้าจอเปลี่ยนแล้ว → ไปรอบถัดไป
+                    else:
+                        gui_log(device.serial, f"questfive: {os.path.basename(_cur_path)} ค้าง 15s → กดซ้ำ", step="QuestFive")
+                        # loop จะวนกลับไปคลิกอีกรอบอัตโนมัติ
+
                 img = fast_screencap(device)
 
         # (screenshot preview removed — login.py ไม่มี preview widget, ลด GUI lag)
@@ -3870,9 +3891,29 @@ def process_device_login(device):
                                     
                                 # 4. ถ้าเจอ checkpointquest1 -> ไป questfive2 -> questfive3
                                 gui_log(serial, "Proceeding to questfive2 -> questfive3...", step="Q5_2->3")
-                                for i in range(2, 4):
-                                    q_name = f"questfive{i}.bmp"
-                                    click_until_gone(os.path.join(GQ_DIR, q_name), q_name)
+                                # questfive2: reclick ถ้ายังขึ้นอยู่ หรือถ้า questfive2 โผล่กลับมาหลังกด
+                                while True:
+                                    click_until_gone(os.path.join(GQ_DIR, "questfive2.bmp"), "questfive2.bmp")
+                                    # เช็คซ้ำทันทีหลังกด ถ้า questfive2 ยังขึ้นอยู่ → reclick
+                                    img = get_screen_capture(device)
+                                    if img is not None and img_search(img, os.path.join(GQ_DIR, "questfive2.bmp")):
+                                        gui_log(serial, "questfive2 still present after click, retrying...", step="Q5_2 Still Present")
+                                        continue
+                                    q3_found = False
+                                    while True:
+                                        check_device_reset(serial, cycle_start)
+                                        img = get_screen_capture(device)
+                                        if img is not None:
+                                            if img_search(img, os.path.join(GQ_DIR, "questfive3.bmp")):
+                                                q3_found = True
+                                                break
+                                            if img_search(img, os.path.join(GQ_DIR, "questfive2.bmp")):
+                                                gui_log(serial, "questfive2 reappeared, retrying...", step="Q5_2 Retry")
+                                                break
+                                        time.sleep(0.5)
+                                    if q3_found:
+                                        break
+                                click_until_gone(os.path.join(GQ_DIR, "questfive3.bmp"), "questfive3.bmp")
                                     
                                 # 5. วนกด questfive4 -> questfive5 จนกว่าจะเจอ checkpointquest2
                                 gui_log(serial, "Loop clicking questfive4 -> questfive5...", step="Q5_4->5 Loop")
