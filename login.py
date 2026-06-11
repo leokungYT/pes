@@ -258,8 +258,9 @@ if GUI_ENABLED:
             self.after(500,  self.connect_adb)
             self.after(2000, self.update_realtime_stats)
             self.after(10000, self.auto_scan_devices)
-            self.after(100,  self._process_gui_queue)   # centralized GUI queue poller
-            self.update_check_seconds = 5  # Check update in 5 seconds on startup
+            self.after(200,  self._process_gui_queue)   # queue poller — 200ms
+            self.after(500,  self._periodic_log_flush)  # log flush — 500ms (5x less text widget work)
+            self.update_check_seconds = 60  # Check update every 60s
             self.after(1000, self.tick_update_timer)
             self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
@@ -413,9 +414,7 @@ if GUI_ENABLED:
             ctk.CTkLabel(bottom_bar, text=version_str,
                          font=ctk.CTkFont(size=10), text_color="#888888"
                          ).pack(side="right", padx=8)
-            self.lbl_update_timer = ctk.CTkLabel(bottom_bar, text="🔄 ตรวจอัปเดตใน: --:--",
-                                                 font=ctk.CTkFont(size=10), text_color="#aaaaaa")
-            self.lbl_update_timer.pack(side="right", padx=15)
+            self.lbl_update_timer = None  # removed — UI update every 1s was causing lag
 
             # Pack the main frames in the correct order to prevent layout clipping
             bottom_bar.pack(side="bottom", fill="x")
@@ -826,18 +825,31 @@ if GUI_ENABLED:
                 self._flush_log_buffer()
 
         def _flush_log_buffer(self):
-            """Batch-insert all pending log lines in one configure cycle."""
             if not self._log_buffer:
                 return
-            lines = self._log_buffer[:50]   # cap per flush to keep UI responsive
-            self._log_buffer = self._log_buffer[50:]
+            lines = self._log_buffer[:25]
+            self._log_buffer = self._log_buffer[25:]
             try:
                 self.log_text.configure(state="normal")
+                try:
+                    total = int(self.log_text.index("end-1c").split(".")[0])
+                    if total > 500:
+                        self.log_text.delete("1.0", f"{total - 300}.0")
+                except Exception:
+                    pass
                 self.log_text.insert("end", "".join(lines))
-                self.log_text.see("end")
+                # see("end") removed — blocked click/drag events every 100ms
                 self.log_text.configure(state="disabled")
             except Exception:
                 pass
+
+        def _periodic_log_flush(self):
+            try:
+                self._flush_log_buffer()
+            except Exception:
+                pass
+            finally:
+                self.after(500, self._periodic_log_flush)
 
         def add_stat_row(self, name, count, is_error=False):
             if name not in self.stat_rows:
@@ -865,8 +877,7 @@ if GUI_ENABLED:
             self.log("Searching for ADB...")
             def _thread():
                 if find_adb_executable():
-                    # DO NOT scan 101 ports on startup! Just check currently connected devices.
-                    # This prevents the CPU process storm and GUI freezing on startup.
+                    connect_known_ports(quiet=False, kill_server=False)
                     devices = get_connected_devices()
                     _gui_queue.put(('adb_ready', devices))
                 else:
@@ -1105,10 +1116,10 @@ if GUI_ENABLED:
                 pass
 
         def _process_gui_queue(self):
-            """Central poller: drain _gui_queue and apply updates. Runs every 30ms for maximum smoothness."""
+            """Central poller: drain _gui_queue and apply updates. Runs every 200ms."""
             try:
                 processed = 0
-                while processed < 100:    # cap per tick to keep UI alive
+                while processed < 15:
                     try:
                         kind, data = _gui_queue.get_nowait()
                     except Exception:
@@ -1128,15 +1139,10 @@ if GUI_ENABLED:
                         self._on_auto_scan_result(data)
                     elif kind == 'silent_update':
                         self.perform_silent_update()
-
-                # Flush any pending log buffer
-                self._flush_log_buffer()
-                # Force Tkinter to process all idle tasks and update screen graphics immediately to prevent any freezing
-                self.update_idletasks()
             except Exception:
                 pass
             finally:
-                self.after(30, self._process_gui_queue)
+                self.after(200, self._process_gui_queue)
 
         def check_background_updates(self):
             def _thread():
@@ -1171,18 +1177,11 @@ if GUI_ENABLED:
 
         def tick_update_timer(self):
             if not hasattr(self, 'update_check_seconds'):
-                self.update_check_seconds = 600
-            
+                self.update_check_seconds = 60
+
             if self.update_check_seconds <= 0:
-                self.update_check_seconds = 600
+                self.update_check_seconds = 60
                 self.check_background_updates()
-            
-            mins = self.update_check_seconds // 60
-            secs = self.update_check_seconds % 60
-            try:
-                self.lbl_update_timer.configure(text=f"🔄 ตรวจอัปเดตใน: {mins:02d}:{secs:02d}")
-            except Exception:
-                pass
             
             self.update_check_seconds -= 1
             self.after(1000, self.tick_update_timer)
@@ -1237,7 +1236,7 @@ def update_gui(serial, **kwargs):
     if gui_instance:
         _gui_queue.put(('device_update', (serial, kwargs)))
 
-_GUI_LOG_INTERVAL = 2  # seconds — ส่ง text update ไป GUI ทุก 2 วินาทีต่อ device
+_GUI_LOG_INTERVAL = 5  # seconds — ส่ง text update ไป GUI ทุก 5 วินาทีต่อ device (ลด queue spam กับ 20+ จอ)
 
 def gui_log(serial, msg, step=None, status=None):
     print(f"{Fore.CYAN}[{serial}] {msg}{Style.RESET_ALL}")
@@ -1339,7 +1338,21 @@ def get_connected_devices():
                     port_map[port] = serial
             else:
                 port_map[serial] = serial
-        return list(port_map.values())
+        # Normalize emulator-XXXX → 127.0.0.1:(XXXX+1) so all devices use IP:port format
+        final = []
+        for serial in port_map.values():
+            if "emulator-" in serial:
+                try:
+                    adb_port = int(serial.split("-")[1]) + 1
+                    ip_serial = f"127.0.0.1:{adb_port}"
+                    subprocess.run([adb_path, "connect", ip_serial],
+                                   capture_output=True, timeout=2, shell=(os.name == 'nt'))
+                    final.append(ip_serial)
+                except Exception:
+                    final.append(serial)
+            else:
+                final.append(serial)
+        return final
     except: return []
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1446,7 +1459,7 @@ def get_screen_capture(device):
                     return None
 
             # === fixtip floating check ===
-            pts1 = img_search(img, os.path.join(GETQUEST_IMG_DIR, "fixtip1.bmp"))
+            pts1 = img_search(img, os.path.join(GETQUEST_IMG_DIR, "fixtip1.bmp")) if GETQUEST == 1 else None
             if pts1:
                 gui_log(device.serial, "fixtip1.bmp detected! Looking for fixtip2.bmp...", step="Fix Tip")
                 pts2 = img_search(img, os.path.join(GETQUEST_IMG_DIR, "fixtip2.bmp"))
@@ -1696,8 +1709,8 @@ def get_screen_capture(device):
                 # Re-capture after fixing
                 img = fast_screencap(device)
 
-            # questfive1-14 floating check — click ทุกรูปจนกว่าจะหายไปทั้งหมด
-            _qf_hit_path = next((p for p in _QUESTFIVE_PATHS if img_search(img, p)), None)
+            # questfive1-14 floating check — click ทุกรูปจนกว่าจะหายไปทั้งหมด (เฉพาะเมื่อ GETQUEST=1)
+            _qf_hit_path = next((p for p in _QUESTFIVE_PATHS if img_search(img, p)), None) if GETQUEST == 1 else None
             if _qf_hit_path:
                 gui_log(device.serial, f"Floating: {os.path.basename(_qf_hit_path)} found! Clicking until gone...", step="QuestFive")
                 while True:
