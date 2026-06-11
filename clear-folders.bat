@@ -7,16 +7,14 @@ echo       CLEARING BACKUP FOLDERS...
 echo =========================================
 echo.
 
-set FOLDERS=backup backup-id found-hero no-hero input-id login-success random-fail fast-random file-error run-file
+set FOLDERS=backup backup-id found-hero no-hero input-id login-success login-failed random-fail fast-random file-error run-file timeout logs check-coin debug-ocr
 
 for %%F in (%FOLDERS%) do (
     if exist "%%F" (
         rd /s /q "%%F"
-        md "%%F"
-        echo  [OK] Cleared folder: %%F
+        echo  [OK] Deleted folder: %%F
     ) else (
-        md "%%F"
-        echo  [OK] Created folder: %%F
+        echo  [--] Not found: %%F
     )
 )
 
