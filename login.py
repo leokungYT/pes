@@ -123,8 +123,7 @@ DEVICE_DISABLE_FIXEVENT = {}
 DEVICE_LAST_GAME_CHECK  = {}  # throttle: เช็คเกมออนทุก 30 วิ
 
 # ── Performance ───────────────────────────────────────────────────────────────
-# ลด resolution ก่อน matchTemplate → 4x เร็วขึ้น (0.5 = 50%)
-SCREENCAP_SCALE = 0.5
+SCREENCAP_SCALE = 1.0  # 1.0 = full resolution (ป้องกัน template quality loss)
 
 # Pre-compute paths — ไม่สร้าง string ใหม่ทุก frame
 _P = {
