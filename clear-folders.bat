@@ -7,7 +7,7 @@ echo       CLEARING BACKUP FOLDERS...
 echo =========================================
 echo.
 
-set FOLDERS=backup backup-id found-hero no-hero input-id login-success login-failed random-fail fast-random file-error run-file timeout logs check-coin debug-ocr
+set FOLDERS=backup backup-id found-hero no-hero login-success login-failed random-fail fast-random file-error run-file timeout logs check-coin debug-ocr
 
 for %%F in (%FOLDERS%) do (
     if exist "%%F" (
@@ -16,6 +16,13 @@ for %%F in (%FOLDERS%) do (
     ) else (
         echo  [--] Not found: %%F
     )
+)
+
+if exist "input-id" (
+    del /q "input-id\*.*" 2>nul
+    echo  [OK] Cleared files in: input-id
+) else (
+    echo  [--] Not found: input-id
 )
 
 echo.
