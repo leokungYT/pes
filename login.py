@@ -107,6 +107,10 @@ try:
     from config import GETQUEST_IMG_DIR
 except ImportError:
     GETQUEST_IMG_DIR = "img/getquest"
+try:
+    from config import LOGIN_FAST
+except ImportError:
+    LOGIN_FAST = 0
 
 REMOTE_AUTH_DIR   = "/data/data/jp.konami.pesam/files/SaveData/AUTH"
 REMOTE_DAT_FILE   = f"{REMOTE_AUTH_DIR}/online_user_id_data.dat"
@@ -645,9 +649,18 @@ if GUI_ENABLED:
             ctk.CTkSwitch(row_getquest, text="", variable=var_getquest,
                           onvalue=1, offvalue=0).pack(side="right")
 
+            # ── LOGIN_FAST toggle ─────────────────────────────
+            row_login_fast = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
+            row_login_fast.pack(fill="x", padx=14, pady=4)
+            ctk.CTkLabel(row_login_fast, text="Login Fast (เจอ login แล้วจบรอบทันที)",
+                         font=ctk.CTkFont(size=12)).pack(side="left")
+            var_login_fast = ctk.IntVar(value=getattr(cfg, 'LOGIN_FAST', 0))
+            ctk.CTkSwitch(row_login_fast, text="", variable=var_login_fast,
+                          onvalue=1, offvalue=0).pack(side="right")
+
             # ── Save button (pinned at bottom, outside scrollable area) ───
             def _save():
-                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST
+                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST
                 new_event = var_event.get()
                 new_box   = var_box.get()
                 new_gacha = var_gacha.get()
@@ -767,6 +780,13 @@ if GUI_ENABLED:
                 else:
                     content += f"\nGETQUEST = {new_getquest}\n"
 
+                new_login_fast = var_login_fast.get()
+                if re.search(r"^LOGIN_FAST\s*=\s*\d", content, flags=re.MULTILINE):
+                    content = re.sub(r"^LOGIN_FAST\s*=\s*\d", f"LOGIN_FAST = {new_login_fast}",
+                                     content, flags=re.MULTILINE)
+                else:
+                    content += f"\nLOGIN_FAST = {new_login_fast}\n"
+
                 with open(cfg_path, "w", encoding="utf-8") as f:
                     f.write(content)
                 # อัปเดต runtime ด้วย
@@ -785,6 +805,7 @@ if GUI_ENABLED:
                 GETCODE = new_getcode
                 GETCODE_TEXT = new_getcode_txt
                 GETQUEST = new_getquest
+                LOGIN_FAST = new_login_fast
                 importlib.reload(cfg)
                 label_status.configure(text=f"✅ Saved!",
                                        text_color="#4caf50")
@@ -3319,11 +3340,23 @@ def process_device_login(device):
                 if img is not None:
                     pts = img_search(img, os.path.join(IMG_DIR, "checkpointlogin.bmp"))
                     if pts:
+                        if LOGIN_FAST:
+                            gui_log(serial, "LOGIN_FAST: checkpointlogin found — clearing app and moving to next file.", step="Fast Done", status="working")
+                            device.shell("am force-stop jp.konami.pesam")
+                            time.sleep(0.5)
+                            dest = os.path.join(LOGIN_SUCCESS_DIR, original_name)
+                            if os.path.exists(file_path):
+                                shutil.move(file_path, dest)
+                            release_file(original_name)
+                            break
                         x, y = pts[0]
                         device.shell(f"input swipe {x} {y} {x} {y} 100")
                         time.sleep(4)
                         break
                 time.sleep(1.5)
+
+            if LOGIN_FAST:
+                continue
 
             # 6. Event sequence — พฤติกรรมขึ้นกับ EVENT_IMG
             if EVENT_IMG == 1:
