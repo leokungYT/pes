@@ -22,6 +22,7 @@ import shutil
 import concurrent.futures
 import json
 import glob
+import queue as _queue_mod
 from ppadb.client import Client as AdbClient
 from colorama import Fore, Style, init
 
@@ -48,6 +49,10 @@ init(autoreset=True)
 adb_path = "adb"
 bot_running = False
 gui_instance = None
+
+_gui_queue        = _queue_mod.Queue()
+_gui_last_update  = {}
+_GUI_LOG_INTERVAL = 2  # seconds — throttle GUI + file writes per device
 
 if GUI_ENABLED:
     ctk.set_appearance_mode("Dark")
@@ -117,8 +122,9 @@ if GUI_ENABLED:
             self.device_monitors = {}
             self.threads = []
             self.setup_ui()
-            self.after(500, self.connect_adb)
+            self.after(500,  self.connect_adb)
             self.after(2000, self.update_realtime_stats)
+            self.after(100,  self._process_gui_queue)
 
         def setup_ui(self):
             self.grid_columnconfigure(1, weight=1)
@@ -413,20 +419,47 @@ SKIPANIMATION = {val_skipanim}
                 return
             client = AdbClient(host="127.0.0.1", port=5037)
             self.log(f"Starting threads for {len(devices)} devices...")
-            for serial in devices:
+
+            def launch_device(index):
+                if index >= len(devices):
+                    return
+                serial = devices[index]
                 device = client.device(serial)
                 if device is None:
                     self.log(f"ERROR: Cannot get device {serial} from ADB!")
-                    continue
-                self.log(f"✅ Started bot on {serial}")
-                t = threading.Thread(target=process_device, args=(device,), daemon=True)
-                t.start()
-                self.threads.append(t)
-                time.sleep(1)
+                else:
+                    self.log(f"✅ Started bot on {serial}")
+                    t = threading.Thread(target=process_device, args=(device,), daemon=True)
+                    t.start()
+                    self.threads.append(t)
+                if index < len(devices) - 1:
+                    self.after(1000, lambda: launch_device(index + 1))
+
+            launch_device(0)
 
         def update_device(self, serial, **kwargs):
             if serial in self.device_monitors:
                 self.device_monitors[serial].update_state(**kwargs)
+
+        def _process_gui_queue(self):
+            try:
+                processed = 0
+                while processed < 200:
+                    try:
+                        kind, data = _gui_queue.get_nowait()
+                    except Exception:
+                        break
+                    processed += 1
+                    if kind == 'device_update':
+                        serial, kwargs = data
+                        if serial in self.device_monitors:
+                            self.device_monitors[serial].update_state(**kwargs)
+                if processed:
+                    self.update_idletasks()
+            except Exception:
+                pass
+            finally:
+                self.after(30, self._process_gui_queue)
 
 DEVICE_RESET_FLAGS = {}
 
@@ -457,15 +490,21 @@ def check_device_reset(serial, cycle_start=None):
 
 def update_gui(serial, **kwargs):
     if gui_instance:
-        gui_instance.after(0, lambda: gui_instance.update_device(serial, **kwargs))
+        _gui_queue.put(('device_update', (serial, kwargs)))
 
 def gui_log(serial, msg, step=None, status=None):
     print(f"{Fore.CYAN}[DEVICE {serial}] {msg}{Style.RESET_ALL}")
-    update_gui(serial, log=msg, step=step, status=status)
+    now = time.time()
+    last = _gui_last_update.get(serial, 0)
+    if status or (now - last >= _GUI_LOG_INTERVAL):
+        _gui_last_update[serial] = now
+        update_gui(serial, log=msg, step=step, status=status)
 
 # --- Configuration ---
 from config_gen import DO_BOX, IMG_DIR, GACHA_FREE, GACHA_FREE_LOOPS, HERO_LIST_FREE, DEBUG_OCR, EVENT_IMG, NOSCAN, SKIPANIMATION, GETQUEST, GETQUEST_IMG_DIR
-IMAGE_CACHE = {}
+IMAGE_CACHE       = {}
+SCREENCAP_SCALE   = 0.5
+_image_cache_lock = threading.Lock()
 
 BACKUP_ID_DIR = "backup-id"
 os.makedirs(BACKUP_ID_DIR, exist_ok=True)
@@ -597,23 +636,33 @@ def fast_screencap(device):
         conn.send("shell:screencap")
         conn.check_status()
         raw = conn.read_all()
-        
+
         if len(raw) > 16:
             w = int.from_bytes(raw[0:4], byteorder='little')
             h = int.from_bytes(raw[4:8], byteorder='little')
             expected_size = w * h * 4
             if len(raw) >= 12 + expected_size:
-                img_data = raw[12:12+expected_size]
-                img = np.frombuffer(img_data, dtype=np.uint8).reshape((h, w, 4))
-                return cv2.cvtColor(img, cv2.COLOR_RGBA2GRAY)
+                gray = cv2.cvtColor(
+                    np.frombuffer(raw, dtype=np.uint8, offset=12, count=expected_size).reshape((h, w, 4)),
+                    cv2.COLOR_RGBA2GRAY
+                )
+                if SCREENCAP_SCALE != 1.0:
+                    gray = cv2.resize(gray,
+                                      (int(w * SCREENCAP_SCALE), int(h * SCREENCAP_SCALE)),
+                                      interpolation=cv2.INTER_LINEAR)
+                return gray
     except Exception:
         pass
     # Fallback to PNG method
     try:
         raw = device.screencap()
         if raw:
-            return cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_GRAYSCALE)
-    except:
+            gray = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_GRAYSCALE)
+            if gray is not None and SCREENCAP_SCALE != 1.0:
+                gray = cv2.resize(gray, None, fx=SCREENCAP_SCALE, fy=SCREENCAP_SCALE,
+                                  interpolation=cv2.INTER_LINEAR)
+            return gray
+    except Exception:
         pass
     return None
 
@@ -721,26 +770,29 @@ def get_screen_capture(device):
         return None
 
 def load_template(find_img_path):
-    if find_img_path not in IMAGE_CACHE:
-        if os.path.exists(find_img_path):
-            template = cv2.imread(find_img_path, cv2.IMREAD_GRAYSCALE)
-            if template is not None:
-                IMAGE_CACHE[find_img_path] = template
-                return template
-        
-        # Try alternate extension (.bmp <-> .png) if not found
+    with _image_cache_lock:
+        if find_img_path in IMAGE_CACHE:
+            return IMAGE_CACHE[find_img_path]
+    t = None
+    if os.path.exists(find_img_path):
+        t = cv2.imread(find_img_path, cv2.IMREAD_GRAYSCALE)
+    else:
         base, ext = os.path.splitext(find_img_path)
-        alt_exts = [".bmp", ".png"]
-        alt_exts = [e for e in alt_exts if e.lower() != ext.lower()]
-        for alt in alt_exts:
-            alt_path = base + alt
-            if os.path.exists(alt_path):
-                template = cv2.imread(alt_path, cv2.IMREAD_GRAYSCALE)
-                if template is not None:
-                    IMAGE_CACHE[find_img_path] = template
-                    return template
-                    
-    return IMAGE_CACHE.get(find_img_path)
+        for alt in [".bmp", ".png"]:
+            if alt.lower() != ext.lower():
+                alt_path = base + alt
+                if os.path.exists(alt_path):
+                    t = cv2.imread(alt_path, cv2.IMREAD_GRAYSCALE)
+                    if t is not None:
+                        break
+    if t is not None and SCREENCAP_SCALE != 1.0:
+        t = cv2.resize(t,
+                       (max(1, int(t.shape[1] * SCREENCAP_SCALE)),
+                        max(1, int(t.shape[0] * SCREENCAP_SCALE))),
+                       interpolation=cv2.INTER_LINEAR)
+    with _image_cache_lock:
+        IMAGE_CACHE[find_img_path] = t
+    return t
 
 def ImgSearchADB(adb_img, find_img_path, threshold=0.8):
     try:
@@ -775,11 +827,10 @@ def ImgSearchADB(adb_img, find_img_path, threshold=0.8):
             
         points = []
         if len(rectangles):
+            inv = 1.0 / SCREENCAP_SCALE if SCREENCAP_SCALE != 1.0 else 1.0
             for (x, y, w, h) in rectangles:
-                center_x = x + int(w/2)
-                center_y = y + int(h/2)
-                points.append((center_x, center_y))
-                
+                points.append((int((x + w / 2) * inv), int((y + h / 2) * inv)))
+
         return points
     except Exception as e:
         print(f"Error in ImgSearchADB: {e}")
@@ -1356,8 +1407,8 @@ def process_device(serial_or_device):
 
                         time.sleep(5)
                         found = True
-                    time.sleep(0.01)
-            
+                    time.sleep(0.15)
+
             # 4. UID Flow (Existing)
             gui_log(serial, "Waiting for UID check screen...", step="UID Backup", status="working")
             while True:
@@ -1370,7 +1421,7 @@ def process_device(serial_or_device):
                     device.shell("input swipe 81 522 81 522 5000")
                     time.sleep(2)
                     break
-                time.sleep(0.01)
+                time.sleep(0.15)
                 
             uid1_done = False
             while True:
@@ -1390,7 +1441,7 @@ def process_device(serial_or_device):
                             device.shell(f"input swipe {x} {y} {x} {y} 100")
                             uid1_done = True
                             time.sleep(3)
-                time.sleep(0.01)
+                time.sleep(0.15)
 
             # play19 → spam (815, 355) จนเจอ play21
             gui_log(serial, "Waiting for play19.bmp...", step="Post-UID")
@@ -1404,7 +1455,7 @@ def process_device(serial_or_device):
                         device.shell(f"input swipe {x} {y} {x} {y} 100")
                         gui_log(serial, "play19 clicked. Spamming (815,355) until play21...", step="Play19 Clicked")
                         break
-                time.sleep(0.01)
+                time.sleep(0.15)
 
             # Spam (815, 355) จนเจอ play21 (ไม่รอ 20 วิ กดรัวๆ เลย)
             gui_log(serial, "Searching for play21.bmp via (815, 355)...", step="Transition")

@@ -116,6 +116,7 @@ REMOTE_AUTH_DIR   = "/data/data/jp.konami.pesam/files/SaveData/AUTH"
 REMOTE_DAT_FILE   = f"{REMOTE_AUTH_DIR}/online_user_id_data.dat"
 
 IMAGE_CACHE          = {}
+_image_cache_lock    = threading.Lock()
 DEVICE_RESET_FLAGS   = {}
 DEVICE_FILE_ASSIGNMENTS = {}
 DEVICE_DISABLE_FIXEVENT = {}
@@ -1241,25 +1242,21 @@ _GUI_LOG_INTERVAL = 2  # seconds — ส่ง text update ไป GUI ทุก 
 
 def gui_log(serial, msg, step=None, status=None):
     print(f"{Fore.CYAN}[{serial}] {msg}{Style.RESET_ALL}")
-    # Throttle GUI text updates — ส่ง step/status ทุกครั้ง แต่ log text ส่งทุก 2 วิ
     now = time.time()
     last = _gui_last_update.get(serial, 0)
     if status or (now - last >= _GUI_LOG_INTERVAL):
         _gui_last_update[serial] = now
         update_gui(serial, log=msg, step=step, status=status)
-    elif step:
-        # ปิดการอัปเดต step รัวๆ เพื่อลดอาการค้างของ UI
-        pass
-    # บันทึก log ลงไฟล์แยกตาม device (ทำใน worker thread โดยตรง ไม่ block GUI)
-    try:
-        safe_name = serial.replace(".", "_").replace(":", "_")
-        log_file = os.path.join(LOG_DIR, f"{safe_name}.txt")
-        ts = time.strftime("%Y-%m-%d %H:%M:%S")
-        with open(log_file, "a", encoding="utf-8") as f:
-            step_str = f" [{step}]" if step else ""
-            f.write(f"[{ts}]{step_str} {msg}\n")
-    except Exception:
-        pass
+        # บันทึก log ลงไฟล์เฉพาะรอบที่ส่ง GUI update (ลด file I/O 50 จอ)
+        try:
+            safe_name = serial.replace(".", "_").replace(":", "_")
+            log_file = os.path.join(LOG_DIR, f"{safe_name}.txt")
+            ts = time.strftime("%Y-%m-%d %H:%M:%S")
+            with open(log_file, "a", encoding="utf-8") as f:
+                step_str = f" [{step}]" if step else ""
+                f.write(f"[{ts}]{step_str} {msg}\n")
+        except Exception:
+            pass
 
 # ═════════════════════════════════════════════════════════════════════════════
 # ADB helpers
@@ -1749,26 +1746,29 @@ def get_screen_capture(device):
         return None
 
 def load_template(path):
-    if path not in IMAGE_CACHE:
-        t = None
-        if os.path.exists(path):
-            t = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
-        else:
-            base, ext = os.path.splitext(path)
-            for alt in (".bmp", ".png"):
-                if alt.lower() != ext.lower():
-                    alt_path = base + alt
-                    if os.path.exists(alt_path):
-                        t = cv2.imread(alt_path, cv2.IMREAD_GRAYSCALE)
-                        if t is not None:
-                            break
-        if t is not None and SCREENCAP_SCALE != 1.0:
-            t = cv2.resize(t,
-                           (max(1, int(t.shape[1] * SCREENCAP_SCALE)),
-                            max(1, int(t.shape[0] * SCREENCAP_SCALE))),
-                           interpolation=cv2.INTER_LINEAR)
-        IMAGE_CACHE[path] = t  # cache None too (avoid repeated disk checks)
-    return IMAGE_CACHE[path]
+    with _image_cache_lock:
+        if path in IMAGE_CACHE:
+            return IMAGE_CACHE[path]
+    t = None
+    if os.path.exists(path):
+        t = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+    else:
+        base, ext = os.path.splitext(path)
+        for alt in (".bmp", ".png"):
+            if alt.lower() != ext.lower():
+                alt_path = base + alt
+                if os.path.exists(alt_path):
+                    t = cv2.imread(alt_path, cv2.IMREAD_GRAYSCALE)
+                    if t is not None:
+                        break
+    if t is not None and SCREENCAP_SCALE != 1.0:
+        t = cv2.resize(t,
+                       (max(1, int(t.shape[1] * SCREENCAP_SCALE)),
+                        max(1, int(t.shape[0] * SCREENCAP_SCALE))),
+                       interpolation=cv2.INTER_LINEAR)
+    with _image_cache_lock:
+        IMAGE_CACHE[path] = t
+    return t
 
 def img_search(gray_img, find_path, threshold=0.8):
     """Returns list of (cx, cy) match centers in DEVICE coordinates."""
@@ -2003,25 +2003,32 @@ def parse_hero_config(config_list):
 # ═════════════════════════════════════════════════════════════════════════════
 # File management  ← แก้ตรงนี้
 # ═════════════════════════════════════════════════════════════════════════════
+_done_cache_names: set  = set()
+_done_cache_time: float = 0.0
+_DONE_CACHE_TTL         = 3.0  # วินาที — รีเฟรช glob ทุก 3 วิ แทนทุก call
+
 def pick_next_file():
     """
     Thread-safe: pick ONE .dat from input-id that is NOT already in use
     AND does NOT already exist in login-success (เคย login แล้ว).
     Returns (full_path, basename) or (None, None).
     """
+    global _done_cache_names, _done_cache_time
     with file_pick_lock:
-        # Snapshot ไฟล์ที่ทำงานสำเร็จ/แยกประเภทไปแล้ว ทั้งหมด
-        done_files = (glob.glob(os.path.join(LOGIN_SUCCESS_DIR, "*.dat")) +
-                      glob.glob(os.path.join(BACKUP_ID_DIR, "**", "*.dat"), recursive=True) +
-                      glob.glob(os.path.join(NO_HERO_DIR, "*.dat")) +
-                      glob.glob(os.path.join(FOUND_HERO_DIR, "**", "*.dat"), recursive=True))
-        already_done = {os.path.basename(p) for p in done_files}
+        now = time.time()
+        if now - _done_cache_time >= _DONE_CACHE_TTL:
+            done_files = (glob.glob(os.path.join(LOGIN_SUCCESS_DIR, "*.dat")) +
+                          glob.glob(os.path.join(BACKUP_ID_DIR, "**", "*.dat"), recursive=True) +
+                          glob.glob(os.path.join(NO_HERO_DIR, "*.dat")) +
+                          glob.glob(os.path.join(FOUND_HERO_DIR, "**", "*.dat"), recursive=True))
+            _done_cache_names = {os.path.basename(p) for p in done_files}
+            _done_cache_time  = now
 
         for f in sorted(glob.glob(os.path.join(INPUT_DIR, "*.dat"))):
             name = os.path.basename(f)
-            if name in in_use_files:       # กำลัง process อยู่แล้ว
+            if name in in_use_files:          # กำลัง process อยู่แล้ว
                 continue
-            if name in already_done:       # เคยทำไปแล้ว → ข้าม
+            if name in _done_cache_names:     # เคยทำไปแล้ว → ข้าม
                 continue
             in_use_files.add(name)
             try:
