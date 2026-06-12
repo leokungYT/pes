@@ -797,43 +797,39 @@ def load_template(find_img_path):
         IMAGE_CACHE[find_img_path] = t
     return t
 
+def _match_template(img_gray, find_img_path, threshold):
+    """ค้นหา template เดียว คืน list of (x,y) หรือ []"""
+    find_img = load_template(find_img_path)
+    if find_img is None:
+        return []
+    needle_w = find_img.shape[1]
+    needle_h = find_img.shape[0]
+    result = cv2.matchTemplate(img_gray, find_img, cv2.TM_CCOEFF_NORMED)
+    locations = list(zip(*np.where(result >= threshold)[::-1]))
+    if not locations:
+        return []
+    rectangles = []
+    for loc in locations:
+        rect = [int(loc[0]), int(loc[1]), needle_w, needle_h]
+        rectangles.append(rect)
+        rectangles.append(rect)
+    rectangles, _ = cv2.groupRectangles(rectangles, groupThreshold=1, eps=1)
+    inv = 1.0 / SCREENCAP_SCALE if SCREENCAP_SCALE != 1.0 else 1.0
+    return [(int((x + w / 2) * inv), int((y + h / 2) * inv)) for (x, y, w, h) in rectangles]
+
 def ImgSearchADB(adb_img, find_img_path, threshold=0.8):
     try:
         if adb_img is None:
             return []
-        
-        if len(adb_img.shape) == 3:
-            img_gray = cv2.cvtColor(adb_img, cv2.COLOR_BGR2GRAY)
-        else:
-            img_gray = adb_img
+        img_gray = cv2.cvtColor(adb_img, cv2.COLOR_BGR2GRAY) if len(adb_img.shape) == 3 else adb_img
 
-        find_img = load_template(find_img_path)
-        if find_img is None:
-            print(f"{Fore.RED}[ERROR] Image not found: {find_img_path}{Style.RESET_ALL}")
-            return []
-            
-        needle_w = find_img.shape[1]
-        needle_h = find_img.shape[0]
-        
-        result = cv2.matchTemplate(img_gray, find_img, cv2.TM_CCOEFF_NORMED)
-        locations = np.where(result >= threshold)
-        locations = list(zip(*locations[::-1]))
-        
-        rectangles = []
-        for loc in locations:
-            rect = [int(loc[0]), int(loc[1]), needle_w, needle_h]
-            rectangles.append(rect)
-            rectangles.append(rect)
-            
-        if len(rectangles) > 0:
-            rectangles, _ = cv2.groupRectangles(rectangles, groupThreshold=1, eps=1)
-            
-        points = []
-        if len(rectangles):
-            inv = 1.0 / SCREENCAP_SCALE if SCREENCAP_SCALE != 1.0 else 1.0
-            for (x, y, w, h) in rectangles:
-                points.append((int((x + w / 2) * inv), int((y + h / 2) * inv)))
-
+        points = _match_template(img_gray, find_img_path, threshold)
+        if not points:
+            base, ext = os.path.splitext(find_img_path)
+            alt_ext = ".png" if ext.lower() == ".bmp" else ".bmp"
+            alt_path = base + alt_ext
+            if os.path.exists(alt_path):
+                points = _match_template(img_gray, alt_path, threshold)
         return points
     except Exception as e:
         print(f"Error in ImgSearchADB: {e}")
