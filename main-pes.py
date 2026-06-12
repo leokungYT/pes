@@ -179,11 +179,22 @@ if GUI_ENABLED:
             win = ctk.CTkToplevel(self)
             win.title("⚙️ Config (config_gen.py)")
             win.geometry("450x580")
-            win.resizable(False, False)
+            win.resizable(True, True)
             win.grab_set()
 
             ctk.CTkLabel(win, text="Bot Settings (config_gen.py)",
                           font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(15, 10))
+
+            # Bottom bar packed FIRST so it's not pushed out by expand=True
+            bottom_bar = ctk.CTkFrame(win, fg_color="transparent")
+            bottom_bar.pack(side="bottom", fill="x", padx=20, pady=(4, 10))
+            label_status = ctk.CTkLabel(bottom_bar, text="", font=ctk.CTkFont(size=11))
+            label_status.pack()
+            btn_save = ctk.CTkButton(bottom_bar, text="💾 Save Configuration",
+                                     font=ctk.CTkFont(size=12, weight="bold"),
+                                     fg_color="#2cc985", hover_color="#229f69",
+                                     command=lambda: _save())
+            btn_save.pack(fill="x")
 
             # Scrollable frame for forms
             form_frame = ctk.CTkFrame(win, fg_color="transparent")
@@ -250,28 +261,28 @@ if GUI_ENABLED:
             ctk.CTkLabel(form_frame, text="Hero Target List (รายชื่อนักเตะ - บรรทัดละคน):", font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10, 2))
             txt_heroes = ctk.CTkTextbox(form_frame, height=180, font=ctk.CTkFont(family="Consolas", size=11))
             txt_heroes.pack(fill="both", expand=True, pady=(0, 10))
-            
+
             # Pre-fill textarea
             current_heroes = "\n".join(cfg.HERO_LIST_FREE)
             txt_heroes.insert("1.0", current_heroes)
 
             def _save():
                 global DO_BOX, GACHA_FREE, GACHA_FREE_LOOPS, HERO_LIST_FREE, DEBUG_OCR, EVENT_IMG, NOSCAN, SKIPANIMATION, GETQUEST
-                
+
                 val_event = var_event.get()
                 val_box = var_box.get()
                 val_free = var_free.get()
-                
+
                 try:
                     val_loops = int(entry_loops.get().strip())
                 except ValueError:
                     val_loops = 6
-                    
+
                 val_debug = var_debug.get()
                 val_getquest = var_getquest.get()
                 val_noscan = var_noscan.get()
                 val_skipanim = var_skipanim.get()
-                
+
                 # Parse heroes
                 raw_heroes = txt_heroes.get("1.0", "end").strip()
                 parsed_heroes = []
@@ -340,7 +351,7 @@ SKIPANIMATION = {val_skipanim}
                 try:
                     with open(cfg_path, "w", encoding="utf-8") as f:
                         f.write(content)
-                    
+
                     # Update local/global variables
                     EVENT_IMG = val_event
                     DO_BOX = val_box
@@ -351,17 +362,13 @@ SKIPANIMATION = {val_skipanim}
                     NOSCAN = val_noscan
                     SKIPANIMATION = val_skipanim
                     GETQUEST = val_getquest
-                    
+
                     importlib.reload(cfg)
                     label_status.configure(text="✅ Saved settings successfully!", text_color="#2cc985")
                     self.log(f"Config updated: EVENT={val_event}, BOX={val_box}, FREE={val_free}, LOOPS={val_loops}, NOSCAN={val_noscan}, SKIP={val_skipanim}, GETQUEST={val_getquest}, HEROES={len(parsed_heroes)}")
                 except Exception as ex:
                     label_status.configure(text=f"❌ Save error: {ex}", text_color="#ff5555")
 
-            ctk.CTkButton(win, text="💾 Save Configuration", font=ctk.CTkFont(size=12, weight="bold"), fg_color="#2cc985",
-                          hover_color="#229f69", command=_save).pack(pady=(5, 5))
-            label_status = ctk.CTkLabel(win, text="", font=ctk.CTkFont(size=11))
-            label_status.pack(pady=(0, 5))
 
         def log(self, msg):
             timestamp = time.strftime("%H:%M:%S")
@@ -774,17 +781,13 @@ def load_template(find_img_path):
         if find_img_path in IMAGE_CACHE:
             return IMAGE_CACHE[find_img_path]
     t = None
-    if os.path.exists(find_img_path):
-        t = cv2.imread(find_img_path, cv2.IMREAD_GRAYSCALE)
-    else:
-        base, ext = os.path.splitext(find_img_path)
-        for alt in [".bmp", ".png"]:
-            if alt.lower() != ext.lower():
-                alt_path = base + alt
-                if os.path.exists(alt_path):
-                    t = cv2.imread(alt_path, cv2.IMREAD_GRAYSCALE)
-                    if t is not None:
-                        break
+    base, ext = os.path.splitext(find_img_path)
+    alt_ext = ".png" if ext.lower() == ".bmp" else ".bmp"
+    for candidate in [find_img_path, base + alt_ext]:
+        if os.path.exists(candidate):
+            t = cv2.imread(candidate, cv2.IMREAD_GRAYSCALE)
+            if t is not None:
+                break
     if t is not None and SCREENCAP_SCALE != 1.0:
         t = cv2.resize(t,
                        (max(1, int(t.shape[1] * SCREENCAP_SCALE)),
@@ -1355,10 +1358,14 @@ def process_device(serial_or_device):
                 img_num = int(img_name.replace("play", "").replace(".bmp", ""))
                 has_timeout = img_num >= 13 and img_num != 17
                 start_time = time.time()
-                
+
                 while not found:
                     check_device_reset(serial, cycle_start)
-                    if has_timeout and (time.time() - start_time > 5):
+                    if img_num == 17:
+                        if time.time() - start_time > 15:
+                            start_time = time.time()
+                            gui_log(serial, "play17 not found yet, retrying...", step="Wait play17")
+                    elif has_timeout and (time.time() - start_time > 5):
                         gui_log(serial, f"Timeout for {img_name}.", step="Skipping")
                         break
                     adb_img = get_screen_capture(device)
@@ -1529,8 +1536,12 @@ def process_device(serial_or_device):
                     if img_name == "play22.bmp":
                         gui_log(serial, "Clicking 815 355 until play22/play23...", step="Loop play22")
                         spam_count_p22_event = 0
+                        p22_start = time.time()
                         while True:
                             check_device_reset(serial, cycle_start)
+                            if time.time() - p22_start > 15:
+                                gui_log(serial, "play22 timeout (15s) — skipping to play23", step="Skip play22")
+                                break
                             adb_img = get_screen_capture(device)
                             if adb_img is not None:
                                 if ImgSearchADB(adb_img, os.path.join(IMG_DIR, "play23.bmp")):
@@ -1541,15 +1552,15 @@ def process_device(serial_or_device):
                                     x, y = p22[0]
                                     gui_log(serial, "Clicking play22.bmp again...", step="Repeat play22")
                                     device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                    p22_start = time.time()
                                     time.sleep(3)
                                 else:
-                                    # Not found play22 or play23, spam click 815 355
                                     spam_count_p22_event += 1
                                     if spam_count_p22_event % 15 == 0:
                                         gui_log(serial, f"Still waiting for play22/play23... (Spammed 815,355 x{spam_count_p22_event})", step="Wait Play22")
                                     device.shell("input swipe 815 355 815 355 100")
                                     time.sleep(0.5)
-                            time.sleep(0.05)   # Optimized sleep from 0.01 to 0.05 to save host CPU
+                            time.sleep(0.05)
                         continue
 
                     gui_log(serial, f"Waiting for {img_name}...", step=f"Wait {img_name}")

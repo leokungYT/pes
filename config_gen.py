@@ -22,56 +22,7 @@ GACHA_FREE = 0
 GACHA_FREE_LOOPS = 3
 
 # รายชื่อนักเตะที่ต้องการเก็บ (Gacha Free → found-hero)
-HERO_LIST_FREE = [
-    "Fabio Cannavaro",
-    "Paolo Maldini",
-    "Daniele De Rossi",
-    "Didier Drogba",
-    "Mohamed Salah",
-    "Nico Paz",
-    "Federico Dimarco",
-    "Luka",
-    "rgson",
-    "Arribas",
-    "Ramedhan Saifullah",
-    "Chrigor",
-    "Lamine",
-    "Mbappe",
-    "Joan Garcia",
-    "Martin Odegaard",
-    "Atep",
-    "Gareth Bale",
-    "Aubameyang",
-    "Marcelo",
-    "Peter Schmeichel",
-    "Leonardo Bonucci",
-    "Ronald Koeman",
-    "Casemiro",
-    "Erling Haaland",
-    "Hugo Ekitike",
-    "Declan Rice",
-    "Hidetoshi Nakata",
-    "Seigo Narazaki",
-    "Shunsuke Nakamura",
-    "Vitinha",
-    "David Raya",
-    "Kvaratskhelia",
-    "Johan Cruyff",
-    "Filippo Inzaghi",
-    "Jordi Alba",
-    "Oliver Kahn",
-    "David Beckham",
-    "Rivaldo",
-    ""
-]
-
-# ── Get Quest Sequence ─────────────────────────────
-# 1 = ทำขั้นตอน getquest (เก็บรางวัลเควส) ก่อน Box
-# 0 = ข้าม
-GETQUEST = 1
-
-# โฟลเดอร์รูป getquest (อยู่ใน img/getquest/)
-GETQUEST_IMG_DIR = "img/getquest"
+HERO_LIST_FREE = ['Fabio Cannavaro', 'Paolo Maldini', 'Daniele De Rossi', 'Didier Drogba', 'Mohamed Salah', 'Nico Paz', 'Federico Dimarco', 'Luka', 'rgson', 'Arribas', 'Ramedhan Saifullah', 'Chrigor', 'Lamine', 'Mbappe', 'Joan Garcia', 'Martin Odegaard', 'Atep', 'Gareth Bale', 'Aubameyang', 'Marcelo', 'Peter Schmeichel', 'Leonardo Bonucci', 'Ronald Koeman', 'Casemiro', 'Erling Haaland', 'Hugo Ekitike', 'Declan Rice', 'Hidetoshi Nakata', 'Seigo Narazaki', 'Shunsuke Nakamura', 'Vitinha', 'David Raya', 'Kvaratskhelia', 'Johan Cruyff', 'Filippo Inzaghi', 'Jordi Alba', 'Oliver Kahn', 'David Beckham', 'Rivaldo']
 
 # ── Path ──────────────────────────────────────────
 IMG_DIR = "img"
@@ -80,6 +31,14 @@ IMG_DIR = "img"
 # 1 = บันทึกภาพที่สแกน OCR ทุกครั้งไว้ในโฟลเดอร์ debug-ocr/
 # 0 = ไม่บันทึก
 DEBUG_OCR = 0
+
+# ── Get Quest Sequence ─────────────────────────────
+# 1 = ทำขั้นตอน getquest (เก็บรางวัลเควส) ก่อน Box
+# 0 = ข้าม
+GETQUEST = 1
+
+# โฟลเดอร์รูป getquest (อยู่ใน img/getquest/)
+GETQUEST_IMG_DIR = "img/getquest"
 
 # ── No Scan Mode ──────────────────────────────────
 # 1 = ข้ามขั้นตอน checkpointgacha (ไม่สแกน OCR)
