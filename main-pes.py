@@ -1353,7 +1353,7 @@ def process_device(serial_or_device):
                 img_path = os.path.join(IMG_DIR, img_name)
                 found = False
                 img_num = int(img_name.replace("play", "").replace(".bmp", ""))
-                has_timeout = img_num >= 13
+                has_timeout = img_num >= 13 and img_num != 17
                 start_time = time.time()
                 
                 while not found:
