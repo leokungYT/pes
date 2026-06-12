@@ -248,7 +248,8 @@ if GUI_ENABLED:
             self.is_started       = False
             self.stat_labels      = {}
             self.stat_rows        = {}
-            self.login_times      = []
+            from collections import deque
+            self.login_times      = deque(maxlen=500)  # cap — ป้องกัน sum() ช้าเมื่อรันนานๆ
             self._log_buffer      = []     # batch log lines
             self._prev_stats      = {}     # cache previous stat counts to skip no-op updates
             self.current_filter   = ""
@@ -258,9 +259,10 @@ if GUI_ENABLED:
             self.after(500,  self.connect_adb)
             self.after(2000, self.update_realtime_stats)
             self.after(10000, self.auto_scan_devices)
-            self.after(200,  self._process_gui_queue)   # queue poller — 200ms
-            self.after(500,  self._periodic_log_flush)  # log flush — 500ms (5x less text widget work)
-            self.update_check_seconds = 60  # Check update every 60s
+            self.after(200,   self._process_gui_queue)   # queue poller — 200ms
+            self.after(500,   self._periodic_log_flush)  # log flush — 500ms
+            self.after(120000, self._periodic_gc)        # GC every 2 min — ป้องกัน memory leak
+            self.update_check_seconds = 60
             self.after(1000, self.tick_update_timer)
             self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
@@ -819,10 +821,10 @@ if GUI_ENABLED:
         def log(self, msg):
             from datetime import datetime
             ts = datetime.now().strftime("%H:%M:%S")
+            if len(self._log_buffer) > 80:
+                self._log_buffer = self._log_buffer[-40:]  # ตัดทิ้งกัน queue ล้น
             self._log_buffer.append(f"[{ts}] {msg}\n")
-            # Flush buffer immediately if it's large, otherwise the queue poller handles it
-            if len(self._log_buffer) >= 20:
-                self._flush_log_buffer()
+            # ไม่ flush ที่นี่ — _periodic_log_flush จัดการทุก 500ms เพื่อป้องกัน text widget ops กลาง queue drain
 
         def _flush_log_buffer(self):
             if not self._log_buffer:
@@ -850,6 +852,30 @@ if GUI_ENABLED:
                 pass
             finally:
                 self.after(500, self._periodic_log_flush)
+
+        def _periodic_gc(self):
+            # drain queue ที่ค้างบน main thread (เร็ว)
+            try:
+                drained = 0
+                while _gui_queue.qsize() > 300 and drained < 200:
+                    try:
+                        _gui_queue.get_nowait()
+                        drained += 1
+                    except Exception:
+                        break
+                if drained:
+                    self.log(f"[GC] Drained {drained} stale queue items")
+            except Exception:
+                pass
+            # gc.collect() ใน background thread — ไม่บล็อก main thread
+            def _bg_gc():
+                try:
+                    import gc
+                    gc.collect()
+                except Exception:
+                    pass
+            threading.Thread(target=_bg_gc, daemon=True).start()
+            self.after(120000, self._periodic_gc)
 
         def add_stat_row(self, name, count, is_error=False):
             if name not in self.stat_rows:
@@ -1056,7 +1082,7 @@ if GUI_ENABLED:
 
             t = threading.Thread(target=_bg_scan, daemon=True)
             t.start()
-            self.after(15000, self.update_realtime_stats)
+            self.after(30000, self.update_realtime_stats)
 
         def _apply_stats_ui(self, input_count, success_count, hero_count, hero_counts, fail_count=0):
             try:
@@ -1119,7 +1145,7 @@ if GUI_ENABLED:
             """Central poller: drain _gui_queue and apply updates. Runs every 200ms."""
             try:
                 processed = 0
-                while processed < 15:
+                while processed < 50:
                     try:
                         kind, data = _gui_queue.get_nowait()
                     except Exception:
@@ -1234,7 +1260,8 @@ def check_device_reset(serial, cycle_start=None):
 def update_gui(serial, **kwargs):
     """Queue a device update — never call GUI directly from worker threads."""
     if gui_instance:
-        _gui_queue.put(('device_update', (serial, kwargs)))
+        if _gui_queue.qsize() < 400:  # drop เมื่อ queue เริ่มล้น ป้องกัน Not Responding
+            _gui_queue.put(('device_update', (serial, kwargs)))
 
 _GUI_LOG_INTERVAL = 5  # seconds — ส่ง text update ไป GUI ทุก 5 วินาทีต่อ device (ลด queue spam กับ 20+ จอ)
 
