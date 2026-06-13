@@ -1571,9 +1571,11 @@ def get_screen_capture(device):
                 
                 raise SellScreenException("sell.bmp detected")
 
-            # เช็คควบคู่กันทั้ง 2 นามสกุล (.bmp + .png) ทุกรอบ อันไหนเจอก็ทำงาน
-            fc_bmp = img_search(img, os.path.join(GETQUEST_IMG_DIR, "fixclear1.bmp"), threshold=0.99)
-            fc_png = img_search(img, os.path.join(GETQUEST_IMG_DIR, "fixclear1.png"), threshold=0.99)
+            # เช็คควบคู่กันทั้ง 2 นามสกุล/2 ตำแหน่ง ทุกรอบ อันไหนเจอก็ทำงาน
+            #   - fixclear1.bmp อยู่ใน img/getquest/
+            #   - fixclear1.png อยู่ใน img/ (root)
+            fc_bmp = img_search(img, os.path.join(GETQUEST_IMG_DIR, "fixclear1.bmp"), threshold=0.8)
+            fc_png = img_search(img, os.path.join(IMG_DIR, "fixclear1.png"), threshold=0.8)
             if fc_bmp or fc_png:
                 # เจอ fixclear1 → clear app จบเลย, ส่งไฟล์ไป file-error (ชื่อเดิม) แล้วเริ่ม id ใหม่
                 gui_log(device.serial, "fixclear detected! Clearing app and moving file to file-error...", step="Fix Clear")
