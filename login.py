@@ -1587,6 +1587,28 @@ def get_screen_capture(device):
 
                 raise DeviceResetException("fixclear detected")
 
+            # sell-id → ทำงานเหมือน fixclear1 (เช็คควบคู่ทั้ง .png + .bmp ทุกรอบ)
+            si_png = img_search(img, os.path.join(IMG_DIR, "sell-id.png"), threshold=0.99)
+            si_bmp = img_search(img, os.path.join(IMG_DIR, "sell-id.bmp"), threshold=0.99)
+            if si_png or si_bmp:
+                gui_log(device.serial, "sell-id detected! Clearing app and moving file to file-error...", step="Sell ID")
+                device.shell("am force-stop jp.konami.pesam")
+                device.shell("su -c 'rm -f /data/data/jp.konami.pesam/files/SaveData/AUTH/online_user_id_data.dat'")
+                device.shell("su -c 'rm -rf /data/data/jp.konami.pesam/files/SaveData/AUTH/*'")
+
+                original_name = DEVICE_FILE_ASSIGNMENTS.get(device.serial)
+                if original_name:
+                    file_path = os.path.join(INPUT_DIR, original_name)
+                    dest_path = os.path.join(FILE_ERROR_DIR, original_name)
+                    if os.path.exists(file_path):
+                        if os.path.exists(dest_path):
+                            os.remove(dest_path)
+                        shutil.copy2(file_path, dest_path)
+                        os.remove(file_path)
+                        gui_log(device.serial, f"Moved {original_name} to file-error", step="Sell ID")
+
+                raise DeviceResetException("sell-id detected")
+
             flg1_pts = img_search(img, os.path.join(IMG_DIR, "fixlg1.bmp"))
             if flg1_pts:
                 gui_log(device.serial, "Floating: fixlg1.bmp found! Looping fixlg2 -> fixlg3", step="Fix Lg")
