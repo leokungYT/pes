@@ -1564,37 +1564,28 @@ def get_screen_capture(device):
                 
                 raise SellScreenException("sell.bmp detected")
 
-            fc_pts = img_search(img, os.path.join(GETQUEST_IMG_DIR, "fixclear1.bmp"), threshold=0.99)
-            if not fc_pts:
-                fc_pts = img_search(img, os.path.join(GETQUEST_IMG_DIR, "fixclear1.png"), threshold=0.99)
-            if fc_pts:
-                if device.serial not in FIXCLEAR_FIRST_SEEN:
-                    FIXCLEAR_FIRST_SEEN[device.serial] = time.time()
-                    gui_log(device.serial, "fixclear.bmp detected! Starting 15s persistent timer...", step="Fix Clear")
-                else:
-                    elapsed = time.time() - FIXCLEAR_FIRST_SEEN[device.serial]
-                    gui_log(device.serial, f"fixclear.bmp detected for {elapsed:.1f}s / 15s...", step="Fix Clear")
-                    if elapsed >= 15:
-                        gui_log(device.serial, "Floating: fixclear.bmp found! Deleting save data and moving file to file-error", step="Fix Clear")
-                        FIXCLEAR_FIRST_SEEN.pop(device.serial, None)
-                        device.shell("am force-stop jp.konami.pesam")
-                        device.shell("su -c 'rm -f /data/data/jp.konami.pesam/files/SaveData/AUTH/online_user_id_data.dat'")
-                        device.shell("su -c 'rm -rf /data/data/jp.konami.pesam/files/SaveData/AUTH/*'")
-                        
-                        original_name = DEVICE_FILE_ASSIGNMENTS.get(device.serial)
-                        if original_name:
-                            file_path = os.path.join(INPUT_DIR, original_name)
-                            dest_path = os.path.join(FILE_ERROR_DIR, original_name)
-                            if os.path.exists(file_path):
-                                if os.path.exists(dest_path):
-                                    os.remove(dest_path)
-                                shutil.copy2(file_path, dest_path)
-                                os.remove(file_path)
-                                gui_log(device.serial, f"Moved {original_name} to file-error", step="Fix Clear")
-                        
-                        raise DeviceResetException("fixclear.bmp detected")
-            else:
-                FIXCLEAR_FIRST_SEEN.pop(device.serial, None)
+            # เช็คควบคู่กันทั้ง 2 นามสกุล (.bmp + .png) ทุกรอบ อันไหนเจอก็ทำงาน
+            fc_bmp = img_search(img, os.path.join(GETQUEST_IMG_DIR, "fixclear1.bmp"), threshold=0.99)
+            fc_png = img_search(img, os.path.join(GETQUEST_IMG_DIR, "fixclear1.png"), threshold=0.99)
+            if fc_bmp or fc_png:
+                # เจอ fixclear1 → clear app จบเลย, ส่งไฟล์ไป file-error (ชื่อเดิม) แล้วเริ่ม id ใหม่
+                gui_log(device.serial, "fixclear detected! Clearing app and moving file to file-error...", step="Fix Clear")
+                device.shell("am force-stop jp.konami.pesam")
+                device.shell("su -c 'rm -f /data/data/jp.konami.pesam/files/SaveData/AUTH/online_user_id_data.dat'")
+                device.shell("su -c 'rm -rf /data/data/jp.konami.pesam/files/SaveData/AUTH/*'")
+
+                original_name = DEVICE_FILE_ASSIGNMENTS.get(device.serial)
+                if original_name:
+                    file_path = os.path.join(INPUT_DIR, original_name)
+                    dest_path = os.path.join(FILE_ERROR_DIR, original_name)
+                    if os.path.exists(file_path):
+                        if os.path.exists(dest_path):
+                            os.remove(dest_path)
+                        shutil.copy2(file_path, dest_path)
+                        os.remove(file_path)
+                        gui_log(device.serial, f"Moved {original_name} to file-error", step="Fix Clear")
+
+                raise DeviceResetException("fixclear detected")
 
             flg1_pts = img_search(img, os.path.join(IMG_DIR, "fixlg1.bmp"))
             if flg1_pts:
@@ -1811,10 +1802,8 @@ def load_template(path):
         IMAGE_CACHE[path] = t
     return t
 
-def img_search(gray_img, find_path, threshold=0.8):
-    """Returns list of (cx, cy) match centers in DEVICE coordinates."""
-    if gray_img is None:
-        return []
+def _match_single(gray_img, find_path, threshold):
+    """Match one template, return list of (cx, cy) or []."""
     tmpl = load_template(find_path)
     if tmpl is None:
         return []
@@ -1829,9 +1818,22 @@ def img_search(gray_img, find_path, threshold=0.8):
     rects, _ = cv2.groupRectangles(rects, groupThreshold=1, eps=1)
     if not len(rects):
         return []
-    # scale coordinates back to real device space
     inv = 1.0 / SCREENCAP_SCALE if SCREENCAP_SCALE != 1.0 else 1.0
     return [(int((x + tw // 2) * inv), int((y + th // 2) * inv)) for x, y, tw, th in rects]
+
+def img_search(gray_img, find_path, threshold=0.8):
+    """Returns list of (cx, cy) match centers in DEVICE coordinates.
+    Tries .bmp first, then .png (or vice versa) automatically."""
+    if gray_img is None:
+        return []
+    points = _match_single(gray_img, find_path, threshold)
+    if not points:
+        base, ext = os.path.splitext(find_path)
+        alt_ext = ".png" if ext.lower() == ".bmp" else ".bmp"
+        alt_path = base + alt_ext
+        if os.path.exists(alt_path):
+            points = _match_single(gray_img, alt_path, threshold)
+    return points
 
 # ═════════════════════════════════════════════════════════════════════════════
 # OCR Helper (Ref: find-gearname.py)
@@ -3771,10 +3773,41 @@ def process_device_login(device):
                             p5_start = 8
                             for gq_i in range(p5_start, 12):
                                 gq_name = f"getquest{gq_i}.bmp"
+                                thresh = 0.8
+                                gq_deadline = time.time() + 15
+
+                                # ── getquest10 ใช้ getquestfix10.png แทนเลย ──
+                                if gq_i == 10:
+                                    gui_log(serial, "Looking for getquestfix10...", step="gq10 Fix")
+                                    fix10_path = os.path.join(GQ_DIR, "getquestfix10.png")
+                                    while True:
+                                        check_device_reset(serial, cycle_start)
+                                        img = get_screen_capture(device)
+                                        if img is not None:
+                                            pts_fix = img_search(img, fix10_path, threshold=0.8)
+                                            if pts_fix:
+                                                gui_log(serial, "getquestfix10 found! Tapping [86,413] until getquest11...", step="gq10 Fix Tap")
+                                                while True:
+                                                    check_device_reset(serial, cycle_start)
+                                                    device.shell("input swipe 86 413 86 413 100")
+                                                    time.sleep(1.0)
+                                                    img2 = get_screen_capture(device)
+                                                    if img2 is not None:
+                                                        pts11 = img_search(img2, os.path.join(GQ_DIR, "getquest11.bmp"), threshold=0.8)
+                                                        if pts11:
+                                                            gui_log(serial, "getquest11 found — continuing!", step="gq11 Found")
+                                                            break
+                                                break
+                                        time.sleep(0.8)
+                                    continue
+
                                 gui_log(serial, f"Waiting {gq_name}...", step=f"gq{gq_i}")
-                                thresh = 0.99 if gq_i == 10 else 0.8
+                                found_gq = False
                                 while True:
                                     check_device_reset(serial, cycle_start)
+                                    if time.time() > gq_deadline:
+                                        gui_log(serial, f"{gq_name} timeout 15s — skipping", step=f"gq{gq_i} Skip")
+                                        break
                                     img = get_screen_capture(device)
                                     if img is not None:
                                         pts = img_search(img, os.path.join(GQ_DIR, gq_name), threshold=thresh)
@@ -3783,7 +3816,6 @@ def process_device_login(device):
                                             device.shell(f"input swipe {x} {y} {x} {y} 100")
                                             gui_log(serial, f"Clicked {gq_name} ({x},{y})", step=f"gq{gq_i} Click")
                                             time.sleep(1.5)
-                                            # กดซ้ำจนรูปหาย (กันกดไม่ติด)
                                             retry_end = time.time() + 8
                                             while time.time() < retry_end:
                                                 img2 = get_screen_capture(device)
@@ -3947,7 +3979,7 @@ def process_device_login(device):
                                                 gui_log(serial, "Re-clicked questfive1", step="Q5_1 Retry")
                                                 time.sleep(1.0)
                                             break
-                                    time.sleep(0.8)
+                                    time.sleep(0.1)
                                     
                                 if not q5_1_found:
                                     gui_log(serial, "questfive1.bmp not found! Retrying from drag...", step="Q5_1 Fail")

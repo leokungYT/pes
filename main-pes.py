@@ -1730,10 +1730,40 @@ def process_device(serial_or_device):
                                 p5_start = 8
                                 for gq_i in range(p5_start, 12):
                                     gq_name = f"getquest{gq_i}.bmp"
+                                    thresh = 0.8
+                                    gq_deadline = time.time() + 15
+
+                                    # ── getquest10 ใช้ getquestfix10.png แทนเลย ──
+                                    if gq_i == 10:
+                                        gui_log(serial, "Looking for getquestfix10...", step="gq10 Fix")
+                                        fix10_path = os.path.join(GQ_DIR, "getquestfix10.png")
+                                        while True:
+                                            check_device_reset(serial, cycle_start)
+                                            img = get_screen_capture(device)
+                                            if img is not None:
+                                                pts_fix = ImgSearchADB(img, fix10_path, threshold=0.8)
+                                                if pts_fix:
+                                                    gui_log(serial, "getquestfix10 found! Tapping [86,413] until getquest11...", step="gq10 Fix Tap")
+                                                    while True:
+                                                        check_device_reset(serial, cycle_start)
+                                                        device.shell("input swipe 86 413 86 413 100")
+                                                        time.sleep(1.0)
+                                                        img2 = get_screen_capture(device)
+                                                        if img2 is not None:
+                                                            pts11 = ImgSearchADB(img2, os.path.join(GQ_DIR, "getquest11.bmp"), threshold=0.8)
+                                                            if pts11:
+                                                                gui_log(serial, "getquest11 found — continuing!", step="gq11 Found")
+                                                                break
+                                                    break
+                                            time.sleep(0.8)
+                                        continue
+
                                     gui_log(serial, f"Waiting {gq_name}...", step=f"gq{gq_i}")
-                                    thresh = 0.99 if gq_i == 10 else 0.8
                                     while True:
                                         check_device_reset(serial, cycle_start)
+                                        if time.time() > gq_deadline:
+                                            gui_log(serial, f"{gq_name} timeout 15s — skipping", step=f"gq{gq_i} Skip")
+                                            break
                                         img = get_screen_capture(device)
                                         if img is not None:
                                             pts = ImgSearchADB(img, os.path.join(GQ_DIR, gq_name), threshold=thresh)
@@ -1742,7 +1772,6 @@ def process_device(serial_or_device):
                                                 device.shell(f"input swipe {x} {y} {x} {y} 100")
                                                 gui_log(serial, f"Clicked {gq_name} ({x},{y})", step=f"gq{gq_i} Click")
                                                 time.sleep(1.5)
-                                                # กดซ้ำจนรูปหาย (กันกดไม่ติด)
                                                 retry_end = time.time() + 8
                                                 while time.time() < retry_end:
                                                     img2 = get_screen_capture(device)
@@ -1757,7 +1786,7 @@ def process_device(serial_or_device):
                                 # วิธีที่ 1: ใช้ draganddrop (กดค้างแล้วลาก)
                                 # draganddrop จะกดค้างที่จุดแรกสักครู่ แล้วค่อยลากไปยังจุดที่สอง
                                 # โดยตัวเลข 5000 คือระยะเวลาในการลาก (5 วินาที)
-                                cmd_drag = "input draganddrop 96 124 691 205 5000"
+                                cmd_drag = "input draganddrop 96 124 691 205 3000"
                                 gui_log(serial, "Dragging from 96 124 to 691 205...", step="gq Drag")
                                 device.shell(cmd_drag)
                                 time.sleep(1.5)
@@ -1867,7 +1896,7 @@ def process_device(serial_or_device):
                                                     gui_log(serial, f"Re-clicked {label}", step=f"{label} Retry")
                                                     time.sleep(1.0)
                                                 break
-                                        time.sleep(0.8)
+                                        time.sleep(0.2)
 
                                 while True:
                                     check_device_reset(serial, cycle_start)
@@ -1875,10 +1904,10 @@ def process_device(serial_or_device):
                                     gui_log(serial, "Waiting 10 seconds delay before dragging...", step="Q5 Drag Delay")
                                     time.sleep(10.0)
                                     
-                                    drag_cmd = "input draganddrop 96 124 691 205 5000"
-                                    gui_log(serial, "Dragging from 96 124 to 691 205...", step="Q5 Drag")
+                                    drag_cmd = "input draganddrop 96 124 691 205 2000"
+                                    gui_log(serial, "Dragging from 96 124 to 691 205 (2s)...", step="Q5 Drag")
                                     device.shell(drag_cmd)
-                                    time.sleep(0.2) # เริ่มค้นหาต่อทันที
+                                    # ปล่อยลากปับ → หา questfive1 ต่อทันที (ไม่หน่วง)
                                     
                                     # 2. กด questfive1
                                     gui_log(serial, "Searching for questfive1.bmp...", step="Q5_1 Search")
@@ -1888,26 +1917,25 @@ def process_device(serial_or_device):
                                         check_device_reset(serial, cycle_start)
                                         img = get_screen_capture(device)
                                         if img is not None:
-                                            pts = ImgSearchADB(img, os.path.join(GQ_DIR, "questfive1.bmp"))
+                                            pts = ImgSearchADB(img, os.path.join(GQ_DIR, "questfive1.bmp"), threshold=0.7)
                                             if pts:
                                                 x, y = pts[0]
                                                 device.shell(f"input swipe {x} {y} {x} {y} 100")
                                                 gui_log(serial, f"Clicked questfive1 at ({x}, {y})", step="Q5_1 Click")
                                                 q5_1_found = True
-                                                time.sleep(1.5)
-                                                # กดซ้ำจนกว่าจะหาย
+                                                # กดซ้ำรัวๆ จนกว่าจะหาย
                                                 retry_end = time.time() + 8
                                                 while time.time() < retry_end:
                                                     check_device_reset(serial, cycle_start)
                                                     img2 = get_screen_capture(device)
-                                                    if img2 is not None and not ImgSearchADB(img2, os.path.join(GQ_DIR, "questfive1.bmp")):
+                                                    if img2 is not None and not ImgSearchADB(img2, os.path.join(GQ_DIR, "questfive1.bmp"), threshold=0.7):
                                                         break
                                                     device.shell(f"input swipe {x} {y} {x} {y} 100")
                                                     gui_log(serial, "Re-clicked questfive1", step="Q5_1 Retry")
-                                                    time.sleep(1.0)
+                                                    time.sleep(0.2)
                                                 break
-                                        time.sleep(0.8)
-                                        
+                                        time.sleep(0.05)
+
                                     if not q5_1_found:
                                         gui_log(serial, "questfive1.bmp not found! Retrying from drag...", step="Q5_1 Fail")
                                         continue
@@ -1950,7 +1978,7 @@ def process_device(serial_or_device):
                                                 if ImgSearchADB(img, os.path.join(GQ_DIR, "questfive2.bmp")):
                                                     gui_log(serial, "questfive2 reappeared, retrying...", step="Q5_2 Retry")
                                                     break
-                                            time.sleep(0.5)
+                                            time.sleep(0.2)
                                         if q3_found:
                                             break
                                     click_until_gone(os.path.join(GQ_DIR, "questfive3.bmp"), "questfive3.bmp")
@@ -1993,8 +2021,8 @@ def process_device(serial_or_device):
                                                         gui_log(serial, "Re-clicked questfive4", step="Q5_4 Retry")
                                                         time.sleep(1.0)
                                                     break
-                                            time.sleep(0.8)
-                                            
+                                            time.sleep(0.2)
+
                                         if q4_break:
                                             break
                                             
@@ -2032,8 +2060,8 @@ def process_device(serial_or_device):
                                                         gui_log(serial, "Re-clicked questfive5", step="Q5_5 Retry")
                                                         time.sleep(1.0)
                                                     break
-                                            time.sleep(0.8)
-                                            
+                                            time.sleep(0.2)
+
                                         if q5_break:
                                             break
                                             
@@ -2055,7 +2083,7 @@ def process_device(serial_or_device):
                                                 break
                                             
                                             # ค้นหา questfive10.bmp
-                                            pts10 = ImgSearchADB(img, os.path.join(GQ_DIR, "questfive10.bmp"))
+                                            pts10 = ImgSearchADB(img, os.path.join(GQ_DIR, "questfive10.bmp"), threshold=0.7)
                                             if pts10:
                                                 x, y = pts10[0]
                                                 gui_log(serial, f"Long pressing questfive10 at ({x}, {y})...", step="Q5_10 Click")
@@ -2084,12 +2112,12 @@ def process_device(serial_or_device):
                                         img = get_screen_capture(device)
                                         if img is not None:
                                             # เช็ค checkpointquest4.bmp
-                                            if ImgSearchADB(img, os.path.join(GQ_DIR, "checkpointquest4.bmp")):
+                                            if ImgSearchADB(img, os.path.join(GQ_DIR, "checkpointquest4.bmp"), threshold=0.7):
                                                 gui_log(serial, "checkpointquest4.bmp FOUND!", step="Q5 CP4 OK")
                                                 break
                                                     
                                             # ค้นหา questfive13.bmp
-                                            pts13 = ImgSearchADB(img, os.path.join(GQ_DIR, "questfive13.bmp"))
+                                            pts13 = ImgSearchADB(img, os.path.join(GQ_DIR, "questfive13.bmp"), threshold=0.7)
                                             if pts13:
                                                 x, y = pts13[0]
                                                 gui_log(serial, f"Long pressing questfive13 at ({x}, {y})...", step="Q5_13 Click")
@@ -2098,7 +2126,7 @@ def process_device(serial_or_device):
                                                 
                                                 # เช็ค checkpointquest4 อีกรอบหลังกดค้างเสร็จ
                                                 img_after = get_screen_capture(device)
-                                                if img_after is not None and ImgSearchADB(img_after, os.path.join(GQ_DIR, "checkpointquest4.bmp")):
+                                                if img_after is not None and ImgSearchADB(img_after, os.path.join(GQ_DIR, "checkpointquest4.bmp"), threshold=0.7):
                                                     gui_log(serial, "checkpointquest4.bmp FOUND after long press!", step="Q5 CP4 OK")
                                                     break
                                             else:
