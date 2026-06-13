@@ -1386,6 +1386,7 @@ def get_connected_devices():
 # Screen / image
 # ═════════════════════════════════════════════════════════════════════════════
 def fast_screencap(device):
+    conn = None
     try:
         conn = device.client.create_connection(timeout=device.client.timeout)
         conn.send(f"host:transport:{device.serial}")
@@ -1410,6 +1411,12 @@ def fast_screencap(device):
                 return gray
     except Exception:
         pass
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     # Fallback
     try:

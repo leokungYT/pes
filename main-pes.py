@@ -636,6 +636,7 @@ def get_connected_devices():
 
 def fast_screencap(device):
     """Fast screencap using raw RGBA data — ~30-50ms vs ~200-500ms PNG"""
+    conn = None
     try:
         conn = device.client.create_connection(timeout=device.client.timeout)
         conn.send(f"host:transport:{device.serial}")
@@ -660,6 +661,12 @@ def fast_screencap(device):
                 return gray
     except Exception:
         pass
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
     # Fallback to PNG method
     try:
         raw = device.screencap()
