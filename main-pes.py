@@ -634,8 +634,20 @@ def get_connected_devices():
         return final_devices
     except: return []
 
+# Throttle: จำกัดความถี่ screencap ต่อเครื่อง — กัน loop ที่เรียกถี่เกินยิงใส่ MuMu จนค้าง (ANR)
+_MIN_SCREENCAP_INTERVAL = 0.25          # วินาที (≈ 4 ครั้ง/วิ/เครื่อง)
+_LAST_SCREENCAP_TS = {}
+
 def fast_screencap(device):
     """Fast screencap using raw RGBA data — ~30-50ms vs ~200-500ms PNG"""
+    # ── per-device throttle: กัน loop เรียกถี่เกินจนยิง MuMu ค้าง (ANR) ──
+    serial = device.serial
+    last = _LAST_SCREENCAP_TS.get(serial, 0.0)
+    wait = _MIN_SCREENCAP_INTERVAL - (time.time() - last)
+    if wait > 0:
+        time.sleep(wait)
+    _LAST_SCREENCAP_TS[serial] = time.time()
+
     conn = None
     try:
         conn = device.client.create_connection(timeout=device.client.timeout)

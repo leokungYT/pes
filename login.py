@@ -1382,10 +1382,42 @@ def get_connected_devices():
         return final
     except: return []
 
+def is_device_online(device):
+    """เช็คเร็วๆ ว่า device ยัง online จริงไหม (adb get-state == 'device')."""
+    try:
+        kwargs = {'creationflags': 0x08000000} if os.name == 'nt' else {}
+        r = subprocess.run([adb_path, "-s", device.serial, "get-state"],
+                           capture_output=True, text=True, timeout=5, **kwargs)
+        return r.stdout.strip() == "device"
+    except Exception:
+        return False
+
+def try_reconnect_device(serial):
+    """พยายาม adb connect กลับ (เผื่อ MuMu ฟื้นจาก offline/ANR)."""
+    try:
+        kwargs = {'creationflags': 0x08000000} if os.name == 'nt' else {}
+        subprocess.run([adb_path, "connect", serial],
+                       capture_output=True, text=True, timeout=5, **kwargs)
+    except Exception:
+        pass
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Screen / image
 # ═════════════════════════════════════════════════════════════════════════════
+# Throttle: จำกัดความถี่ screencap ต่อเครื่อง — กัน loop ที่เรียกถี่เกินไปยิงใส่ MuMu
+# จนค้าง (ANR). ไม่ว่าจะเรียกถี่แค่ไหน แต่ละเครื่องจะถูกแคปไม่เกิน ~1/_MIN_SCREENCAP_INTERVAL ครั้ง/วิ
+_MIN_SCREENCAP_INTERVAL = 0.25          # วินาที (≈ 4 ครั้ง/วิ/เครื่อง)
+_LAST_SCREENCAP_TS = {}
+
 def fast_screencap(device):
+    # ── per-device throttle ──
+    serial = device.serial
+    last = _LAST_SCREENCAP_TS.get(serial, 0.0)
+    wait = _MIN_SCREENCAP_INTERVAL - (time.time() - last)
+    if wait > 0:
+        time.sleep(wait)
+    _LAST_SCREENCAP_TS[serial] = time.time()
+
     conn = None
     try:
         conn = device.client.create_connection(timeout=device.client.timeout)
@@ -3310,6 +3342,17 @@ def process_device_login(device):
         try:
             DEVICE_DISABLE_FIXEVENT[serial] = False
             check_device_reset(serial)
+
+            # ── ด่านเช็ค device online ก่อนเริ่ม cycle ──
+            # กัน 2 อาการ: (1) spin วน cycle รัวๆ ตอนเครื่องตาย
+            #              (2) เริ่มทำงาน/ย้ายไฟล์มั่วบนเครื่องที่ offline/ค้าง
+            # ยังไม่ได้ pick file (original_name=None) → continue ปลอดภัย ไม่มีไฟล์ค้าง
+            if not is_device_online(device):
+                gui_log(serial, "⚠️ Device OFFLINE — reconnecting & waiting...", step="Offline", status="stuck")
+                try_reconnect_device(serial)
+                time.sleep(10)
+                continue
+
             gui_log(serial, "--- Starting New Cycle ---", step="New Cycle", status="working")
 
             # 0. Force-stop
@@ -4638,9 +4681,17 @@ def process_device_login(device):
 
 
         except Exception as e:
+            # คืนไฟล์กลับ input-id เสมอ (ไม่ย้ายไปโฟลเดอร์ผลลัพธ์) → กันส่งไฟล์มั่ว
             release_file(original_name)
-            gui_log(serial, f"❌ Error: {e}", status="stuck")
-            time.sleep(5)
+            msg = str(e).lower()
+            if "offline" in msg or "timed out" in msg or "timeout" in msg or "closed" in msg or "connection" in msg:
+                # device หลุด/ค้างกลางคัน → reconnect แล้ว backoff นานขึ้น (อย่า spin)
+                gui_log(serial, f"⚠️ Device offline/timeout — reconnecting & backing off...", step="Offline", status="stuck")
+                try_reconnect_device(serial)
+                time.sleep(10)
+            else:
+                gui_log(serial, f"❌ Error: {e}", status="stuck")
+                time.sleep(5)
         finally:
             # Safe, non-disruptive memory optimization at the end of each account cycle
             try:
