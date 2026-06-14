@@ -58,50 +58,6 @@ GACHA_FREE = 0
 # จำนวนลูปย่อยที่ต้องการสุ่มกาชาฟรี (เช่น 2, 3, 5)
 GACHA_FREE_LOOPS = 10
 
-# รายชื่อนักเตะที่ต้องการเก็บ (Gacha Free → backup-id) (หากเจอชื่อซ้ำกัน ระบบจะตรวจจับและใส่ x2, x3 ต่อท้ายให้อัตโนมัติ)
-HERO_LIST_FREE = [
-    "Fabio Cannavaro",
-    "Paolo Maldini",
-    "Daniele De Rossi",
-    "Didier Drogba",
-    "Mohamed Salah",
-    "Nico Paz",
-    "Federico Dimarco",
-    "Luka",
-    "rgson",
-    "Arribas",
-    "Ramedhan Saifullah",
-    "Chrigor",
-    "Lamine",
-    "Mbappe",
-    "Joan Garcia",
-    "Martin Odegaard",
-    "Atep",
-    "Gareth Bale",
-    "Aubameyang",
-    "Marcelo",
-    "Peter Schmeichel",
-    "Leonardo Bonucci",
-    "Ronald Koeman",
-    "Casemiro",
-    "Erling Haaland",
-    "Hugo Ekitike",
-    "Declan Rice",
-    "Hidetoshi Nakata",
-    "Seigo Narazaki",
-    "Shunsuke Nakamura",
-    "Vitinha",
-    "David Raya",
-    "Kvaratskhelia",
-    "Johan Cruyff",
-    "Filippo Inzaghi",
-    "Jordi Alba",
-    "Oliver Kahn",
-    "David Beckham",
-    "Rivaldo",
-    ""
-]
-
 # รายชื่อนักเตะที่ใช้สแกนหา (หากเจอชื่อซ้ำกัน ระบบจะตรวจจับและใส่ x2, x3 ต่อท้ายให้อัตโนมัติ)
 list_find_hero = [
     "Fabio Cannavaro",
@@ -143,8 +99,14 @@ list_find_hero = [
     "Oliver Kahn",
     "David Beckham",
     "Rivaldo",
+    "Gianluigi Buffon",
+    "Andrea Pirlo",
+    "Gialuca Zambrotta",
     ""
 ]
+
+# แชร์ list เดียวกัน — แก้ที่ list_find_hero อย่างเดียวพอ
+HERO_LIST_FREE = list_find_hero
 
 
 # ── Debug OCR ─────────────────────────────────────

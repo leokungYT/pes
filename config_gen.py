@@ -22,7 +22,51 @@ GACHA_FREE = 0
 GACHA_FREE_LOOPS = 3
 
 # รายชื่อนักเตะที่ต้องการเก็บ (Gacha Free → found-hero)
-HERO_LIST_FREE = ['Fabio Cannavaro', 'Paolo Maldini', 'Daniele De Rossi', 'Didier Drogba', 'Mohamed Salah', 'Nico Paz', 'Federico Dimarco', 'Luka', 'rgson', 'Arribas', 'Ramedhan Saifullah', 'Chrigor', 'Lamine', 'Mbappe', 'Joan Garcia', 'Martin Odegaard', 'Atep', 'Gareth Bale', 'Aubameyang', 'Marcelo', 'Peter Schmeichel', 'Leonardo Bonucci', 'Ronald Koeman', 'Casemiro', 'Erling Haaland', 'Hugo Ekitike', 'Declan Rice', 'Hidetoshi Nakata', 'Seigo Narazaki', 'Shunsuke Nakamura', 'Vitinha', 'David Raya', 'Kvaratskhelia', 'Johan Cruyff', 'Filippo Inzaghi', 'Jordi Alba', 'Oliver Kahn', 'David Beckham', 'Rivaldo']
+HERO_LIST_FREE = [
+    "Fabio Cannavaro",
+    "Paolo Maldini",
+    "Daniele De Rossi",
+    "Didier Drogba",
+    "Mohamed Salah",
+    "Nico Paz",
+    "Federico Dimarco",
+    "Luka",
+    "rgson",
+    "Arribas",
+    "Ramedhan Saifullah",
+    "Chrigor",
+    "Lamine=x2",
+    "Mbappe",
+    "Joan Garcia",
+    "Martin Odegaard",
+    "Atep",
+    "Gareth Bale",
+    "Aubameyang",
+    "Marcelo",
+    "Peter Schmeichel",
+    "Leonardo Bonucci",
+    "Ronald Koeman",
+    "Casemiro",
+    "Erling Haaland",
+    "Hugo Ekitike",
+    "Declan Rice",
+    "Hidetoshi Nakata",
+    "Seigo Narazaki",
+    "Shunsuke Nakamura",
+    "Vitinha",
+    "David Raya",
+    "Kvaratskhelia",
+    "Johan Cruyff",
+    "Filippo Inzaghi",
+    "Jordi Alba",
+    "Oliver Kahn",
+    "David Beckham",
+    "Rivaldo",
+    "Gianluigi Buffon",
+    "Andrea Pirlo",
+    "Gialuca Zambrotta",
+    ""
+]
 
 # ── Path ──────────────────────────────────────────
 IMG_DIR = "img"
