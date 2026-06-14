@@ -1382,10 +1382,61 @@ def get_connected_devices():
         return final
     except: return []
 
+def is_device_online(device):
+    """เช็คเร็วๆ ว่า device ยัง online จริงไหม (adb get-state == 'device')."""
+    try:
+        kwargs = {'creationflags': 0x08000000} if os.name == 'nt' else {}
+        r = subprocess.run([adb_path, "-s", device.serial, "get-state"],
+                           capture_output=True, text=True, timeout=5, **kwargs)
+        return r.stdout.strip() == "device"
+    except Exception:
+        return False
+
+def try_reconnect_device(serial):
+    """พยายาม adb connect กลับ (เผื่อ MuMu ฟื้นจาก offline/ANR)."""
+    try:
+        kwargs = {'creationflags': 0x08000000} if os.name == 'nt' else {}
+        subprocess.run([adb_path, "connect", serial],
+                       capture_output=True, text=True, timeout=5, **kwargs)
+    except Exception:
+        pass
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Screen / image
 # ═════════════════════════════════════════════════════════════════════════════
+# Throttle: จำกัดความถี่ screencap ต่อเครื่อง — กัน loop ที่เรียกถี่เกินไปยิงใส่ MuMu
+# จนค้าง (ANR). ไม่ว่าจะเรียกถี่แค่ไหน แต่ละเครื่องจะถูกแคปไม่เกิน ~1/_MIN_SCREENCAP_INTERVAL ครั้ง/วิ
+_MIN_SCREENCAP_INTERVAL = 0.25          # วินาที (≈ 4 ครั้ง/วิ/เครื่อง)
+_LAST_SCREENCAP_TS = {}
+
+# Launch cooldown: ห้าม cold-start เกมถี่เกินไป/เครื่อง — cold-start คือคำสั่งที่หนัก
+# ที่สุดสำหรับ MuMu (โหลด asset + init 3D ใหม่) ถ้า relaunch ซ้อนถี่ๆ → ANR
+_MIN_LAUNCH_INTERVAL = 20.0             # วินาที — เว้นระยะ cold-start ขั้นต่ำ/เครื่อง
+_LAST_LAUNCH_TS = {}
+
+def launch_game(device, settle=14.0):
+    """Cold-start เกมแบบมี cooldown ต่อเครื่อง — กัน relaunch ซ้อนถี่จน MuMu ค้าง (ANR)."""
+    serial = device.serial
+    elapsed = time.time() - _LAST_LAUNCH_TS.get(serial, 0.0)
+    if elapsed < _MIN_LAUNCH_INTERVAL:
+        wait = _MIN_LAUNCH_INTERVAL - elapsed
+        gui_log(serial, f"Launch cooldown — waiting {wait:.0f}s before relaunch...", step="Launch CD")
+        time.sleep(wait)
+    device.shell("monkey -p jp.konami.pesam -c android.intent.category.LAUNCHER 1")
+    _LAST_LAUNCH_TS[serial] = time.time()
+    if settle > 0:
+        time.sleep(settle)
+
 def fast_screencap(device):
+    # ── per-device throttle ──
+    serial = device.serial
+    last = _LAST_SCREENCAP_TS.get(serial, 0.0)
+    wait = _MIN_SCREENCAP_INTERVAL - (time.time() - last)
+    if wait > 0:
+        time.sleep(wait)
+    _LAST_SCREENCAP_TS[serial] = time.time()
+
+    conn = None
     try:
         conn = device.client.create_connection(timeout=device.client.timeout)
         conn.send(f"host:transport:{device.serial}")
@@ -1410,6 +1461,12 @@ def fast_screencap(device):
                 return gray
     except Exception:
         pass
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     # Fallback
     try:
@@ -1450,8 +1507,7 @@ def get_screen_capture(device):
         # เช็คเกมออนอยู่หรือไม่ (ทุก 30 วิ)
         if not is_game_running(device):
             gui_log(device.serial, "⚠️ Game not running! Relaunching...", step="Relaunch")
-            device.shell("monkey -p jp.konami.pesam -c android.intent.category.LAUNCHER 1")
-            time.sleep(14)
+            launch_game(device, settle=14)
             DEVICE_LAST_GAME_CHECK[device.serial] = time.time()
 
         img = fast_screencap(device)
@@ -1564,35 +1620,52 @@ def get_screen_capture(device):
                 
                 raise SellScreenException("sell.bmp detected")
 
-            fc_pts = img_search(img, os.path.join(GETQUEST_IMG_DIR, "fixclear1.bmp"), threshold=0.99)
-            if fc_pts:
-                if device.serial not in FIXCLEAR_FIRST_SEEN:
-                    FIXCLEAR_FIRST_SEEN[device.serial] = time.time()
-                    gui_log(device.serial, "fixclear.bmp detected! Starting 15s persistent timer...", step="Fix Clear")
-                else:
-                    elapsed = time.time() - FIXCLEAR_FIRST_SEEN[device.serial]
-                    gui_log(device.serial, f"fixclear.bmp detected for {elapsed:.1f}s / 15s...", step="Fix Clear")
-                    if elapsed >= 15:
-                        gui_log(device.serial, "Floating: fixclear.bmp found! Deleting save data and moving file to file-error", step="Fix Clear")
-                        FIXCLEAR_FIRST_SEEN.pop(device.serial, None)
-                        device.shell("am force-stop jp.konami.pesam")
-                        device.shell("su -c 'rm -f /data/data/jp.konami.pesam/files/SaveData/AUTH/online_user_id_data.dat'")
-                        device.shell("su -c 'rm -rf /data/data/jp.konami.pesam/files/SaveData/AUTH/*'")
-                        
-                        original_name = DEVICE_FILE_ASSIGNMENTS.get(device.serial)
-                        if original_name:
-                            file_path = os.path.join(INPUT_DIR, original_name)
-                            dest_path = os.path.join(FILE_ERROR_DIR, original_name)
-                            if os.path.exists(file_path):
-                                if os.path.exists(dest_path):
-                                    os.remove(dest_path)
-                                shutil.copy2(file_path, dest_path)
-                                os.remove(file_path)
-                                gui_log(device.serial, f"Moved {original_name} to file-error", step="Fix Clear")
-                        
-                        raise DeviceResetException("fixclear.bmp detected")
-            else:
-                FIXCLEAR_FIRST_SEEN.pop(device.serial, None)
+            # เช็คควบคู่กันทั้ง 2 นามสกุล/2 ตำแหน่ง ทุกรอบ อันไหนเจอก็ทำงาน
+            #   - fixclear1.bmp อยู่ใน img/getquest/
+            #   - fixclear1.png อยู่ใน img/ (root)
+            fc_bmp = img_search(img, os.path.join(GETQUEST_IMG_DIR, "fixclear1.bmp"), threshold=0.8)
+            fc_png = img_search(img, os.path.join(IMG_DIR, "fixclear1.png"), threshold=0.8)
+            if fc_bmp or fc_png:
+                # เจอ fixclear1 → clear app จบเลย, ส่งไฟล์ไป file-error (ชื่อเดิม) แล้วเริ่ม id ใหม่
+                gui_log(device.serial, "fixclear detected! Clearing app and moving file to file-error...", step="Fix Clear")
+                device.shell("am force-stop jp.konami.pesam")
+                device.shell("su -c 'rm -f /data/data/jp.konami.pesam/files/SaveData/AUTH/online_user_id_data.dat'")
+                device.shell("su -c 'rm -rf /data/data/jp.konami.pesam/files/SaveData/AUTH/*'")
+
+                original_name = DEVICE_FILE_ASSIGNMENTS.get(device.serial)
+                if original_name:
+                    file_path = os.path.join(INPUT_DIR, original_name)
+                    dest_path = os.path.join(FILE_ERROR_DIR, original_name)
+                    if os.path.exists(file_path):
+                        if os.path.exists(dest_path):
+                            os.remove(dest_path)
+                        shutil.copy2(file_path, dest_path)
+                        os.remove(file_path)
+                        gui_log(device.serial, f"Moved {original_name} to file-error", step="Fix Clear")
+
+                raise DeviceResetException("fixclear detected")
+
+            # sell-id → ทำงานเหมือน fixclear1 (เช็คควบคู่ทั้ง .png + .bmp ทุกรอบ)
+            si_png = img_search(img, os.path.join(IMG_DIR, "sell-id.png"), threshold=0.99)
+            si_bmp = img_search(img, os.path.join(IMG_DIR, "sell-id.bmp"), threshold=0.99)
+            if si_png or si_bmp:
+                gui_log(device.serial, "sell-id detected! Clearing app and moving file to file-error...", step="Sell ID")
+                device.shell("am force-stop jp.konami.pesam")
+                device.shell("su -c 'rm -f /data/data/jp.konami.pesam/files/SaveData/AUTH/online_user_id_data.dat'")
+                device.shell("su -c 'rm -rf /data/data/jp.konami.pesam/files/SaveData/AUTH/*'")
+
+                original_name = DEVICE_FILE_ASSIGNMENTS.get(device.serial)
+                if original_name:
+                    file_path = os.path.join(INPUT_DIR, original_name)
+                    dest_path = os.path.join(FILE_ERROR_DIR, original_name)
+                    if os.path.exists(file_path):
+                        if os.path.exists(dest_path):
+                            os.remove(dest_path)
+                        shutil.copy2(file_path, dest_path)
+                        os.remove(file_path)
+                        gui_log(device.serial, f"Moved {original_name} to file-error", step="Sell ID")
+
+                raise DeviceResetException("sell-id detected")
 
             flg1_pts = img_search(img, os.path.join(IMG_DIR, "fixlg1.bmp"))
             if flg1_pts:
@@ -1809,10 +1882,8 @@ def load_template(path):
         IMAGE_CACHE[path] = t
     return t
 
-def img_search(gray_img, find_path, threshold=0.8):
-    """Returns list of (cx, cy) match centers in DEVICE coordinates."""
-    if gray_img is None:
-        return []
+def _match_single(gray_img, find_path, threshold):
+    """Match one template, return list of (cx, cy) or []."""
     tmpl = load_template(find_path)
     if tmpl is None:
         return []
@@ -1827,9 +1898,22 @@ def img_search(gray_img, find_path, threshold=0.8):
     rects, _ = cv2.groupRectangles(rects, groupThreshold=1, eps=1)
     if not len(rects):
         return []
-    # scale coordinates back to real device space
     inv = 1.0 / SCREENCAP_SCALE if SCREENCAP_SCALE != 1.0 else 1.0
     return [(int((x + tw // 2) * inv), int((y + th // 2) * inv)) for x, y, tw, th in rects]
+
+def img_search(gray_img, find_path, threshold=0.8):
+    """Returns list of (cx, cy) match centers in DEVICE coordinates.
+    Tries .bmp first, then .png (or vice versa) automatically."""
+    if gray_img is None:
+        return []
+    points = _match_single(gray_img, find_path, threshold)
+    if not points:
+        base, ext = os.path.splitext(find_path)
+        alt_ext = ".png" if ext.lower() == ".bmp" else ".bmp"
+        alt_path = base + alt_ext
+        if os.path.exists(alt_path):
+            points = _match_single(gray_img, alt_path, threshold)
+    return points
 
 # ═════════════════════════════════════════════════════════════════════════════
 # OCR Helper (Ref: find-gearname.py)
@@ -2048,26 +2132,15 @@ _DONE_CACHE_TTL         = 3.0  # วินาที — รีเฟรช glob 
 
 def pick_next_file():
     """
-    Thread-safe: pick ONE .dat from input-id that is NOT already in use
-    AND does NOT already exist in login-success (เคย login แล้ว).
+    Thread-safe: pick ONE .dat from input-id that is NOT already in use.
+    หมายเหตุ: ไม่ข้ามไฟล์ที่ชื่อซ้ำกับโฟลเดอร์ done อีกแล้ว → ประมวลผลซ้ำได้
+    (ผลลัพธ์จะทับไฟล์เดิมที่ชื่อเดียวกัน + อัปเวลาเป็นปัจจุบัน)
     Returns (full_path, basename) or (None, None).
     """
-    global _done_cache_names, _done_cache_time
     with file_pick_lock:
-        now = time.time()
-        if now - _done_cache_time >= _DONE_CACHE_TTL:
-            done_files = (glob.glob(os.path.join(LOGIN_SUCCESS_DIR, "*.dat")) +
-                          glob.glob(os.path.join(BACKUP_ID_DIR, "**", "*.dat"), recursive=True) +
-                          glob.glob(os.path.join(NO_HERO_DIR, "*.dat")) +
-                          glob.glob(os.path.join(FOUND_HERO_DIR, "**", "*.dat"), recursive=True))
-            _done_cache_names = {os.path.basename(p) for p in done_files}
-            _done_cache_time  = now
-
         for f in sorted(glob.glob(os.path.join(INPUT_DIR, "*.dat"))):
             name = os.path.basename(f)
-            if name in in_use_files:          # กำลัง process อยู่แล้ว
-                continue
-            if name in _done_cache_names:     # เคยทำไปแล้ว → ข้าม
+            if name in in_use_files:          # กำลัง process อยู่ในรอบนี้ → ข้าม (กันแย่งไฟล์)
                 continue
             in_use_files.add(name)
             try:
@@ -2088,6 +2161,20 @@ def release_file(name):
                     os.remove(run_path)
             except Exception:
                 pass
+
+def save_result(src, dest):
+    """ย้าย src → dest แบบ 'ทับของเดิมถ้าชื่อซ้ำ' + ตั้งเวลาแก้ไขเป็นปัจจุบัน
+    (ใช้แทน shutil.move ตรงๆ เพราะ Windows จะ error ถ้าปลายทางมีไฟล์ชื่อเดียวกันอยู่)."""
+    try:
+        if os.path.exists(dest):
+            os.remove(dest)
+    except Exception:
+        pass
+    shutil.move(src, dest)
+    try:
+        os.utime(dest, None)   # อัปเวลาเป็นปัจจุบัน
+    except Exception:
+        pass
 
 # ═════════════════════════════════════════════════════════════════════════════
 def push_dat_to_device(device, local_path):
@@ -3275,6 +3362,17 @@ def process_device_login(device):
         try:
             DEVICE_DISABLE_FIXEVENT[serial] = False
             check_device_reset(serial)
+
+            # ── ด่านเช็ค device online ก่อนเริ่ม cycle ──
+            # กัน 2 อาการ: (1) spin วน cycle รัวๆ ตอนเครื่องตาย
+            #              (2) เริ่มทำงาน/ย้ายไฟล์มั่วบนเครื่องที่ offline/ค้าง
+            # ยังไม่ได้ pick file (original_name=None) → continue ปลอดภัย ไม่มีไฟล์ค้าง
+            if not is_device_online(device):
+                gui_log(serial, "⚠️ Device OFFLINE — reconnecting & waiting...", step="Offline", status="stuck")
+                try_reconnect_device(serial)
+                time.sleep(10)
+                continue
+
             gui_log(serial, "--- Starting New Cycle ---", step="New Cycle", status="working")
 
             # 0. Force-stop
@@ -3307,7 +3405,7 @@ def process_device_login(device):
             gui_log(serial, "Launching PES...", step="Launch", status="working")
             
             for black_attempt in range(3):
-                device.shell("monkey -p jp.konami.pesam -c android.intent.category.LAUNCHER 1")
+                launch_game(device, settle=0)   # cooldown กัน cold-start ซ้อนถี่ (settle=0 เพราะมี black-check ตามหลังอยู่แล้ว)
                 black_start = time.time()
                 is_stuck = False
                 while time.time() - black_start < 45:
@@ -3340,7 +3438,7 @@ def process_device_login(device):
                 if is_stuck:
                     gui_log(serial, f"[BLACK] Dark screen detected! (attempt {black_attempt+1}/3) Restarting app...", step="Black Stuck")
                     device.shell("am force-stop jp.konami.pesam")
-                    time.sleep(2)
+                    time.sleep(5)   # settle หลัง force-stop เกมหนัก (เดิม 2 วิ) ก่อน relaunch
                 else:
                     break
             
@@ -3392,7 +3490,7 @@ def process_device_login(device):
                             time.sleep(0.5)
                             dest = os.path.join(LOGIN_SUCCESS_DIR, original_name)
                             if os.path.exists(file_path):
-                                shutil.move(file_path, dest)
+                                save_result(file_path, dest)
                             release_file(original_name)
                             break
                         x, y = pts[0]
@@ -3769,10 +3867,41 @@ def process_device_login(device):
                             p5_start = 8
                             for gq_i in range(p5_start, 12):
                                 gq_name = f"getquest{gq_i}.bmp"
+                                thresh = 0.8
+                                gq_deadline = time.time() + 15
+
+                                # ── getquest10 ใช้ getquestfix10.png แทนเลย ──
+                                if gq_i == 10:
+                                    gui_log(serial, "Looking for getquestfix10...", step="gq10 Fix")
+                                    fix10_path = os.path.join(GQ_DIR, "getquestfix10.png")
+                                    while True:
+                                        check_device_reset(serial, cycle_start)
+                                        img = get_screen_capture(device)
+                                        if img is not None:
+                                            pts_fix = img_search(img, fix10_path, threshold=0.8)
+                                            if pts_fix:
+                                                gui_log(serial, "getquestfix10 found! Tapping [86,413] until getquest11...", step="gq10 Fix Tap")
+                                                while True:
+                                                    check_device_reset(serial, cycle_start)
+                                                    device.shell("input swipe 86 413 86 413 100")
+                                                    time.sleep(1.0)
+                                                    img2 = get_screen_capture(device)
+                                                    if img2 is not None:
+                                                        pts11 = img_search(img2, os.path.join(GQ_DIR, "getquest11.bmp"), threshold=0.8)
+                                                        if pts11:
+                                                            gui_log(serial, "getquest11 found — continuing!", step="gq11 Found")
+                                                            break
+                                                break
+                                        time.sleep(0.8)
+                                    continue
+
                                 gui_log(serial, f"Waiting {gq_name}...", step=f"gq{gq_i}")
-                                thresh = 0.99 if gq_i == 10 else 0.8
+                                found_gq = False
                                 while True:
                                     check_device_reset(serial, cycle_start)
+                                    if time.time() > gq_deadline:
+                                        gui_log(serial, f"{gq_name} timeout 15s — skipping", step=f"gq{gq_i} Skip")
+                                        break
                                     img = get_screen_capture(device)
                                     if img is not None:
                                         pts = img_search(img, os.path.join(GQ_DIR, gq_name), threshold=thresh)
@@ -3781,7 +3910,6 @@ def process_device_login(device):
                                             device.shell(f"input swipe {x} {y} {x} {y} 100")
                                             gui_log(serial, f"Clicked {gq_name} ({x},{y})", step=f"gq{gq_i} Click")
                                             time.sleep(1.5)
-                                            # กดซ้ำจนรูปหาย (กันกดไม่ติด)
                                             retry_end = time.time() + 8
                                             while time.time() < retry_end:
                                                 img2 = get_screen_capture(device)
@@ -3945,7 +4073,7 @@ def process_device_login(device):
                                                 gui_log(serial, "Re-clicked questfive1", step="Q5_1 Retry")
                                                 time.sleep(1.0)
                                             break
-                                    time.sleep(0.8)
+                                    time.sleep(0.1)
                                     
                                 if not q5_1_found:
                                     gui_log(serial, "questfive1.bmp not found! Retrying from drag...", step="Q5_1 Fail")
@@ -4552,7 +4680,7 @@ def process_device_login(device):
                 try:
                     src_file = os.path.join(INPUT_DIR, original_name)
                     if os.path.exists(src_file):
-                        shutil.move(src_file, os.path.join(TIMEOUT_DIR, original_name))
+                        save_result(src_file, os.path.join(TIMEOUT_DIR, original_name))
                         gui_log(serial, f"Moved {original_name} to timeout/", step="Timeout Move")
                 except Exception as e:
                     gui_log(serial, f"Failed to move {original_name} to timeout: {e}", step="Timeout Error")
@@ -4573,9 +4701,17 @@ def process_device_login(device):
 
 
         except Exception as e:
+            # คืนไฟล์กลับ input-id เสมอ (ไม่ย้ายไปโฟลเดอร์ผลลัพธ์) → กันส่งไฟล์มั่ว
             release_file(original_name)
-            gui_log(serial, f"❌ Error: {e}", status="stuck")
-            time.sleep(5)
+            msg = str(e).lower()
+            if "offline" in msg or "timed out" in msg or "timeout" in msg or "closed" in msg or "connection" in msg:
+                # device หลุด/ค้างกลางคัน → reconnect แล้ว backoff นานขึ้น (อย่า spin)
+                gui_log(serial, f"⚠️ Device offline/timeout — reconnecting & backing off...", step="Offline", status="stuck")
+                try_reconnect_device(serial)
+                time.sleep(10)
+            else:
+                gui_log(serial, f"❌ Error: {e}", status="stuck")
+                time.sleep(5)
         finally:
             # Safe, non-disruptive memory optimization at the end of each account cycle
             try:
