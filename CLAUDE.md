@@ -91,9 +91,10 @@ OCR regions use `Region(x, y, width, height)`. Enable `DEBUG_OCR=1` in `config.p
 | `GACHA_CHECK` | 0 | After gacha, go straight to hero search |
 | `GACHA_FREE` | 0 | Enable free gacha sequence |
 | `GACHA_FREE_LOOPS` | 10 | Number of free gacha repetitions |
-| `FIND_HERO` | 1 | Enable hero scanning (fin1–fin8 flow) |
+| `FIND_HERO` | 0 | Enable hero scanning (fin1–fin8 flow) |
 | `NOSCAN` | 1 | Skip OCR; save to `fast-random/` instead of `backup-id/` |
 | `SKIPANIMATION` | 1 | Spam-click to skip gacha animations |
+| `LOGIN_FAST` | 1 | Clear app and end the cycle immediately on hitting the login checkpoint (fastest path) |
 | `CHECK_COIN` | 0 | Scan and log coin amounts via OCR |
 | `DEBUG_OCR` | 0 | Save OCR crop images to `debug-ocr/` |
 | `AUTORUN` | 0 | Start bot automatically on launch |
@@ -151,7 +152,7 @@ Quest images are stored in `img/getquest/` (path controlled by `GETQUEST_IMG_DIR
 - **`auto_update.py`** — GitHub release version checking and download
 - **`config_gen.py`** — generates live config-edit dialogs (no file writes)
 - **`playcode.py`** — standalone promo code sender (uses `SEND_CODE` from config)
-- **`patch_*.py`, `fix.py`** — one-off hotfixes; check git log for context
+- **`patch_*.py`, `fix.py`, `refactor_login.py`** — one-off code-rewriting scripts; check git log for context. Note `refactor_login.py` has a stale hardcoded path (`d:/bot/pes/login.py`) and is not runnable as-is.
 
 ## Notes
 

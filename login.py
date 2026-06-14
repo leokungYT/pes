@@ -76,6 +76,10 @@ try:
 except ImportError:
     GACHA_CHECK = 0
 try:
+    from config import GACHA_FIND
+except ImportError:
+    GACHA_FIND = 0
+try:
     from config import list_find_hero
 except ImportError:
     list_find_hero = HERO_LIST
@@ -524,6 +528,19 @@ if GUI_ENABLED:
             ctk.CTkSwitch(row4, text="", variable=var_find_hero,
                           onvalue=1, offvalue=0).pack(side="right")
 
+            # ── GACHA_FIND toggle (gacha ปกติ gacha3 → หา hero, ไม่ clear app) ──
+            row4b = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
+            row4b.pack(fill="x", padx=14, pady=4)
+            ctk.CTkLabel(row4b, text="Gacha + find mode (ไม่ clear app)",
+                         font=ctk.CTkFont(size=12)).pack(side="left")
+            var_gacha_find = ctk.IntVar(value=getattr(cfg, 'GACHA_FIND', 0))
+            def _sync_gacha_find():
+                # Gacha+Find ต้องอาศัย DO_GACHA (gacha1→2→3→4→5) → เปิดให้อัตโนมัติ
+                if var_gacha_find.get() == 1:
+                    var_gacha.set(1)
+            ctk.CTkSwitch(row4b, text="", variable=var_gacha_find,
+                          onvalue=1, offvalue=0, command=_sync_gacha_find).pack(side="right")
+
             # ── GACHA_FREE toggle ──────────────────────────
             row5 = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
             row5.pack(fill="x", padx=14, pady=4)
@@ -661,7 +678,7 @@ if GUI_ENABLED:
 
             # ── Save button (pinned at bottom, outside scrollable area) ───
             def _save():
-                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST
+                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST
                 new_event = var_event.get()
                 new_box   = var_box.get()
                 new_gacha = var_gacha.get()
@@ -671,6 +688,10 @@ if GUI_ENABLED:
                 new_noscan = var_noscan.get()
                 new_skipanim = var_skipanim.get()
                 new_gacha_check = var_gacha_check.get()
+                new_gacha_find = var_gacha_find.get()
+                # Gacha+Find ต้องทำ gacha ปกติ (gacha1→2→3→4→5) ก่อน → บังคับเปิด DO_GACHA
+                if new_gacha_find == 1:
+                    new_gacha = 1
                 new_timeout = var_timeout.get()
                 new_autorun = var_autorun.get()
                 try:
@@ -728,6 +749,11 @@ if GUI_ENABLED:
                                      content, flags=re.MULTILINE)
                 else:
                     content += f"\nGACHA_CHECK = {new_gacha_check}\n"
+                if re.search(r"^GACHA_FIND\s*=\s*\d", content, flags=re.MULTILINE):
+                    content = re.sub(r"^GACHA_FIND\s*=\s*\d", f"GACHA_FIND = {new_gacha_find}",
+                                     content, flags=re.MULTILINE)
+                else:
+                    content += f"\nGACHA_FIND = {new_gacha_find}\n"
 
                 if re.search(r"^TIMEOUT_ENABLE\s*=\s*\d", content, flags=re.MULTILINE):
                     content = re.sub(r"^TIMEOUT_ENABLE\s*=\s*\d", f"TIMEOUT_ENABLE = {new_timeout}",
@@ -800,6 +826,7 @@ if GUI_ENABLED:
                 CHECK_COIN = new_ccoin
                 NOSCAN     = new_noscan
                 GACHA_CHECK = new_gacha_check
+                GACHA_FIND = new_gacha_find
                 AUTORUN    = new_autorun
                 SILENT_UPDATE_MODE = new_update_mode
                 OVERWRITE_CONFIG_ON_UPDATE = new_overwrite_cfg
@@ -810,7 +837,7 @@ if GUI_ENABLED:
                 importlib.reload(cfg)
                 label_status.configure(text=f"✅ Saved!",
                                        text_color="#4caf50")
-                self.log(f"Config saved: EVENT={new_event}, BOX={new_box}, GACHA={new_gacha}, HERO={new_find}, GFREE={new_gfree}({new_gfree_loops} loops), COIN={new_ccoin}, NOSCAN={new_noscan}, GACHACHECK={new_gacha_check}, AUTORUN={new_autorun}, GETCODE={new_getcode}, GETCODE_TEXT={new_getcode_txt}, GETQUEST={new_getquest}")
+                self.log(f"Config saved: EVENT={new_event}, BOX={new_box}, GACHA={new_gacha}, HERO={new_find}, GFREE={new_gfree}({new_gfree_loops} loops), COIN={new_ccoin}, NOSCAN={new_noscan}, GACHACHECK={new_gacha_check}, GACHAFIND={new_gacha_find}, AUTORUN={new_autorun}, GETCODE={new_getcode}, GETCODE_TEXT={new_getcode_txt}, GETQUEST={new_getquest}")
 
             ctk.CTkButton(win, text="💾 Save", fg_color="#2cc985",
                           hover_color="#229f69", command=_save).pack(pady=8)
@@ -2229,10 +2256,13 @@ def push_dat_to_device(device, local_path):
         if os.path.exists(tmp_local):
             os.remove(tmp_local)
 
-def find_hero_mode(device, cycle_start, serial, original_name, file_path):
+def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_prefix=None):
     """
     Dedicated function to find heroes with robust checking (Triple Check).
     Checks multiple times to ensure a consistent match and avoid false positives.
+
+    coin_prefix: ถ้าส่งเลขเหรียญมา (จากโหมด Gacha+Find + CHECK_COIN) จะแนบ "[เลข]+"
+                 ไว้หน้าชื่อไฟล์ตอน export.
     """
     gui_log(serial, "Find Hero sequence started...", step="Find Hero", status="working")
     
@@ -2689,6 +2719,11 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
             final_name = clean_orig
             gui_log(serial, "Scan did not show verified empty state. Sending to file-error for safety.", step="Scan Safety")
 
+    # แนบเลขเหรียญที่สแกนไว้ (Gacha+Find + CHECK_COIN=1) ไว้หน้าชื่อไฟล์
+    if coin_prefix:
+        final_name = f"[{coin_prefix}]+{final_name}"
+        gui_log(serial, f"🪙 Attaching coins to filename: {final_name}", step="Coin Tag")
+
     dest = os.path.join(dest_dir, final_name)
     if os.path.exists(file_path):
         time.sleep(2)
@@ -2707,6 +2742,152 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path):
 
     release_file(original_name)
     return True
+
+def navigate_home_then_find_hero(device, cycle_start, serial, original_name, file_path):
+    """
+    Navigate to Home (backhome -> backhome1) แล้วต่อด้วย find_hero_mode ทันที (ไม่ clear app).
+    ใช้ร่วมกันระหว่าง GachaFree+Check (GACHA_CHECK) และ Gacha+Find (GACHA_FIND)
+    เพื่อให้ทั้งสองโหมดทำงานเหมือนกันเป๊ะ.
+    """
+    # 1. Wait for backhome.bmp with a 45-second timeout to prevent infinite hanging
+    clicked_home = False
+    deadline_home = time.time() + 45
+    while time.time() < deadline_home:
+        check_device_reset(serial, cycle_start)
+        img = get_screen_capture(device)
+        if img is not None:
+            pts_home = img_search(img, os.path.join(IMG_DIR, "backhome.bmp"))
+            if pts_home:
+                x, y = pts_home[0]
+                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                gui_log(serial, f"Clicked backhome.bmp at ({x}, {y})!", step="Back Home Click")
+                clicked_home = True
+                time.sleep(4)
+                break
+        time.sleep(1)
+
+    if clicked_home:
+        # 1b. Wait for backhome1.bmp with a 30-second timeout, click until gone
+        gui_log(serial, "Waiting for backhome1.bmp...", step="Back Home 1 Wait")
+        clicked_home1 = False
+        deadline_home1 = time.time() + 30
+        while time.time() < deadline_home1:
+            check_device_reset(serial, cycle_start)
+            img = get_screen_capture(device)
+            if img is not None:
+                pts_home1 = img_search(img, os.path.join(IMG_DIR, "backhome1.bmp"))
+                if pts_home1:
+                    x, y = pts_home1[0]
+                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                    gui_log(serial, f"Clicked backhome1.bmp at ({x}, {y})!", step="Back Home 1 Click")
+                    clicked_home1 = True
+                    time.sleep(2.0)
+                    continue
+                else:
+                    if clicked_home1:
+                        gui_log(serial, "backhome1.bmp is gone!", step="Back Home 1 Gone")
+                        break
+            time.sleep(1.0)
+
+    # 2. Run Find Hero sequence continuously!
+    return find_hero_mode(device, cycle_start, serial, original_name, file_path)
+
+
+def scan_coin_number(device, cycle_start, serial):
+    """
+    รอ checkpointcoin.bmp → OCR ที่ Region(52, 10, 106, 41) → คืนค่าเลขเหรียญ (string)
+    หรือ None ถ้าหา checkpointcoin ไม่เจอ. (สแกนอย่างเดียว ไม่ย้ายไฟล์/ไม่ปิดแอป)
+    """
+    import re
+    gui_log(serial, "Waiting checkpointcoin (Gacha+Find)...", step="Coin Wait", status="working")
+    deadline = time.time() + 60
+    found_cp = False
+    while time.time() < deadline:
+        check_device_reset(serial, cycle_start)
+        img = get_screen_capture(device)
+        if img is not None:
+            pts = img_search(img, os.path.join(IMG_DIR, "checkpointcoin.bmp"))
+            if pts:
+                found_cp = True
+                break
+        time.sleep(1)
+
+    if not found_cp:
+        gui_log(serial, "checkpointcoin.bmp not found — skip coin scan.", step="Coin Timeout")
+        return None
+
+    gui_log(serial, "checkpointcoin detected! Scanning coins...", step="Scanning Coin")
+    coin_number = None
+    for attempt in range(3):
+        check_device_reset(serial, cycle_start)
+        img = get_screen_capture(device)
+        if img is not None:
+            coin_region = Region(52, 10, 106, 41)
+            ocr_text = read_screen_text(img, region=coin_region, serial=serial)
+            digits = "".join(re.findall(r"\d+", ocr_text))
+            if digits:
+                coin_number = digits
+                break
+        time.sleep(1)
+
+    if not coin_number:
+        gui_log(serial, "Could not read coins via OCR! Using '0'", step="OCR Fail")
+        coin_number = "0"
+
+    gui_log(serial, f"🪙 Coins scanned & remembered: {coin_number}", step="Coin Match")
+    print(f"[{serial}] Gacha+Find Coin Scan: {coin_number}")
+    return coin_number
+
+
+def gacha_find_navigate_then_find_hero(device, cycle_start, serial, original_name, file_path):
+    """
+    เส้นทางหลังสุ่ม gacha ปกติ (Gacha+Find) ก่อนเริ่มค้นหา fin1:
+      1) รอ next.bmp → คลิก (ปิดหน้าผลสุ่ม)
+      2) กด Back รัวๆ จนกว่าจะเจอ cancel.bmp → คลิก
+      3) ถ้า CHECK_COIN=1 → แวะสแกนเลขเหรียญ (จำไว้)
+      4) เริ่ม find_hero_mode (fin1...) แล้วแนบเลขเหรียญตอน export
+    """
+    # 1. รอ next.bmp → คลิก
+    gui_log(serial, "Waiting next.bmp (Gacha+Find)...", step="Next Wait")
+    deadline_next = time.time() + 30
+    while time.time() < deadline_next:
+        check_device_reset(serial, cycle_start)
+        img = get_screen_capture(device)
+        if img is not None:
+            pts = img_search(img, os.path.join(IMG_DIR, "next.bmp"))
+            if pts:
+                x, y = pts[0]
+                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                gui_log(serial, f"next.bmp clicked at ({x},{y})", step="Next OK")
+                time.sleep(1.2)
+                break
+        time.sleep(0.3)
+
+    # 2. กด Back รัวๆ จนกว่าจะเจอ cancel.bmp → คลิก (timeout 60s กันค้าง)
+    gui_log(serial, "Spamming Back until cancel.bmp...", step="Back Spam")
+    deadline_cancel = time.time() + 60
+    while time.time() < deadline_cancel:
+        check_device_reset(serial, cycle_start)
+        device.shell("input keyevent 4")  # KEYCODE_BACK
+        time.sleep(0.4)
+        img = get_screen_capture(device)
+        if img is not None:
+            pts_c = img_search(img, os.path.join(IMG_DIR, "cancel.bmp"))
+            if pts_c:
+                x, y = pts_c[0]
+                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                gui_log(serial, f"cancel.bmp found at ({x},{y})! Clicked, stopping Back spam.", step="Cancel OK")
+                time.sleep(1.0)
+                break
+
+    # 3. ถ้าเปิด CHECK_COIN → แวะสแกนเลขเหรียญก่อน (จำไว้แนบชื่อไฟล์ตอนจบ)
+    coin_prefix = None
+    if CHECK_COIN == 1:
+        coin_prefix = scan_coin_number(device, cycle_start, serial)
+
+    # 4. เริ่มค้นหา fin1... (แนบเลขเหรียญตอน export ถ้ามี)
+    return find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_prefix=coin_prefix)
+
 
 def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
     """
@@ -3137,49 +3318,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
     # 3. จบตามลูปที่ตั้งค่า → Sort file
     if GACHA_CHECK == 1:
         gui_log(serial, "GachaFree finished. Gacha+Check mode active: waiting for backhome...", step="GachaFree Done")
-        
-        # 1. Wait for backhome.bmp with a 45-second timeout to prevent infinite hanging
-        clicked_home = False
-        deadline_home = time.time() + 45
-        while time.time() < deadline_home:
-            check_device_reset(serial, cycle_start)
-            img = get_screen_capture(device)
-            if img is not None:
-                pts_home = img_search(img, os.path.join(IMG_DIR, "backhome.bmp"))
-                if pts_home:
-                    x, y = pts_home[0]
-                    device.shell(f"input swipe {x} {y} {x} {y} 100")
-                    gui_log(serial, f"Clicked backhome.bmp at ({x}, {y})!", step="Back Home Click")
-                    clicked_home = True
-                    time.sleep(4)
-                    break
-            time.sleep(1)
-        
-        if clicked_home:
-            # 1b. Wait for backhome1.bmp with a 30-second timeout, click until gone
-            gui_log(serial, "Waiting for backhome1.bmp...", step="Back Home 1 Wait")
-            clicked_home1 = False
-            deadline_home1 = time.time() + 30
-            while time.time() < deadline_home1:
-                check_device_reset(serial, cycle_start)
-                img = get_screen_capture(device)
-                if img is not None:
-                    pts_home1 = img_search(img, os.path.join(IMG_DIR, "backhome1.bmp"))
-                    if pts_home1:
-                        x, y = pts_home1[0]
-                        device.shell(f"input swipe {x} {y} {x} {y} 100")
-                        gui_log(serial, f"Clicked backhome1.bmp at ({x}, {y})!", step="Back Home 1 Click")
-                        clicked_home1 = True
-                        time.sleep(2.0)
-                        continue
-                    else:
-                        if clicked_home1:
-                            gui_log(serial, "backhome1.bmp is gone!", step="Back Home 1 Gone")
-                            break
-                time.sleep(1.0)
-        
-        # 2. Run Find Hero sequence continuously!
-        return find_hero_mode(device, cycle_start, serial, original_name, file_path)
+        return navigate_home_then_find_hero(device, cycle_start, serial, original_name, file_path)
 
     device.shell("am force-stop jp.konami.pesam")
     time.sleep(1)
@@ -4459,18 +4598,20 @@ def process_device_login(device):
                     time.sleep(1)
 
             # 7.4 Check Coin Sequence (Optional)
+            #     ข้าม standalone check-coin ถ้าเปิด Gacha+Find (เพราะสแกนเหรียญรวมอยู่ในเส้นทาง Gacha+Find แล้ว)
             DEVICE_DISABLE_FIXEVENT[serial] = True
-            if CHECK_COIN == 1:
+            if CHECK_COIN == 1 and GACHA_FIND != 1:
                 if check_coin_mode(device, cycle_start, serial, original_name, file_path):
                     continue  # Start next file immediately
 
             # 7.5 Find Hero Sequence (Optional)
-            if FIND_HERO == 1 and GACHA_CHECK != 1:
+            if FIND_HERO == 1 and GACHA_CHECK != 1 and GACHA_FIND != 1:
                 if find_hero_mode(device, cycle_start, serial, original_name, file_path):
                     continue  # Start next file immediately
 
             # 7.6 Gacha Free Sequence (Optional)
-            if GACHA_FREE == 1 or GACHA_CHECK == 1:
+            #     ถ้าเปิด Gacha+Find (GACHA_FIND) → ข้าม free-gacha ไปทำ gacha ปกติ (gacha3) แทน
+            if (GACHA_FREE == 1 or GACHA_CHECK == 1) and GACHA_FIND != 1:
                 if gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                     continue  # Start next file immediately
 
@@ -4583,7 +4724,10 @@ def process_device_login(device):
                                 break
                         time.sleep(1)
                 # checkpointgacha -> OCR (ข้ามถ้าไม่เจอ gacha4)
-                if found_g4:
+                # NOSCAN=1 → ข้ามขั้นตอน checkpointgacha/OCR ทั้งหมด (ทำงานเหมือน gachafree)
+                if found_g4 and NOSCAN == 1:
+                    gui_log(serial, "NOSCAN=1 → Skipping checkpointgacha/OCR (Gacha)", step="NoScan Skip")
+                elif found_g4:
                     gui_log(serial, "Waiting checkpointgacha or fixcheckpointgacha (OCR)...", step="OCR Wait")
                     deadline_ocr = time.time() + 60
                     while time.time() < deadline_ocr:
@@ -4626,6 +4770,13 @@ def process_device_login(device):
                                 break
                         time.sleep(1)
 
+            # 8.5 Gacha + Find Hero (Optional) — หลังสุ่มกาชาเสร็จ "ไม่ clear app"
+            #      next → กด Back รัวๆจนเจอ cancel → คลิก → แล้วค่อยค้นหา fin1
+            if DO_GACHA == 1 and GACHA_FIND == 1:
+                gui_log(serial, "Gacha finished. Gacha+Find mode active: next → Back→cancel → Find Hero...", step="Gacha+Find")
+                if gacha_find_navigate_then_find_hero(device, cycle_start, serial, original_name, file_path):
+                    continue  # find_hero_mode จัดการปิดแอป + ย้ายไฟล์ + จบรอบให้แล้ว
+
             # 9. Done & File Sorting
             device.shell("am force-stop jp.konami.pesam")
             time.sleep(1)
@@ -4635,7 +4786,12 @@ def process_device_login(device):
             elif "-" in clean_orig: clean_orig = clean_orig.split("-")[-1]
 
             if DO_GACHA == 1:
-                if gacha_hero_found:
+                if NOSCAN == 1:
+                    # NOSCAN → ไม่สแกน OCR → เก็บลง fast-random/ (เหมือน gachafree)
+                    dest_dir = FAST_RANDOM_DIR
+                    final_name = clean_orig
+                    gui_log(serial, f"NOSCAN → {dest_dir}/{final_name}", step="Fast Random")
+                elif gacha_hero_found:
                     dest_dir = os.path.join(BACKUP_ID_DIR, "hero1")
                     os.makedirs(dest_dir, exist_ok=True)
                     final_name = f"{gacha_hero_found}-{clean_orig}"

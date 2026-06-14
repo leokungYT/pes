@@ -11,17 +11,23 @@ EVENT_IMG = 0
 # ── Box Sequence (main-pes.py) ────────────────────
 # 1 = เปิดกล่อง (ทำ play26-play31 และ box1-box4)
 # 0 = ข้ามการเปิดกล่อง (จบที่ play25 แล้วส่งไฟล์เลย)
-DO_BOX = 0
+DO_BOX = 1
 
 # ── Gacha Sequence (login.py) ──────────────────────
 # 1 = สุ่มกาชา (ต่อจากจบ box4)
 # 0 = ไม่สุ่มกาชา (จบงานปกติ)
-DO_GACHA = 0
+DO_GACHA = 1
 
 # ── Gacha + Check Mode ──────────────────────────────
 # 1 = สุ่มกาชาเสร็จแล้วกด backhome ต่อด้วยค้นหาฮีโร่ทันที
 # 0 = ข้าม
 GACHA_CHECK = 0
+
+# ── Gacha + Find Mode (DO_GACHA) ────────────────────
+# 1 = สุ่มกาชาแบบเสียเงิน (DO_GACHA) เสร็จแล้ว "ไม่ต้อง clear app"
+#     กด backhome ต่อด้วยค้นหาฮีโร่ทันที (ทำงานเหมือน gachafree+check)
+# 0 = ข้าม (สุ่มกาชาเสร็จแล้วปิดแอปจบรอบตามปกติ)
+GACHA_FIND = 1
 
 # รายชื่อนักเตะที่ต้องการเก็บ (Backup-id)
 HERO_LIST = [
@@ -136,7 +142,7 @@ SKIPANIMATION = 1
 # ── Login Fast Mode ───────────────────────────────
 # 1 = เจอ checkpointlogin ปุ๊บ clear app จบรอบทันที (เร็วสุด)
 # 0 = ทำงานปกติ (กด checkpointlogin แล้วไปต่อ)
-LOGIN_FAST = 1
+LOGIN_FAST = 0
 
 # ── Timeout ───────────────────────────────────────
 # 1 = Enable, 0 = Disable
