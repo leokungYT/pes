@@ -1409,6 +1409,24 @@ def try_reconnect_device(serial):
 _MIN_SCREENCAP_INTERVAL = 0.25          # วินาที (≈ 4 ครั้ง/วิ/เครื่อง)
 _LAST_SCREENCAP_TS = {}
 
+# Launch cooldown: ห้าม cold-start เกมถี่เกินไป/เครื่อง — cold-start คือคำสั่งที่หนัก
+# ที่สุดสำหรับ MuMu (โหลด asset + init 3D ใหม่) ถ้า relaunch ซ้อนถี่ๆ → ANR
+_MIN_LAUNCH_INTERVAL = 20.0             # วินาที — เว้นระยะ cold-start ขั้นต่ำ/เครื่อง
+_LAST_LAUNCH_TS = {}
+
+def launch_game(device, settle=14.0):
+    """Cold-start เกมแบบมี cooldown ต่อเครื่อง — กัน relaunch ซ้อนถี่จน MuMu ค้าง (ANR)."""
+    serial = device.serial
+    elapsed = time.time() - _LAST_LAUNCH_TS.get(serial, 0.0)
+    if elapsed < _MIN_LAUNCH_INTERVAL:
+        wait = _MIN_LAUNCH_INTERVAL - elapsed
+        gui_log(serial, f"Launch cooldown — waiting {wait:.0f}s before relaunch...", step="Launch CD")
+        time.sleep(wait)
+    device.shell("monkey -p jp.konami.pesam -c android.intent.category.LAUNCHER 1")
+    _LAST_LAUNCH_TS[serial] = time.time()
+    if settle > 0:
+        time.sleep(settle)
+
 def fast_screencap(device):
     # ── per-device throttle ──
     serial = device.serial
@@ -1489,8 +1507,7 @@ def get_screen_capture(device):
         # เช็คเกมออนอยู่หรือไม่ (ทุก 30 วิ)
         if not is_game_running(device):
             gui_log(device.serial, "⚠️ Game not running! Relaunching...", step="Relaunch")
-            device.shell("monkey -p jp.konami.pesam -c android.intent.category.LAUNCHER 1")
-            time.sleep(14)
+            launch_game(device, settle=14)
             DEVICE_LAST_GAME_CHECK[device.serial] = time.time()
 
         img = fast_screencap(device)
@@ -2115,26 +2132,15 @@ _DONE_CACHE_TTL         = 3.0  # วินาที — รีเฟรช glob 
 
 def pick_next_file():
     """
-    Thread-safe: pick ONE .dat from input-id that is NOT already in use
-    AND does NOT already exist in login-success (เคย login แล้ว).
+    Thread-safe: pick ONE .dat from input-id that is NOT already in use.
+    หมายเหตุ: ไม่ข้ามไฟล์ที่ชื่อซ้ำกับโฟลเดอร์ done อีกแล้ว → ประมวลผลซ้ำได้
+    (ผลลัพธ์จะทับไฟล์เดิมที่ชื่อเดียวกัน + อัปเวลาเป็นปัจจุบัน)
     Returns (full_path, basename) or (None, None).
     """
-    global _done_cache_names, _done_cache_time
     with file_pick_lock:
-        now = time.time()
-        if now - _done_cache_time >= _DONE_CACHE_TTL:
-            done_files = (glob.glob(os.path.join(LOGIN_SUCCESS_DIR, "*.dat")) +
-                          glob.glob(os.path.join(BACKUP_ID_DIR, "**", "*.dat"), recursive=True) +
-                          glob.glob(os.path.join(NO_HERO_DIR, "*.dat")) +
-                          glob.glob(os.path.join(FOUND_HERO_DIR, "**", "*.dat"), recursive=True))
-            _done_cache_names = {os.path.basename(p) for p in done_files}
-            _done_cache_time  = now
-
         for f in sorted(glob.glob(os.path.join(INPUT_DIR, "*.dat"))):
             name = os.path.basename(f)
-            if name in in_use_files:          # กำลัง process อยู่แล้ว
-                continue
-            if name in _done_cache_names:     # เคยทำไปแล้ว → ข้าม
+            if name in in_use_files:          # กำลัง process อยู่ในรอบนี้ → ข้าม (กันแย่งไฟล์)
                 continue
             in_use_files.add(name)
             try:
@@ -2155,6 +2161,20 @@ def release_file(name):
                     os.remove(run_path)
             except Exception:
                 pass
+
+def save_result(src, dest):
+    """ย้าย src → dest แบบ 'ทับของเดิมถ้าชื่อซ้ำ' + ตั้งเวลาแก้ไขเป็นปัจจุบัน
+    (ใช้แทน shutil.move ตรงๆ เพราะ Windows จะ error ถ้าปลายทางมีไฟล์ชื่อเดียวกันอยู่)."""
+    try:
+        if os.path.exists(dest):
+            os.remove(dest)
+    except Exception:
+        pass
+    shutil.move(src, dest)
+    try:
+        os.utime(dest, None)   # อัปเวลาเป็นปัจจุบัน
+    except Exception:
+        pass
 
 # ═════════════════════════════════════════════════════════════════════════════
 def push_dat_to_device(device, local_path):
@@ -3385,7 +3405,7 @@ def process_device_login(device):
             gui_log(serial, "Launching PES...", step="Launch", status="working")
             
             for black_attempt in range(3):
-                device.shell("monkey -p jp.konami.pesam -c android.intent.category.LAUNCHER 1")
+                launch_game(device, settle=0)   # cooldown กัน cold-start ซ้อนถี่ (settle=0 เพราะมี black-check ตามหลังอยู่แล้ว)
                 black_start = time.time()
                 is_stuck = False
                 while time.time() - black_start < 45:
@@ -3418,7 +3438,7 @@ def process_device_login(device):
                 if is_stuck:
                     gui_log(serial, f"[BLACK] Dark screen detected! (attempt {black_attempt+1}/3) Restarting app...", step="Black Stuck")
                     device.shell("am force-stop jp.konami.pesam")
-                    time.sleep(2)
+                    time.sleep(5)   # settle หลัง force-stop เกมหนัก (เดิม 2 วิ) ก่อน relaunch
                 else:
                     break
             
@@ -3470,7 +3490,7 @@ def process_device_login(device):
                             time.sleep(0.5)
                             dest = os.path.join(LOGIN_SUCCESS_DIR, original_name)
                             if os.path.exists(file_path):
-                                shutil.move(file_path, dest)
+                                save_result(file_path, dest)
                             release_file(original_name)
                             break
                         x, y = pts[0]
@@ -4660,7 +4680,7 @@ def process_device_login(device):
                 try:
                     src_file = os.path.join(INPUT_DIR, original_name)
                     if os.path.exists(src_file):
-                        shutil.move(src_file, os.path.join(TIMEOUT_DIR, original_name))
+                        save_result(src_file, os.path.join(TIMEOUT_DIR, original_name))
                         gui_log(serial, f"Moved {original_name} to timeout/", step="Timeout Move")
                 except Exception as e:
                     gui_log(serial, f"Failed to move {original_name} to timeout: {e}", step="Timeout Error")
