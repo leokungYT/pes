@@ -125,6 +125,9 @@ DEVICE_RESET_FLAGS   = {}
 DEVICE_FILE_ASSIGNMENTS = {}
 DEVICE_DISABLE_FIXEVENT = {}
 DEVICE_LAST_GAME_CHECK  = {}  # throttle: เช็คเกมออนทุก 30 วิ
+DEVICE_REENTER_FILE  = {}     # serial -> (file_path, original_name) ไฟล์ที่ต้อง "เข้าใหม่" (fixclear)
+DEVICE_REENTER_COUNT = {}     # serial -> (original_name, count) นับจำนวนครั้งที่ re-enter
+FIXCLEAR_MAX_REENTER = 5      # เข้าใหม่ได้สูงสุดกี่ครั้งต่อไฟล์ ก่อน fall back ย้ายไฟล์ออก
 
 # ── Performance ───────────────────────────────────────────────────────────────
 SCREENCAP_SCALE = 1.0  # 1.0 = full resolution (ป้องกัน template quality loss)
@@ -179,6 +182,7 @@ os.makedirs(LOGIN_FAILED_DIR, exist_ok=True)
 
 # ── Exceptions ────────────────────────────────────────────────────────────────
 class DeviceResetException(Exception):  pass
+class FixClearReenterException(Exception): pass
 class CycleTimeoutException(Exception): pass
 class SellScreenException(Exception):  pass
 class RestartFromQuest8Exception(Exception): pass
@@ -1653,22 +1657,77 @@ def get_screen_capture(device):
             fc_bmp = img_search(img, os.path.join(GETQUEST_IMG_DIR, "fixclear1.bmp"), threshold=0.8)
             fc_png = img_search(img, os.path.join(IMG_DIR, "fixclear1.png"), threshold=0.8)
             if fc_bmp or fc_png:
-                # เจอ fixclear1 → clear app จบเลย, ส่งไฟล์ไป file-error (ชื่อเดิม) แล้วเริ่ม id ใหม่
-                gui_log(device.serial, "fixclear detected! Clearing app and moving file to file-error...", step="Fix Clear")
+                import re as _re_fc
+                serial_fc = device.serial
+                original_name = DEVICE_FILE_ASSIGNMENTS.get(serial_fc)
+
+                # ── โหมดเข้าใหม่: เจอ fixclear → ปิดแอปแล้วเข้าใหม่ (ไม่ย้ายไฟล์ออก) ──
+                #    ลองซ้ำได้สูงสุด FIXCLEAR_MAX_REENTER ครั้งต่อไฟล์ ก่อนยอมแพ้
+                name_cnt, cnt = DEVICE_REENTER_COUNT.get(serial_fc, (None, 0))
+                if name_cnt != original_name:
+                    cnt = 0
+                cnt += 1
+                if original_name and cnt <= FIXCLEAR_MAX_REENTER:
+                    gui_log(serial_fc, f"fixclear detected! Re-entering (attempt {cnt}/{FIXCLEAR_MAX_REENTER}) — closing & relaunching, file kept.", step="Fix Clear Re-enter")
+                    device.shell("am force-stop jp.konami.pesam")
+                    time.sleep(1)
+                    DEVICE_REENTER_COUNT[serial_fc] = (original_name, cnt)
+                    DEVICE_REENTER_FILE[serial_fc] = (os.path.join(INPUT_DIR, original_name), original_name)
+                    raise FixClearReenterException("fixclear re-enter")
+
+                # ── เกินจำนวน re-enter แล้วยังเจอ fixclear → ยอมแพ้ ย้ายไฟล์ออก (logic เดิม) ──
+                gui_log(serial_fc, f"fixclear still after {FIXCLEAR_MAX_REENTER} re-enters — giving up, moving file out.", step="Fix Clear Giveup")
+                DEVICE_REENTER_COUNT.pop(serial_fc, None)
+                DEVICE_REENTER_FILE.pop(serial_fc, None)
+                # ลบ coin tag ออกก่อน แล้วค่อยเช็คว่ามี hero จริงไหม
+                #   กัน [140]+ASCV... (เลขเหรียญ) มาหลอกว่ามี "+" = มี hero
+                #   - [เลข]+ (prefix แบบเก่า) และ -[เลข] (suffix) = coin ไม่ใช่ hero
+                name_no_coin = original_name or ""
+                name_no_coin = _re_fc.sub(r"^\[\d+\]\+", "", name_no_coin)
+                name_no_coin = _re_fc.sub(r"-\[\d+\]", "", name_no_coin)
+                if name_no_coin and "+" in name_no_coin:
+                    dest_base = FOUND_HERO_DIR
+                    dest_label = "found-hero"
+                else:
+                    dest_base = NO_HERO_DIR
+                    dest_label = "no-hero"
+
+                # ถ้าเปิด CHECK_COIN → ลองสแกนเลขเหรียญก่อน clear (timeout 15s,
+                #   ใช้ fast_screencap กัน recursion; ถ้าจอนั้นไม่มี checkpointcoin ก็ข้าม)
+                coin_number = None
+                if CHECK_COIN == 1:
+                    deadline_coin = time.time() + 15
+                    while time.time() < deadline_coin:
+                        img_coin = fast_screencap(device)
+                        if img_coin is not None and img_search(img_coin, os.path.join(IMG_DIR, "checkpointcoin.bmp")):
+                            ocr_text = read_screen_text(img_coin, region=Region(52, 10, 106, 41), serial=device.serial)
+                            digits = "".join(_re_fc.findall(r"\d+", ocr_text))
+                            if digits:
+                                coin_number = digits
+                                gui_log(device.serial, f"🪙 fixclear coin scanned: {coin_number}", step="Fix Clear Coin")
+                            break
+                        time.sleep(0.5)
+
+                gui_log(device.serial, f"fixclear detected! Clearing app and moving file to {dest_label}...", step="Fix Clear")
                 device.shell("am force-stop jp.konami.pesam")
                 device.shell("su -c 'rm -f /data/data/jp.konami.pesam/files/SaveData/AUTH/online_user_id_data.dat'")
                 device.shell("su -c 'rm -rf /data/data/jp.konami.pesam/files/SaveData/AUTH/*'")
 
-                original_name = DEVICE_FILE_ASSIGNMENTS.get(device.serial)
                 if original_name:
                     file_path = os.path.join(INPUT_DIR, original_name)
-                    dest_path = os.path.join(FILE_ERROR_DIR, original_name)
+                    os.makedirs(dest_base, exist_ok=True)
+                    # ใช้ชื่อที่ลบ coin tag เดิมออกแล้วเป็นฐาน แล้วแนบเลขเหรียญใหม่ต่อท้ายก่อนนามสกุล
+                    move_name = name_no_coin if name_no_coin else original_name
+                    if coin_number:
+                        b, e = os.path.splitext(move_name)
+                        move_name = f"{b}-[{coin_number}]{e}"
+                    dest_path = os.path.join(dest_base, move_name)
                     if os.path.exists(file_path):
                         if os.path.exists(dest_path):
                             os.remove(dest_path)
                         shutil.copy2(file_path, dest_path)
                         os.remove(file_path)
-                        gui_log(device.serial, f"Moved {original_name} to file-error", step="Fix Clear")
+                        gui_log(device.serial, f"Moved {original_name} to {dest_label} ({move_name})", step="Fix Clear")
 
                 raise DeviceResetException("fixclear detected")
 
@@ -1771,9 +1830,9 @@ def get_screen_capture(device):
             if not DEVICE_DISABLE_FIXEVENT.get(device.serial, False):
                 fe_pts = img_search(img, _P['fixevent'])
                 if fe_pts:
-                    gui_log(device.serial, "Floating: fixevent.bmp found! Checking if it persists for 5s...", step="Fix Event")
+                    gui_log(device.serial, "Floating: fixevent.bmp found! Checking if it persists for 15s...", step="Fix Event")
                     persisted = True
-                    for _ in range(5):
+                    for _ in range(15):
                         time.sleep(1)
                         img_check = fast_screencap(device)
                         if img_check is None:
@@ -1785,7 +1844,7 @@ def get_screen_capture(device):
                             break
 
                     if persisted:
-                        gui_log(device.serial, "fixevent.bmp persisted for 5s! Clicking...", step="Fix Event")
+                        gui_log(device.serial, "fixevent.bmp persisted for 15s! Clicking...", step="Fix Event")
                         img_click = fast_screencap(device)
                         if img_click is not None:
                             pts_click = img_search(img_click, _P['fixevent'])
@@ -2672,7 +2731,13 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
     device.shell("am force-stop jp.konami.pesam")
     time.sleep(1)
 
+    import re
     clean_orig = original_name
+    # ลบ coin tag เดิมที่อาจติดมาจากรอบก่อน (กันชื่อซ้อน + กันโดน split("-") ตัดผิด)
+    #   เช่น  ASCV610701450-[110].dat  ->  ASCV610701450.dat
+    #         [110]+ASCV...            ->  ASCV...   (รูปแบบเก่า)
+    clean_orig = re.sub(r"^\[\d+\]\+", "", clean_orig)   # prefix แบบเก่า [เลข]+
+    clean_orig = re.sub(r"-\[\d+\]", "", clean_orig)      # suffix -[เลข]
     if "+" in clean_orig: clean_orig = clean_orig.split("+")[-1]
     elif "-" in clean_orig: clean_orig = clean_orig.split("-")[-1]
 
@@ -2692,36 +2757,16 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
         final_name = f"{hero_prefix}+{clean_orig}"
         gui_log(serial, f"⭐ MATCH: {hero_prefix}", step=f"⭐ {hero_prefix}")
     else:
-        l1_lower = last_lock1_text.lower()
-        l2_lower = last_lock2_text.lower()
-        l3_lower = last_lock3_text.lower()
-        
-        is_empty_state = (
-            "n 'chang trv" in l1_lower or 
-            "found ter conditions" in l2_lower or
-            "no matching" in l1_lower or
-            "no matching" in l2_lower or
-            "no matching" in l3_lower or
-            "filter conditions" in l1_lower or
-            "filter conditions" in l2_lower or
-            "filter conditions" in l3_lower or
-            "conditions" in l1_lower or
-            "conditions" in l2_lower or
-            "conditions" in l3_lower
-        )
-        
-        if is_empty_state:
-            dest_dir = NO_HERO_DIR
-            final_name = clean_orig
-            gui_log(serial, "No hero match found (Verified empty state).", step="No Match")
-        else:
-            dest_dir = FILE_ERROR_DIR
-            final_name = clean_orig
-            gui_log(serial, "Scan did not show verified empty state. Sending to file-error for safety.", step="Scan Safety")
+        # ไม่เจอฮีโร่ → ส่งไป no-hero เสมอ (ตามที่ต้องการ ไม่ใช้ file-error แล้ว)
+        dest_dir = NO_HERO_DIR
+        final_name = clean_orig
+        gui_log(serial, "No hero match found → no-hero.", step="No Match")
 
-    # แนบเลขเหรียญที่สแกนไว้ (Gacha+Find + CHECK_COIN=1) ไว้หน้าชื่อไฟล์
+    # แนบเลขเหรียญที่สแกนไว้ (Gacha+Find + CHECK_COIN=1) ต่อท้ายชื่อไฟล์ก่อนนามสกุล
+    #   เช่น  Paolo Maldini+ASCV610367086.dat  ->  Paolo Maldini+ASCV610367086-[300].dat
     if coin_prefix:
-        final_name = f"[{coin_prefix}]+{final_name}"
+        base, ext = os.path.splitext(final_name)
+        final_name = f"{base}-[{coin_prefix}]{ext}"
         gui_log(serial, f"🪙 Attaching coins to filename: {final_name}", step="Coin Tag")
 
     dest = os.path.join(dest_dir, final_name)
@@ -2837,6 +2882,34 @@ def scan_coin_number(device, cycle_start, serial):
     gui_log(serial, f"🪙 Coins scanned & remembered: {coin_number}", step="Coin Match")
     print(f"[{serial}] Gacha+Find Coin Scan: {coin_number}")
     return coin_number
+
+
+def handle_notcoin(device, cycle_start, serial, img=None):
+    """
+    ถ้าเจอ not-coin.bmp (เงินไม่พอตอนสุ่ม gacha) → กด Back รัวๆ จนกว่าจะเจอ cancel.bmp
+    → คลิก → หยุด → คืน True (จัดการแล้ว). ไม่เจอ not-coin → คืน False.
+    """
+    if img is None:
+        img = get_screen_capture(device)
+    if img is None or not img_search(img, os.path.join(IMG_DIR, "not-coin.bmp")):
+        return False
+
+    gui_log(serial, "not-coin.bmp detected! Spamming Back until cancel.bmp...", step="Not-Coin")
+    deadline_cancel = time.time() + 60  # timeout กันค้าง
+    while time.time() < deadline_cancel:
+        check_device_reset(serial, cycle_start)
+        device.shell("input keyevent 4")  # KEYCODE_BACK
+        time.sleep(0.4)
+        img_c = get_screen_capture(device)
+        if img_c is not None:
+            pts_c = img_search(img_c, os.path.join(IMG_DIR, "cancel.bmp"))
+            if pts_c:
+                x, y = pts_c[0]
+                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                gui_log(serial, f"cancel.bmp found at ({x},{y})! Clicked, stopping Back spam.", step="Not-Coin OK")
+                time.sleep(1.0)
+                break
+    return True
 
 
 def gacha_find_navigate_then_find_hero(device, cycle_start, serial, original_name, file_path):
@@ -3519,12 +3592,24 @@ def process_device_login(device):
             device.shell("am force-stop jp.konami.pesam")
             time.sleep(1)
 
+            # 0.5 ลบ save data เดิมออกก่อนเริ่มวนไฟล์ใหม่ (กันข้อมูล id เก่าค้าง)
+            device.shell("su -c 'rm -f /data/data/jp.konami.pesam/files/SaveData/AUTH/online_user_id_data.dat'")
+            time.sleep(0.3)
+
             # 1. Pick file
-            file_path, original_name = pick_next_file()
-            if file_path is None:
-                gui_log(serial, "No files left — waiting...", step="No Files", status="idle")
-                time.sleep(3)
-                continue
+            #    ถ้ามีไฟล์ค้างให้ "เข้าใหม่" จาก fixclear → ใช้ไฟล์เดิม (ไม่หยิบไฟล์ใหม่/ไม่ปล่อย lock)
+            pending = DEVICE_REENTER_FILE.pop(serial, None)
+            if pending:
+                file_path, original_name = pending
+                gui_log(serial, f"Re-entering same file: {original_name}", step="Re-enter", status="working")
+            else:
+                # ไฟล์ใหม่ปกติ → รีเซ็ตตัวนับ re-enter
+                DEVICE_REENTER_COUNT.pop(serial, None)
+                file_path, original_name = pick_next_file()
+                if file_path is None:
+                    gui_log(serial, "No files left — waiting...", step="No Files", status="idle")
+                    time.sleep(3)
+                    continue
 
             gui_log(serial, f"File: {original_name}", step="File OK", status="working")
             DEVICE_FILE_ASSIGNMENTS[serial] = original_name
@@ -4565,10 +4650,10 @@ def process_device_login(device):
                                 break
                         time.sleep(1.2)
                 
-                # box3 (กดเรื่อยๆ จนไม่เจอครบ 10s ค่อยไป box4)
+                # box3 — กดไปเรื่อยๆ จนกว่า box3 จะหายไปเลย แล้วค่อยไป box4
                 gui_log(serial, "Waiting box3.bmp...", step="box3")
-                last_seen = time.time()
-                while time.time() - last_seen < 10:
+                deadline_box3 = time.time() + 90  # safety กันค้าง
+                while time.time() < deadline_box3:
                     check_device_reset(serial, cycle_start)
                     img = get_screen_capture(device)
                     if img is not None:
@@ -4577,11 +4662,22 @@ def process_device_login(device):
                             x, y = pts[0]
                             device.shell(f"input swipe {x} {y} {x} {y} 100")
                             gui_log(serial, "box3.bmp clicked!", step="box3")
-                            time.sleep(4)
-                            last_seen = time.time()  # รีเซ็ตนับใหม่
+                            time.sleep(2)
                             continue
-                    time.sleep(1)
-                gui_log(serial, "box3 not seen for 10s, moving to box4", step="box3-done")
+                        else:
+                            # ไม่เจอ box3 → ยืนยันสั้นๆ (~3s) ว่าหายจริง กัน flicker ระหว่าง animation
+                            confirmed_gone = True
+                            confirm_deadline = time.time() + 3
+                            while time.time() < confirm_deadline:
+                                img2 = get_screen_capture(device)
+                                if img2 is not None and img_search(img2, os.path.join(IMG_DIR, "box3.bmp")):
+                                    confirmed_gone = False
+                                    break
+                                time.sleep(0.4)
+                            if confirmed_gone:
+                                gui_log(serial, "box3.bmp gone! Moving to box4.", step="box3-done")
+                                break
+                    time.sleep(0.5)
 
                 # box4
                 gui_log(serial, "Waiting box4.bmp...", step="box4")
@@ -4672,6 +4768,11 @@ def process_device_login(device):
                         if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
                             found_g4 = "nocoin"
                             break
+
+                        # เช็ค not-coin → กด Back รัวๆจนเจอ cancel → คลิก → ข้ามไปสเต็ปต่อไป
+                        if handle_notcoin(device, cycle_start, serial, img):
+                            found_g4 = "notcoin"
+                            break
                     time.sleep(1)
 
                 if not found_g4:
@@ -4700,7 +4801,11 @@ def process_device_login(device):
                                 gacha_hero_found = h.strip()
                                 break
                     # จบรอบนี้ทันที
-                    found_g4 = False 
+                    found_g4 = False
+                elif found_g4 == "notcoin":
+                    # not-coin จัดการแล้ว (Back→cancel) → ข้าม gacha5/OCR ไปสเต็ปต่อไปเลย
+                    gui_log(serial, "not-coin handled — skipping rest of gacha.", step="Not-Coin Skip")
+                    found_g4 = False
                 else:
                     # ถ้าผ่าน nocions มาได้ (ไม่เจอ) หรือเจอ gacha4 ไปแล้ว -> ไป gacha5 ต่อ
                     gui_log(serial, "Proceeding to Gacha5...", step="G5-Flow")
@@ -4720,6 +4825,11 @@ def process_device_login(device):
                                 # กรณีเจอตอนรอ gacha5
                                 gui_log(serial, "nocions.bmp detected during Gacha5!", step="No-Coins")
                                 # (ทำ OCR เหมือนด้านบนถ้าต้องการ แต่เพื่อความสั้นจะขอ break เลย)
+                                found_g4 = False
+                                break
+
+                            # เช็ค not-coin ตอนรอ gacha5 → Back รัวๆจนเจอ cancel → ข้ามไปสเต็ปต่อไป
+                            if handle_notcoin(device, cycle_start, serial, img):
                                 found_g4 = False
                                 break
                         time.sleep(1)
@@ -4841,6 +4951,12 @@ def process_device_login(device):
                 except Exception as e:
                     gui_log(serial, f"Failed to move {original_name} to timeout: {e}", step="Timeout Error")
             continue
+
+        except FixClearReenterException:
+            # fixclear → เข้าใหม่ไฟล์เดิม: อย่า release_file (เก็บ lock + ไฟล์ไว้ทำต่อ)
+            gui_log(serial, "🔁 fixclear re-enter — relaunching same file...", step="Re-enter", status="working")
+            device.shell("am force-stop jp.konami.pesam")
+            time.sleep(1)
 
         except DeviceResetException:
             release_file(original_name)

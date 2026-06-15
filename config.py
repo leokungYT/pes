@@ -76,6 +76,7 @@ list_find_hero = [
     "Luka",
     "rgson",
     "Arribas",
+    "Aubameyang",
     "Ramedhan Saifullah",
     "Chrigor",
     "Lamine=x2",
@@ -124,7 +125,7 @@ DEBUG_OCR = 0
 # ── Check Coin Sequence ───────────────────────────
 # 1 = ทำงานสแกนเหรียญ (หา checkpointcoin.bmp → OCR สแกนหาเลขเหรียญที่ Region(52, 10, 106, 41) → บันทึกลง check-coin)
 # 0 = ข้าม
-CHECK_COIN = 0
+CHECK_COIN = 1
 
 # ── No Scan Mode ──────────────────────────────────
 # 1 = ข้ามขั้นตอน checkpointgacha (ไม่สแกน OCR)
