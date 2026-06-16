@@ -1632,9 +1632,8 @@ def get_screen_capture(device):
                             pts_c = img_search(img_back, os.path.join(IMG_DIR, "cancel.bmp"))
                             if pts_c:
                                 xc, yc = pts_c[0]
-                                device.shell(f"input swipe {xc} {yc} {xc} {yc} 100")
                                 gui_log(device.serial, f"cancel found — clicking ({xc},{yc})", step="Back Rescue")
-                                time.sleep(1.5)
+                                click_cancel_until_gone(device, device.serial, xc, yc, step="Back Rescue")
                                 break
                     # After cancel clicked, wait/click fixbackquest1
                     gui_log(device.serial, "Waiting/Clicking fixbackquest1.bmp...", step="Back Rescue")
@@ -1996,6 +1995,38 @@ def img_search(gray_img, find_path, threshold=0.8):
             points = _match_single(gray_img, alt_path, threshold)
     return points
 
+
+def click_cancel_until_gone(device, serial, x, y, gone_secs=3.0, step="Cancel", timeout=30.0):
+    """
+    คลิก cancel.bmp ที่ (x,y) แล้วเช็คซ้ำ: ถ้ายังเจอ cancel.bmp อยู่ ให้กดซ้ำเรื่อยๆ
+    จนกว่าจะหายไป "ครบ gone_secs วินาทีติดต่อกัน" (default 3 วิ)
+    คืนค่า True ถ้า cancel หายครบเวลา, False ถ้า timeout กันค้าง
+    """
+    cancel_path = os.path.join(IMG_DIR, "cancel.bmp")
+    # คลิกครั้งแรกที่จุดที่เจอ
+    device.shell(f"input swipe {x} {y} {x} {y} 100")
+    time.sleep(0.4)
+    gone_since = None
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        img = get_screen_capture(device)
+        pts = img_search(img, cancel_path) if img is not None else None
+        if pts:
+            cx, cy = pts[0]
+            device.shell(f"input swipe {cx} {cy} {cx} {cy} 100")
+            gui_log(serial, f"cancel still visible — clicking again ({cx},{cy})...", step=step)
+            gone_since = None
+            time.sleep(0.4)
+        else:
+            if gone_since is None:
+                gone_since = time.time()
+            elif time.time() - gone_since >= gone_secs:
+                gui_log(serial, f"cancel gone for {gone_secs:.0f}s — done", step=step)
+                return True
+            time.sleep(0.3)
+    gui_log(serial, f"cancel re-click timeout ({timeout:.0f}s) — moving on", step=step)
+    return False
+
 # ═════════════════════════════════════════════════════════════════════════════
 # OCR Helper (Ref: find-gearname.py)
 # ═════════════════════════════════════════════════════════════════════════════
@@ -2344,8 +2375,7 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
                     if pts_c:
                         x, y = pts_c[0]
                         gui_log(serial, f"cancel.bmp found at ({x},{y})! Clicking and stopping back spam.", step="Fix Team Stop")
-                        device.shell(f"input swipe {x} {y} {x} {y} 100")
-                        time.sleep(1.0)
+                        click_cancel_until_gone(device, serial, x, y, step="Fix Team Stop")
                         break
             return True
         return False
@@ -2944,9 +2974,8 @@ def gacha_find_navigate_then_find_hero(device, cycle_start, serial, original_nam
             pts_c = img_search(img, os.path.join(IMG_DIR, "cancel.bmp"))
             if pts_c:
                 x, y = pts_c[0]
-                device.shell(f"input swipe {x} {y} {x} {y} 100")
                 gui_log(serial, f"cancel.bmp found at ({x},{y})! Clicked, stopping Back spam.", step="Cancel OK")
-                time.sleep(1.0)
+                click_cancel_until_gone(device, serial, x, y, step="Cancel OK")
                 break
 
     # 3. ถ้าเปิด CHECK_COIN → แวะสแกนเลขเหรียญก่อน (จำไว้แนบชื่อไฟล์ตอนจบ)
@@ -3767,23 +3796,8 @@ def process_device_login(device):
                         if pts:
                             x, y = pts[0]
                             gui_log(serial, f"cancel.bmp found — clicking ({x},{y})", step="Click Cancel")
-                            device.shell(f"input swipe {x} {y} {x} {y} 100")
-                            time.sleep(1)
-                            # กดจนกว่าจะหายไป ไม่เจอครบ 5 วิ ค่อยไปต่อ
-                            last_seen = time.time()
-                            while time.time() - last_seen < 5:
-                                check_device_reset(serial, cycle_start)
-                                img2 = get_screen_capture(device)
-                                if img2 is not None:
-                                    pts2 = img_search(img2, os.path.join(IMG_DIR, "cancel.bmp"))
-                                    if pts2:
-                                        x2, y2 = pts2[0]
-                                        device.shell(f"input swipe {x2} {y2} {x2} {y2} 100")
-                                        gui_log(serial, "cancel still visible, clicking again...", step="Cancel")
-                                        time.sleep(1)
-                                        last_seen = time.time()
-                                time.sleep(0.5)
-                            gui_log(serial, "cancel.bmp gone for 5s, moving on", step="Cancel OK")
+                            # กดจนกว่าจะหายไปครบ 3 วิ ค่อยไปต่อ
+                            click_cancel_until_gone(device, serial, x, y, step="Cancel")
                             break
 
             # 6.5 Get Code Sequence (Optional — ก่อน Box)
@@ -3895,21 +3909,8 @@ def process_device_login(device):
                             if pts_cancel:
                                 x, y = pts_cancel[0]
                                 gui_log(serial, f"cancel.bmp found (round {cancel_round}) — clicking ({x},{y})", step=f"GetCode Cancel R{cancel_round}")
-                                device.shell(f"input swipe {x} {y} {x} {y} 100")
-                                time.sleep(1)
-                                # Click until cancel disappears for 5s
-                                last_seen_gc = time.time()
-                                while time.time() - last_seen_gc < 5:
-                                    check_device_reset(serial, cycle_start)
-                                    img2 = get_screen_capture(device)
-                                    if img2 is not None:
-                                        pts2 = img_search(img2, os.path.join(IMG_DIR, "cancel.bmp"))
-                                        if pts2:
-                                            x2, y2 = pts2[0]
-                                            device.shell(f"input swipe {x2} {y2} {x2} {y2} 100")
-                                            time.sleep(1)
-                                            last_seen_gc = time.time()
-                                    time.sleep(0.5)
+                                # กดจนกว่าจะหายไปครบ 3 วิ
+                                click_cancel_until_gone(device, serial, x, y, step=f"GetCode Cancel R{cancel_round}")
                                 gui_log(serial, f"cancel.bmp gone (round {cancel_round}) — done!", step=f"GetCode Cancel R{cancel_round} OK")
                                 break
 
@@ -3944,18 +3945,9 @@ def process_device_login(device):
                         pts_cancel = img_search(img, os.path.join(IMG_DIR, "cancel.bmp"))
                         if pts_cancel:
                             x_c, y_c = pts_cancel[0]
-                            device.shell(f"input swipe {x_c} {y_c} {x_c} {y_c} 100")
                             gui_log(serial, f"cancel.bmp found — clicking ({x_c},{y_c})", step="GQ Init Cancel")
-                            time.sleep(1.5)
-                            # กดซ้ำจนกว่าจะหาย
-                            retry_end = time.time() + 8
-                            while time.time() < retry_end:
-                                check_device_reset(serial, cycle_start)
-                                img2 = get_screen_capture(device)
-                                if img2 is not None and not img_search(img2, os.path.join(IMG_DIR, "cancel.bmp")):
-                                    break
-                                device.shell(f"input swipe {x_c} {y_c} {x_c} {y_c} 100")
-                                time.sleep(1.0)
+                            # กดซ้ำจนกว่าจะหายไปครบ 3 วิ
+                            click_cancel_until_gone(device, serial, x_c, y_c, step="GQ Init Cancel")
                             break
 
                 gui_log(serial, "Get Quest sequence started...", step="GetQuest", status="working")
@@ -4077,8 +4069,7 @@ def process_device_login(device):
                                         if pts_c:
                                             xc, yc = pts_c[0]
                                             gui_log(serial, f"cancel found — clicking ({xc},{yc})", step="gq7 Cancel")
-                                            device.shell(f"input swipe {xc} {yc} {xc} {yc} 100")
-                                            time.sleep(1.5)
+                                            click_cancel_until_gone(device, serial, xc, yc, step="gq7 Cancel")
                                             break
 
                             # ── Phase 5: getquest8 → getquest11 (คลิกทีละภาพ) ──
@@ -4159,8 +4150,7 @@ def process_device_login(device):
                                     if pts_c:
                                         xc, yc = pts_c[0]
                                         gui_log(serial, f"cancel found — clicking ({xc},{yc})", step="gq11 Cancel")
-                                        device.shell(f"input swipe {xc} {yc} {xc} {yc} 100")
-                                        time.sleep(1.5)
+                                        click_cancel_until_gone(device, serial, xc, yc, step="gq11 Cancel")
                                         break
 
                             # ── Phase 6: getquest12 → getquest14 ──
@@ -4502,19 +4492,9 @@ def process_device_login(device):
                                         pts_cancel = img_search(img, "img/cancel.bmp")
                                         if pts_cancel:
                                             x, y = pts_cancel[0]
-                                            device.shell(f"input swipe {x} {y} {x} {y} 100")
                                             gui_log(serial, f"Clicked cancel at ({x}, {y})", step="Cancel Click")
-                                            time.sleep(1.5)
-                                            # กดซ้ำจนกว่าจะหาย
-                                            retry_end = time.time() + 8
-                                            while time.time() < retry_end:
-                                                check_device_reset(serial, cycle_start)
-                                                img2 = get_screen_capture(device)
-                                                if img2 is not None and not img_search(img2, "img/cancel.bmp"):
-                                                    break
-                                                device.shell(f"input swipe {x} {y} {x} {y} 100")
-                                                gui_log(serial, "Re-clicked cancel", step="Cancel Retry")
-                                                time.sleep(1.0)
+                                            # กดซ้ำจนกว่าจะหายไปครบ 3 วิ
+                                            click_cancel_until_gone(device, serial, x, y, step="Cancel Click")
                                             break
                                     
                                     # Send Back key
