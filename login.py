@@ -125,6 +125,9 @@ DEVICE_RESET_FLAGS   = {}
 DEVICE_FILE_ASSIGNMENTS = {}
 DEVICE_DISABLE_FIXEVENT = {}
 DEVICE_LAST_GAME_CHECK  = {}  # throttle: เช็คเกมออนทุก 30 วิ
+DEVICE_REENTER_FILE  = {}     # serial -> (file_path, original_name) ไฟล์ที่ต้อง "เข้าใหม่" (fixclear)
+DEVICE_REENTER_COUNT = {}     # serial -> (original_name, count) นับจำนวนครั้งที่ re-enter
+FIXCLEAR_MAX_REENTER = 1      # เจอ fixclear → เข้าใหม่ได้กี่ครั้งก่อนยอมแพ้ส่ง file-error (1 = เข้าใหม่ 1 ครั้ง เจออีกค่อยส่ง)
 
 # ── Performance ───────────────────────────────────────────────────────────────
 SCREENCAP_SCALE = 1.0  # 1.0 = full resolution (ป้องกัน template quality loss)
@@ -170,6 +173,7 @@ LOGIN_FAILED_DIR = "login-failed"
 
 # ── Exceptions ────────────────────────────────────────────────────────────────
 class DeviceResetException(Exception):  pass
+class FixClearReenterException(Exception): pass
 class CycleTimeoutException(Exception): pass
 class SellScreenException(Exception):  pass
 class RestartFromQuest8Exception(Exception): pass
@@ -1685,13 +1689,31 @@ def get_screen_capture(device):
             fc_bmp = img_search(img, os.path.join(GETQUEST_IMG_DIR, "fixclear1.bmp"), threshold=0.8)
             fc_png = img_search(img, os.path.join(IMG_DIR, "fixclear1.png"), threshold=0.8)
             if fc_bmp or fc_png:
-                # เจอ fixclear1 → clear app จบเลย, ส่งไฟล์ไป file-error (ชื่อเดิม) แล้วเริ่ม id ใหม่
-                gui_log(device.serial, "fixclear detected! Clearing app and moving file to file-error...", step="Fix Clear")
+                serial_fc = device.serial
+                original_name = DEVICE_FILE_ASSIGNMENTS.get(serial_fc)
+
+                # ── เจอ fixclear → ลองปิดเกมแล้วเข้าใหม่ก่อน (ไม่ส่ง file-error) ──
+                #    ถ้ายังเจอ fixclear อีก (เกิน FIXCLEAR_MAX_REENTER) ค่อยส่งไป file-error
+                name_cnt, cnt = DEVICE_REENTER_COUNT.get(serial_fc, (None, 0))
+                if name_cnt != original_name:
+                    cnt = 0
+                cnt += 1
+                if original_name and cnt <= FIXCLEAR_MAX_REENTER:
+                    gui_log(serial_fc, f"fixclear detected! Re-entering (attempt {cnt}/{FIXCLEAR_MAX_REENTER}) — closing & relaunching, file kept.", step="Fix Clear Re-enter")
+                    device.shell("am force-stop jp.konami.pesam")
+                    time.sleep(1)
+                    DEVICE_REENTER_COUNT[serial_fc] = (original_name, cnt)
+                    DEVICE_REENTER_FILE[serial_fc] = (os.path.join(INPUT_DIR, original_name), original_name)
+                    raise FixClearReenterException("fixclear re-enter")
+
+                # ── เข้าใหม่แล้วยังเจอ fixclear → clear app + ส่งไฟล์ไป file-error ──
+                gui_log(serial_fc, "fixclear still after re-enter → moving file to file-error...", step="Fix Clear")
+                DEVICE_REENTER_COUNT.pop(serial_fc, None)
+                DEVICE_REENTER_FILE.pop(serial_fc, None)
                 device.shell("am force-stop jp.konami.pesam")
                 device.shell("su -c 'rm -f /data/data/jp.konami.pesam/files/SaveData/AUTH/online_user_id_data.dat'")
                 device.shell("su -c 'rm -rf /data/data/jp.konami.pesam/files/SaveData/AUTH/*'")
 
-                original_name = DEVICE_FILE_ASSIGNMENTS.get(device.serial)
                 if original_name:
                     file_path = os.path.join(INPUT_DIR, original_name)
                     dest_path = os.path.join(FILE_ERROR_DIR, original_name)
@@ -1700,7 +1722,7 @@ def get_screen_capture(device):
                             os.remove(dest_path)
                         _safe_copy(file_path, dest_path)
                         os.remove(file_path)
-                        gui_log(device.serial, f"Moved {original_name} to file-error", step="Fix Clear")
+                        gui_log(serial_fc, f"Moved {original_name} to file-error", step="Fix Clear")
 
                 raise DeviceResetException("fixclear detected")
 
@@ -3566,12 +3588,22 @@ def process_device_login(device):
             device.shell("am force-stop jp.konami.pesam")
             time.sleep(1)
 
-            # 1. Pick file
-            file_path, original_name = pick_next_file()
-            if file_path is None:
-                gui_log(serial, "No files left — waiting...", step="No Files", status="idle")
-                time.sleep(3)
-                continue
+            # 0.5 ลบ save data เดิมออกก่อนเริ่มวนไฟล์ใหม่ (กันข้อมูล id เก่าค้าง)
+            device.shell("su -c 'rm -f /data/data/jp.konami.pesam/files/SaveData/AUTH/online_user_id_data.dat'")
+            time.sleep(0.3)
+
+            # 1. Pick file — ถ้ามีไฟล์ค้าง "เข้าใหม่" จาก fixclear → ใช้ไฟล์เดิม (ไม่หยิบใหม่/ไม่ปล่อย lock)
+            pending = DEVICE_REENTER_FILE.pop(serial, None)
+            if pending:
+                file_path, original_name = pending
+                gui_log(serial, f"Re-entering same file: {original_name}", step="Re-enter", status="working")
+            else:
+                DEVICE_REENTER_COUNT.pop(serial, None)   # ไฟล์ใหม่ → รีเซ็ตตัวนับ re-enter
+                file_path, original_name = pick_next_file()
+                if file_path is None:
+                    gui_log(serial, "No files left — waiting...", step="No Files", status="idle")
+                    time.sleep(3)
+                    continue
 
             gui_log(serial, f"File: {original_name}", step="File OK", status="working")
             DEVICE_FILE_ASSIGNMENTS[serial] = original_name
@@ -4646,15 +4678,9 @@ def process_device_login(device):
 
             DEVICE_DISABLE_FIXEVENT[serial] = True
 
-<<<<<<< HEAD
             # 7.3.5 CheckCoin + FindHero (ไม่มี gacha) → สแกนเหรียญใหม่ แล้วหา hero
             #       เลขเหรียญที่สแกนได้จะ "เขียนทับ" เลขเดิมใน -[เลข] (ไม่ต่อเพิ่มจนชื่อยาว)
             #       เจอ → Hero+ชื่อ-[เลขใหม่] , ไม่เจอ → ชื่อ-[เลขใหม่]
-=======
-            # 7.3.5 CheckCoin + FindHero (ไม่มี gacha) → ทำเหมือน Gacha+CheckCoin+Fin
-            #       แต่เริ่มตรงที่ checkcoin → fin เลย (ข้าม gacha + การ navigate next/back)
-            #       ส่งไฟล์ออกด้วยวิธีเดียวกัน (find_hero_mode แนบ [เหรียญ]+ แล้วจัดลง found-hero/no-hero)
->>>>>>> 9540430c5b06ac0587cb2592c9544012c83c1d76
             if (CHECK_COIN == 1 and FIND_HERO == 1
                     and DO_GACHA != 1 and GACHA_FIND != 1 and GACHA_CHECK != 1):
                 gui_log(serial, "CheckCoin+Find mode → scan coin then find hero...", step="Coin+Find", status="working")
@@ -4906,6 +4932,12 @@ def process_device_login(device):
                 except Exception as e:
                     gui_log(serial, f"Failed to move {original_name} to timeout: {e}", step="Timeout Error")
             continue
+
+        except FixClearReenterException:
+            # fixclear → เข้าใหม่ไฟล์เดิม: อย่า release_file (เก็บ lock + ไฟล์ไว้ทำต่อ)
+            gui_log(serial, "🔁 fixclear re-enter — relaunching same file...", step="Re-enter", status="working")
+            device.shell("am force-stop jp.konami.pesam")
+            time.sleep(1)
 
         except DeviceResetException:
             release_file(original_name)
