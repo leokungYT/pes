@@ -2710,14 +2710,13 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
             "conditions" in l3_lower
         )
         
+        # ไม่ match hero อะไรเลย → ส่งไป no-hero เสมอ (ไม่ว่าจะ verify empty state ได้หรือไม่)
+        dest_dir = NO_HERO_DIR
+        final_name = clean_orig
         if is_empty_state:
-            dest_dir = NO_HERO_DIR
-            final_name = clean_orig
             gui_log(serial, "No hero match found (Verified empty state).", step="No Match")
         else:
-            dest_dir = FILE_ERROR_DIR
-            final_name = clean_orig
-            gui_log(serial, "Scan did not show verified empty state. Sending to file-error for safety.", step="Scan Safety")
+            gui_log(serial, "No hero match found (OCR unverified) → no-hero.", step="No Match")
 
     # แนบเลขเหรียญที่สแกนไว้ (Gacha+Find + CHECK_COIN=1) ไว้หน้าชื่อไฟล์
     if coin_prefix:
@@ -4597,10 +4596,22 @@ def process_device_login(device):
                             break
                     time.sleep(1)
 
-            # 7.4 Check Coin Sequence (Optional)
-            #     ข้าม standalone check-coin ถ้าเปิด Gacha+Find (เพราะสแกนเหรียญรวมอยู่ในเส้นทาง Gacha+Find แล้ว)
             DEVICE_DISABLE_FIXEVENT[serial] = True
-            if CHECK_COIN == 1 and GACHA_FIND != 1:
+
+            # 7.3.5 CheckCoin + FindHero (ไม่มี gacha) → ทำเหมือน Gacha+CheckCoin+Fin
+            #       แต่เริ่มตรงที่ checkcoin → fin เลย (ข้าม gacha + การ navigate next/back)
+            #       ส่งไฟล์ออกด้วยวิธีเดียวกัน (find_hero_mode แนบ [เหรียญ]+ แล้วจัดลง found-hero/no-hero)
+            if (CHECK_COIN == 1 and FIND_HERO == 1
+                    and DO_GACHA != 1 and GACHA_FIND != 1 and GACHA_CHECK != 1):
+                gui_log(serial, "CheckCoin+Find mode → scan coin then find hero...", step="Coin+Find", status="working")
+                coin_prefix = scan_coin_number(device, cycle_start, serial)
+                if find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_prefix=coin_prefix):
+                    continue  # Start next file immediately
+
+            # 7.4 Check Coin Sequence (Optional)
+            #     ข้าม standalone check-coin ถ้าเปิด Gacha+Find (สแกนเหรียญรวมในเส้นทางนั้นแล้ว)
+            #     และข้ามถ้าเปิด FindHero ด้วย (เคสนั้นไปทำในบล็อก 7.3.5 CheckCoin+Find แทน)
+            if CHECK_COIN == 1 and GACHA_FIND != 1 and FIND_HERO != 1:
                 if check_coin_mode(device, cycle_start, serial, original_name, file_path):
                     continue  # Start next file immediately
 
