@@ -125,9 +125,6 @@ DEVICE_RESET_FLAGS   = {}
 DEVICE_FILE_ASSIGNMENTS = {}
 DEVICE_DISABLE_FIXEVENT = {}
 DEVICE_LAST_GAME_CHECK  = {}  # throttle: เช็คเกมออนทุก 30 วิ
-DEVICE_REENTER_FILE  = {}     # serial -> (file_path, original_name) ไฟล์ที่ต้อง "เข้าใหม่" (fixclear)
-DEVICE_REENTER_COUNT = {}     # serial -> (original_name, count) นับจำนวนครั้งที่ re-enter
-FIXCLEAR_MAX_REENTER = 5      # เข้าใหม่ได้สูงสุดกี่ครั้งต่อไฟล์ ก่อน fall back ย้ายไฟล์ออก
 
 # ── Performance ───────────────────────────────────────────────────────────────
 SCREENCAP_SCALE = 1.0  # 1.0 = full resolution (ป้องกัน template quality loss)
@@ -160,29 +157,19 @@ LOG_DIR = "logs"
 os.makedirs(LOG_DIR, exist_ok=True)
 
 os.makedirs(INPUT_DIR, exist_ok=True)
-os.makedirs(LOGIN_SUCCESS_DIR, exist_ok=True)
+# โฟลเดอร์ผลลัพธ์ไม่สร้างล่วงหน้า — จะถูกสร้างตอนเขียนไฟล์จริง (กันโฟลเดอร์ว่างรกตอนรันครั้งแรก)
 BACKUP_ID_DIR = "backup-id"
 NO_HERO_DIR   = "no-hero"
 FOUND_HERO_DIR = "found-hero"
 TIMEOUT_DIR   = "timeout"
-os.makedirs(BACKUP_ID_DIR, exist_ok=True)
-os.makedirs(NO_HERO_DIR, exist_ok=True)
-os.makedirs(FOUND_HERO_DIR, exist_ok=True)
-os.makedirs(TIMEOUT_DIR, exist_ok=True)
 FAST_RANDOM_DIR = "fast-random"
-os.makedirs(FAST_RANDOM_DIR, exist_ok=True)
 FILE_ERROR_DIR = "file-error"
-os.makedirs(FILE_ERROR_DIR, exist_ok=True)
 RUN_FILE_DIR = "run-file"
-os.makedirs(RUN_FILE_DIR, exist_ok=True)
 RANDOM_FAIL_DIR = "random-fail"
-os.makedirs(RANDOM_FAIL_DIR, exist_ok=True)
 LOGIN_FAILED_DIR = "login-failed"
-os.makedirs(LOGIN_FAILED_DIR, exist_ok=True)
 
 # ── Exceptions ────────────────────────────────────────────────────────────────
 class DeviceResetException(Exception):  pass
-class FixClearReenterException(Exception): pass
 class CycleTimeoutException(Exception): pass
 class SellScreenException(Exception):  pass
 class RestartFromQuest8Exception(Exception): pass
@@ -496,189 +483,230 @@ if GUI_ENABLED:
             scroll_cfg = ctk.CTkScrollableFrame(win, fg_color="transparent")
             scroll_cfg.pack(fill="both", expand=True, padx=6, pady=(0, 4))
 
-            # ── EVENT_IMG toggle ────────────────────────────
-            row = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
-            row.pack(fill="x", padx=14, pady=4)
-            ctk.CTkLabel(row, text="Event Image (play22→play31)",
-                         font=ctk.CTkFont(size=12)).pack(side="left")
-            var_event = ctk.IntVar(value=cfg.EVENT_IMG)
-            ctk.CTkSwitch(row, text="", variable=var_event,
-                          onvalue=1, offvalue=0).pack(side="right")
+            # ── helpers: หัวข้อหมวด + แถว toggle (จัด config เป็นเมนูแยกประเภท) ──
+            def _section(title):
+                hdr = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
+                hdr.pack(fill="x", padx=8, pady=(12, 2))
+                ctk.CTkLabel(hdr, text=title,
+                             font=ctk.CTkFont(size=13, weight="bold"),
+                             text_color="#4caf50").pack(side="left")
 
-            # ── DO_BOX toggle ──────────────────────────────
-            row2 = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
-            row2.pack(fill="x", padx=14, pady=4)
-            ctk.CTkLabel(row2, text="Open Box Sequence (1-4)",
-                         font=ctk.CTkFont(size=12)).pack(side="left")
+            def _toggle_row(text, var, command=None):
+                r = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
+                r.pack(fill="x", padx=14, pady=3)
+                ctk.CTkLabel(r, text=text, font=ctk.CTkFont(size=12)).pack(side="left")
+                kw = {"command": command} if command else {}
+                ctk.CTkSwitch(r, text="", variable=var, onvalue=1, offvalue=0, **kw).pack(side="right")
+
+            def _entry_row(text, value, width=50):
+                r = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
+                r.pack(fill="x", padx=14, pady=3)
+                ctk.CTkLabel(r, text=text,
+                             font=ctk.CTkFont(size=11, slant="italic")).pack(side="left", padx=(10, 0))
+                e = ctk.CTkEntry(r, width=width, height=20, justify="center")
+                e.insert(0, str(value))
+                e.pack(side="right")
+                return e
+
+            def _combo_row(text, targets):
+                # สวิตช์รวม (preset): เปิด → ติดทุกตัวใน targets , ปิด → ปิดทุกตัว
+                cv = ctk.IntVar(value=1 if all(t.get() == 1 for t in targets) else 0)
+                def _cmd(cv=cv, targets=targets):
+                    v = cv.get()
+                    for t in targets:
+                        t.set(v)
+                _toggle_row(text, cv, command=_cmd)
+                return cv
+
+            # ════════ General ════════
+            _section("⚙️ General")
             var_box = ctk.IntVar(value=cfg.DO_BOX)
-            ctk.CTkSwitch(row2, text="", variable=var_box,
-                          onvalue=1, offvalue=0).pack(side="right")
-
-            # ── DO_GACHA toggle ────────────────────────────
-            row3 = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
-            row3.pack(fill="x", padx=14, pady=4)
-            ctk.CTkLabel(row3, text="Gacha Mode",
-                         font=ctk.CTkFont(size=12)).pack(side="left")
-            var_gacha = ctk.IntVar(value=cfg.DO_GACHA)
-            ctk.CTkSwitch(row3, text="", variable=var_gacha,
-                          onvalue=1, offvalue=0).pack(side="right")
-
-            # ── FIND_HERO toggle ───────────────────────────
-            row4 = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
-            row4.pack(fill="x", padx=14, pady=4)
-            ctk.CTkLabel(row4, text="Find Hero Mode",
-                         font=ctk.CTkFont(size=12)).pack(side="left")
+            _toggle_row("Open Box Sequence (1-4)", var_box)
             var_find_hero = ctk.IntVar(value=getattr(cfg, 'FIND_HERO', 0))
-            ctk.CTkSwitch(row4, text="", variable=var_find_hero,
-                          onvalue=1, offvalue=0).pack(side="right")
+            _toggle_row("Find Hero Mode", var_find_hero)
+            var_check_coin = ctk.IntVar(value=getattr(cfg, 'CHECK_COIN', 0))
+            _toggle_row("Check Coin Mode", var_check_coin)
+            var_login_fast = ctk.IntVar(value=getattr(cfg, 'LOGIN_FAST', 0))
+            _toggle_row("Login Fast (เจอ login แล้วจบรอบทันที)", var_login_fast)
 
-            # ── GACHA_FIND toggle (gacha ปกติ gacha3 → หา hero, ไม่ clear app) ──
-            row4b = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
-            row4b.pack(fill="x", padx=14, pady=4)
-            ctk.CTkLabel(row4b, text="Gacha + find mode (ไม่ clear app)",
-                         font=ctk.CTkFont(size=12)).pack(side="left")
+            # ════════ Gacha Mode ════════
+            _section("🎰 Gacha Mode")
+            var_gacha = ctk.IntVar(value=cfg.DO_GACHA)
+            _toggle_row("Gacha Mode", var_gacha)
             var_gacha_find = ctk.IntVar(value=getattr(cfg, 'GACHA_FIND', 0))
             def _sync_gacha_find():
-                # Gacha+Find ต้องอาศัย DO_GACHA (gacha1→2→3→4→5) → เปิดให้อัตโนมัติ
+                # Gacha+Find ต้องอาศัย DO_GACHA + Check Coin → เปิดให้อัตโนมัติ
                 if var_gacha_find.get() == 1:
                     var_gacha.set(1)
-            ctk.CTkSwitch(row4b, text="", variable=var_gacha_find,
-                          onvalue=1, offvalue=0, command=_sync_gacha_find).pack(side="right")
+                    var_check_coin.set(1)
+            _toggle_row("Gacha + Find + Check Coin", var_gacha_find, command=_sync_gacha_find)
+            _combo_row("Box + Gacha + Check Coin + Find", [var_box, var_gacha, var_gacha_find, var_check_coin])
 
-            # ── GACHA_FREE toggle ──────────────────────────
-            row5 = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
-            row5.pack(fill="x", padx=14, pady=4)
-            ctk.CTkLabel(row5, text="Gacha Free Mode",
-                         font=ctk.CTkFont(size=12)).pack(side="left")
+            # ════════ Gacha Free ════════
+            _section("🆓 Gacha Free")
             var_gacha_free = ctk.IntVar(value=getattr(cfg, 'GACHA_FREE', 0))
-            ctk.CTkSwitch(row5, text="", variable=var_gacha_free,
-                          onvalue=1, offvalue=0).pack(side="right")
-
-            # ── GACHA_FREE_LOOPS entry ─────────────────────
-            row5_loops = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
-            row5_loops.pack(fill="x", padx=14, pady=4)
-            ctk.CTkLabel(row5_loops, text="  └─ Loops count",
-                         font=ctk.CTkFont(size=11, slant="italic")).pack(side="left", padx=(10, 0))
-            entry_gfree_loops = ctk.CTkEntry(row5_loops, width=50, height=20, justify="center")
-            entry_gfree_loops.insert(0, str(getattr(cfg, 'GACHA_FREE_LOOPS', 2)))
-            entry_gfree_loops.pack(side="right")
-
-            # ── CHECK_COIN toggle ──────────────────────────
-            row6 = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
-            row6.pack(fill="x", padx=14, pady=4)
-            ctk.CTkLabel(row6, text="Check Coin Mode",
-                         font=ctk.CTkFont(size=12)).pack(side="left")
-            var_check_coin = ctk.IntVar(value=getattr(cfg, 'CHECK_COIN', 0))
-            ctk.CTkSwitch(row6, text="", variable=var_check_coin,
-                          onvalue=1, offvalue=0).pack(side="right")
-
-            # ── NOSCAN toggle ─────────────────────────────
-            row7 = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
-            row7.pack(fill="x", padx=14, pady=4)
-            ctk.CTkLabel(row7, text="No Scan Mode (ข้ามสแกน → fast-random)",
-                         font=ctk.CTkFont(size=12)).pack(side="left")
-            var_noscan = ctk.IntVar(value=getattr(cfg, 'NOSCAN', 0))
-            ctk.CTkSwitch(row7, text="", variable=var_noscan,
-                          onvalue=1, offvalue=0).pack(side="right")
-
-            # ── SKIPANIMATION toggle ─────────────────────────────
-            row8 = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
-            row8.pack(fill="x", padx=14, pady=4)
-            ctk.CTkLabel(row8, text="Skip Animation (Fast Taps)",
-                         font=ctk.CTkFont(size=12)).pack(side="left")
-            var_skipanim = ctk.IntVar(value=getattr(cfg, 'SKIPANIMATION', 0))
-            ctk.CTkSwitch(row8, text="", variable=var_skipanim,
-                          onvalue=1, offvalue=0).pack(side="right")
-
-            # ── GACHA_CHECK toggle ─────────────────────────────
-            row9 = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
-            row9.pack(fill="x", padx=14, pady=4)
-            ctk.CTkLabel(row9, text="Gachafree + check mode",
-                         font=ctk.CTkFont(size=12)).pack(side="left")
+            _toggle_row("Gacha Free Mode", var_gacha_free)
+            entry_gfree_loops = _entry_row("  └─ Loops count", getattr(cfg, 'GACHA_FREE_LOOPS', 2))
             var_gacha_check = ctk.IntVar(value=getattr(cfg, 'GACHA_CHECK', 0))
-            ctk.CTkSwitch(row9, text="", variable=var_gacha_check,
-                          onvalue=1, offvalue=0).pack(side="right")
+            def _sync_gacha_check():
+                # Gacha Free + Check + Find ต้องอาศัย Gacha Free + Check Coin → เปิดให้อัตโนมัติ
+                if var_gacha_check.get() == 1:
+                    var_gacha_free.set(1)
+                    var_check_coin.set(1)
+            _toggle_row("Gacha Free + Check Coin + Find", var_gacha_check, command=_sync_gacha_check)
+            _combo_row("Box + Gacha Free + Check Coin + Find", [var_box, var_gacha_free, var_gacha_check, var_check_coin])
 
-            # ── TIMEOUT toggle ──────────────────────────────
-            row10 = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
-            row10.pack(fill="x", padx=14, pady=4)
-            ctk.CTkLabel(row10, text="Timeout Mode (กันค้าง)",
-                         font=ctk.CTkFont(size=12)).pack(side="left")
-            var_timeout = ctk.IntVar(value=getattr(cfg, 'TIMEOUT_ENABLE', 1))
-            ctk.CTkSwitch(row10, text="", variable=var_timeout,
-                          onvalue=1, offvalue=0).pack(side="right")
+            # ════════ Get-Code / Quest ════════
+            _section("🎁 Get-Code / Quest")
+            var_getcode = ctk.IntVar(value=getattr(cfg, 'GETCODE', 0))
+            _toggle_row("Get Code Mode (ใส่โค้ดก่อน Box)", var_getcode)
+            entry_getcode_txt = _entry_row("  └─ Code Text", getattr(cfg, 'GETCODE_TEXT', 'eFCONNECT'), width=120)
+            var_getquest = ctk.IntVar(value=getattr(cfg, 'GETQUEST', 0))
+            _toggle_row("Get Quest Mode (เก็บเควสก่อน Box)", var_getquest)
+            _combo_row("Box + Get Quest", [var_box, var_getquest])
 
-            # ── TIMEOUT_MINUTES entry ──────────────────────
-            row10_time = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
-            row10_time.pack(fill="x", padx=14, pady=4)
-            ctk.CTkLabel(row10_time, text="  ↳ เวลาสูงสุด (Minutes)",
-                         font=ctk.CTkFont(size=11, slant="italic")).pack(side="left", padx=(10, 0))
-            entry_timeout = ctk.CTkEntry(row10_time, width=50, height=20, justify="center")
-            entry_timeout.insert(0, str(getattr(cfg, 'TIMEOUT_MINUTES', 10)))
-            entry_timeout.pack(side="right")
+            # ════════ Find Hero ════════
+            _section("🔍 Find Hero")
+            _toggle_row("Find Mode", var_find_hero)
+            var_find_cc = ctk.IntVar(value=1 if (var_find_hero.get() == 1 and var_check_coin.get() == 1) else 0)
+            def _sync_find_cc():
+                # Find + Check Coin: เปิด → ติดทั้ง Find Mode + Check Coin , ปิด → ปิด Check Coin
+                if var_find_cc.get() == 1:
+                    var_find_hero.set(1)
+                    var_check_coin.set(1)
+                else:
+                    var_check_coin.set(0)
+            _toggle_row("Find + Check Coin", var_find_cc, command=_sync_find_cc)
+            _combo_row("Box + Find + Check Coin", [var_box, var_find_hero, var_check_coin])
 
-            # ── AUTORUN toggle ──────────────────────────────
-            row11 = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
-            row11.pack(fill="x", padx=14, pady=4)
-            ctk.CTkLabel(row11, text="Auto Run on Launch (รันอัตโนมัติเมื่อเปิด)",
-                         font=ctk.CTkFont(size=12)).pack(side="left")
+            # ════════ Setting ════════
+            _section("🔧 Setting")
             var_autorun = ctk.IntVar(value=getattr(cfg, 'AUTORUN', 0))
-            ctk.CTkSwitch(row11, text="", variable=var_autorun,
-                          onvalue=1, offvalue=0).pack(side="right")
-
-            # ── SILENT_UPDATE_MODE segmented button ────────────────────────
+            _toggle_row("Auto Run on Launch (รันอัตโนมัติเมื่อเปิด)", var_autorun)
+            var_event = ctk.IntVar(value=cfg.EVENT_IMG)
+            _toggle_row("Event Image (play22→play31)", var_event)
+            var_noscan = ctk.IntVar(value=getattr(cfg, 'NOSCAN', 0))
+            _toggle_row("No Scan Mode (ข้ามสแกน → fast-random)", var_noscan)
+            var_skipanim = ctk.IntVar(value=getattr(cfg, 'SKIPANIMATION', 0))
+            _toggle_row("Skip Animation (Fast Taps)", var_skipanim)
+            var_timeout = ctk.IntVar(value=getattr(cfg, 'TIMEOUT_ENABLE', 1))
+            _toggle_row("Timeout Mode (กันค้าง)", var_timeout)
+            entry_timeout = _entry_row("  ↳ เวลาสูงสุด (Minutes)", getattr(cfg, 'TIMEOUT_MINUTES', 10))
+            var_overwrite_cfg = ctk.IntVar(value=1 if getattr(cfg, 'OVERWRITE_CONFIG_ON_UPDATE', True) else 0)
+            _toggle_row("Sync Config (อัปเดตตั้งค่าตามเครื่องแม่)", var_overwrite_cfg)
+            # Silent Update Mode (segmented)
             row_update = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
-            row_update.pack(fill="x", padx=14, pady=4)
+            row_update.pack(fill="x", padx=14, pady=3)
             ctk.CTkLabel(row_update, text="Silent Update Mode",
                          font=ctk.CTkFont(size=12)).pack(side="left")
             var_update_mode = ctk.StringVar(value=getattr(cfg, 'SILENT_UPDATE_MODE', 'keep'))
             ctk.CTkSegmentedButton(row_update, values=["keep", "clean"],
                                    variable=var_update_mode).pack(side="right")
 
-            # ── OVERWRITE_CONFIG_ON_UPDATE toggle ──────────────────────────────
-            row_overwrite_cfg = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
-            row_overwrite_cfg.pack(fill="x", padx=14, pady=4)
-            ctk.CTkLabel(row_overwrite_cfg, text="Sync Config (อัปเดตตั้งค่าตามเครื่องแม่)",
-                         font=ctk.CTkFont(size=12)).pack(side="left")
-            var_overwrite_cfg = ctk.IntVar(value=1 if getattr(cfg, 'OVERWRITE_CONFIG_ON_UPDATE', True) else 0)
-            ctk.CTkSwitch(row_overwrite_cfg, text="", variable=var_overwrite_cfg,
-                          onvalue=1, offvalue=0).pack(side="right")
+            # ════════ Import Zip → input-id ════════
+            _section("📦 Import Zip → input-id")
+            lbl_zip = ctk.CTkLabel(scroll_cfg, text="เอา .zip ไปวางในโฟลเดอร์ zip/ แล้วกดปุ่ม → แตกเข้า input-id",
+                                   font=ctk.CTkFont(size=11, slant="italic"), text_color="gray")
+            lbl_zip.pack(fill="x", padx=18, pady=(0, 2))
 
-            # ── GETCODE toggle ──────────────────────────────
-            row_getcode = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
-            row_getcode.pack(fill="x", padx=14, pady=4)
-            ctk.CTkLabel(row_getcode, text="Get Code Mode (ใส่โค้ดก่อน Box)",
-                         font=ctk.CTkFont(size=12)).pack(side="left")
-            var_getcode = ctk.IntVar(value=getattr(cfg, 'GETCODE', 0))
-            ctk.CTkSwitch(row_getcode, text="", variable=var_getcode,
-                          onvalue=1, offvalue=0).pack(side="right")
+            def _import_zip():
+                import zipfile, glob as _glob
+                base_dir = os.path.dirname(os.path.abspath(__file__))
+                zip_dir  = os.path.join(base_dir, "zip")
+                dest_dir = os.path.join(base_dir, INPUT_DIR)
+                os.makedirs(zip_dir, exist_ok=True)    # ไม่มี zip/ → สร้าง
+                os.makedirs(dest_dir, exist_ok=True)   # ไม่มี input-id → สร้าง
+                zips = _glob.glob(os.path.join(zip_dir, "*.zip"))
+                if not zips:
+                    lbl_zip.configure(text="⚠️ ไม่พบไฟล์ .zip ในโฟลเดอร์ zip/", text_color="#e53935")
+                    return
+                count = 0
+                nzip = 0
+                try:
+                    for zpath in zips:
+                        with zipfile.ZipFile(zpath, 'r') as zf:
+                            for info in zf.infolist():
+                                if info.is_dir():
+                                    continue
+                                fname = os.path.basename(info.filename)
+                                if not fname:
+                                    continue
+                                # แตกไฟล์มาวางใน input-id (เอาเฉพาะชื่อไฟล์ ไม่เอาโครงสร้างโฟลเดอร์)
+                                with zf.open(info) as src, open(os.path.join(dest_dir, fname), 'wb') as out:
+                                    shutil.copyfileobj(src, out)
+                                count += 1
+                        nzip += 1
+                    lbl_zip.configure(text=f"✅ แตก {count} ไฟล์ จาก {nzip} zip เข้า input-id แล้ว", text_color="#4caf50")
+                    self.log(f"Import Zip: {count} files from {nzip} zip(s) → {INPUT_DIR}")
+                except Exception as e:
+                    lbl_zip.configure(text=f"⚠️ ผิดพลาด: {e}", text_color="#e53935")
+                    self.log(f"Import Zip failed: {e}")
 
-            # ── GETCODE_TEXT entry ──────────────────────────
-            row_getcode_txt = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
-            row_getcode_txt.pack(fill="x", padx=14, pady=4)
-            ctk.CTkLabel(row_getcode_txt, text="  └─ Code Text",
-                         font=ctk.CTkFont(size=11, slant="italic")).pack(side="left", padx=(10, 0))
-            entry_getcode_txt = ctk.CTkEntry(row_getcode_txt, width=120, height=20, justify="center")
-            entry_getcode_txt.insert(0, str(getattr(cfg, 'GETCODE_TEXT', 'eFCONNECT')))
-            entry_getcode_txt.pack(side="right")
+            def _clear_input():
+                from tkinter import messagebox
+                base_dir = os.path.dirname(os.path.abspath(__file__))
+                dest_dir = os.path.join(base_dir, INPUT_DIR)
+                files = [f for f in glob.glob(os.path.join(dest_dir, "*")) if os.path.isfile(f)]
+                if not files:
+                    lbl_zip.configure(text="input-id ว่างอยู่แล้ว (ไม่มีไฟล์ให้ลบ)", text_color="gray")
+                    return
+                if not messagebox.askyesno("ยืนยันลบไฟล์",
+                                           f"ลบไฟล์ทั้งหมด {len(files)} ไฟล์ใน input-id?\n(ลบแล้วกู้คืนไม่ได้)"):
+                    return
+                deleted = 0
+                for f in files:
+                    try:
+                        os.remove(f)
+                        deleted += 1
+                    except Exception:
+                        pass
+                lbl_zip.configure(text=f"🗑️ ลบ {deleted} ไฟล์ใน input-id แล้ว", text_color="#e53935")
+                self.log(f"Cleared input-id: deleted {deleted} files")
 
-            # ── GETQUEST toggle ──────────────────────────────
-            row_getquest = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
-            row_getquest.pack(fill="x", padx=14, pady=4)
-            ctk.CTkLabel(row_getquest, text="Get Quest Mode (เก็บเควสก่อน Box)",
-                         font=ctk.CTkFont(size=12)).pack(side="left")
-            var_getquest = ctk.IntVar(value=getattr(cfg, 'GETQUEST', 0))
-            ctk.CTkSwitch(row_getquest, text="", variable=var_getquest,
-                          onvalue=1, offvalue=0).pack(side="right")
+            btn_zip_row = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
+            btn_zip_row.pack(fill="x", padx=14, pady=(2, 6))
+            ctk.CTkButton(btn_zip_row, text="📂 แตก zip → input-id",
+                          command=_import_zip, height=30).pack(side="left", expand=True, fill="x", padx=(0, 4))
+            ctk.CTkButton(btn_zip_row, text="🗑️ ลบไฟล์ใน input-id",
+                          command=_clear_input, height=30,
+                          fg_color="#c0392b", hover_color="#a93226").pack(side="left", expand=True, fill="x", padx=(4, 0))
 
-            # ── LOGIN_FAST toggle ─────────────────────────────
-            row_login_fast = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
-            row_login_fast.pack(fill="x", padx=14, pady=4)
-            ctk.CTkLabel(row_login_fast, text="Login Fast (เจอ login แล้วจบรอบทันที)",
-                         font=ctk.CTkFont(size=12)).pack(side="left")
-            var_login_fast = ctk.IntVar(value=getattr(cfg, 'LOGIN_FAST', 0))
-            ctk.CTkSwitch(row_login_fast, text="", variable=var_login_fast,
-                          onvalue=1, offvalue=0).pack(side="right")
+            def _clear_folders():
+                # ล้างโฟลเดอร์ผลลัพธ์ทั้งหมด (เหมือน clear-folders.bat) + เคลียร์ไฟล์ใน input-id
+                from tkinter import messagebox
+                base_dir = os.path.dirname(os.path.abspath(__file__))
+                folders = ["backup", "backup-id", "found-hero", "no-hero", "login-success",
+                           "login-failed", "random-fail", "fast-random", "file-error",
+                           "run-file", "timeout", "logs", "check-coin", "debug-ocr"]
+                if not messagebox.askyesno("ยืนยันล้างโฟลเดอร์ทั้งหมด",
+                                           "ลบโฟลเดอร์ผลลัพธ์ทั้งหมด + เคลียร์ไฟล์ใน input-id?\n"
+                                           "(backup, found-hero, no-hero, logs ฯลฯ — กู้คืนไม่ได้)"):
+                    return
+                removed = 0
+                for fo in folders:
+                    p = os.path.join(base_dir, fo)
+                    if os.path.isdir(p):
+                        try:
+                            shutil.rmtree(p)
+                            removed += 1
+                        except Exception:
+                            pass
+                in_dir = os.path.join(base_dir, INPUT_DIR)
+                cleared = 0
+                if os.path.isdir(in_dir):
+                    for f in glob.glob(os.path.join(in_dir, "*")):
+                        if os.path.isfile(f):
+                            try:
+                                os.remove(f)
+                                cleared += 1
+                            except Exception:
+                                pass
+                lbl_zip.configure(text=f"🧹 ล้าง {removed} โฟลเดอร์ + {cleared} ไฟล์ input-id แล้ว", text_color="#e53935")
+                self.log(f"Clear folders: removed {removed} folders, cleared {cleared} input-id files")
+
+            ctk.CTkButton(scroll_cfg, text="🧹 ล้างโฟลเดอร์ทั้งหมด (clear-folders)",
+                          command=_clear_folders, height=30,
+                          fg_color="#8e1e1e", hover_color="#6e1515").pack(fill="x", padx=14, pady=(0, 6))
 
             # ── Save button (pinned at bottom, outside scrollable area) ───
             def _save():
@@ -1645,7 +1673,7 @@ def get_screen_capture(device):
                     if os.path.exists(file_path):
                         if os.path.exists(dest_path):
                             os.remove(dest_path)
-                        shutil.copy2(file_path, dest_path)
+                        _safe_copy(file_path, dest_path)
                         os.remove(file_path)
                         gui_log(device.serial, f"✅ Sorted (Sell): {original_name} -> {LOGIN_FAILED_DIR}", step="Sell Sorted")
                 
@@ -1657,77 +1685,22 @@ def get_screen_capture(device):
             fc_bmp = img_search(img, os.path.join(GETQUEST_IMG_DIR, "fixclear1.bmp"), threshold=0.8)
             fc_png = img_search(img, os.path.join(IMG_DIR, "fixclear1.png"), threshold=0.8)
             if fc_bmp or fc_png:
-                import re as _re_fc
-                serial_fc = device.serial
-                original_name = DEVICE_FILE_ASSIGNMENTS.get(serial_fc)
-
-                # ── โหมดเข้าใหม่: เจอ fixclear → ปิดแอปแล้วเข้าใหม่ (ไม่ย้ายไฟล์ออก) ──
-                #    ลองซ้ำได้สูงสุด FIXCLEAR_MAX_REENTER ครั้งต่อไฟล์ ก่อนยอมแพ้
-                name_cnt, cnt = DEVICE_REENTER_COUNT.get(serial_fc, (None, 0))
-                if name_cnt != original_name:
-                    cnt = 0
-                cnt += 1
-                if original_name and cnt <= FIXCLEAR_MAX_REENTER:
-                    gui_log(serial_fc, f"fixclear detected! Re-entering (attempt {cnt}/{FIXCLEAR_MAX_REENTER}) — closing & relaunching, file kept.", step="Fix Clear Re-enter")
-                    device.shell("am force-stop jp.konami.pesam")
-                    time.sleep(1)
-                    DEVICE_REENTER_COUNT[serial_fc] = (original_name, cnt)
-                    DEVICE_REENTER_FILE[serial_fc] = (os.path.join(INPUT_DIR, original_name), original_name)
-                    raise FixClearReenterException("fixclear re-enter")
-
-                # ── เกินจำนวน re-enter แล้วยังเจอ fixclear → ยอมแพ้ ย้ายไฟล์ออก (logic เดิม) ──
-                gui_log(serial_fc, f"fixclear still after {FIXCLEAR_MAX_REENTER} re-enters — giving up, moving file out.", step="Fix Clear Giveup")
-                DEVICE_REENTER_COUNT.pop(serial_fc, None)
-                DEVICE_REENTER_FILE.pop(serial_fc, None)
-                # ลบ coin tag ออกก่อน แล้วค่อยเช็คว่ามี hero จริงไหม
-                #   กัน [140]+ASCV... (เลขเหรียญ) มาหลอกว่ามี "+" = มี hero
-                #   - [เลข]+ (prefix แบบเก่า) และ -[เลข] (suffix) = coin ไม่ใช่ hero
-                name_no_coin = original_name or ""
-                name_no_coin = _re_fc.sub(r"^\[\d+\]\+", "", name_no_coin)
-                name_no_coin = _re_fc.sub(r"-\[\d+\]", "", name_no_coin)
-                if name_no_coin and "+" in name_no_coin:
-                    dest_base = FOUND_HERO_DIR
-                    dest_label = "found-hero"
-                else:
-                    dest_base = NO_HERO_DIR
-                    dest_label = "no-hero"
-
-                # ถ้าเปิด CHECK_COIN → ลองสแกนเลขเหรียญก่อน clear (timeout 15s,
-                #   ใช้ fast_screencap กัน recursion; ถ้าจอนั้นไม่มี checkpointcoin ก็ข้าม)
-                coin_number = None
-                if CHECK_COIN == 1:
-                    deadline_coin = time.time() + 15
-                    while time.time() < deadline_coin:
-                        img_coin = fast_screencap(device)
-                        if img_coin is not None and img_search(img_coin, os.path.join(IMG_DIR, "checkpointcoin.bmp")):
-                            ocr_text = read_screen_text(img_coin, region=Region(52, 10, 106, 41), serial=device.serial)
-                            digits = "".join(_re_fc.findall(r"\d+", ocr_text))
-                            if digits:
-                                coin_number = digits
-                                gui_log(device.serial, f"🪙 fixclear coin scanned: {coin_number}", step="Fix Clear Coin")
-                            break
-                        time.sleep(0.5)
-
-                gui_log(device.serial, f"fixclear detected! Clearing app and moving file to {dest_label}...", step="Fix Clear")
+                # เจอ fixclear1 → clear app จบเลย, ส่งไฟล์ไป file-error (ชื่อเดิม) แล้วเริ่ม id ใหม่
+                gui_log(device.serial, "fixclear detected! Clearing app and moving file to file-error...", step="Fix Clear")
                 device.shell("am force-stop jp.konami.pesam")
                 device.shell("su -c 'rm -f /data/data/jp.konami.pesam/files/SaveData/AUTH/online_user_id_data.dat'")
                 device.shell("su -c 'rm -rf /data/data/jp.konami.pesam/files/SaveData/AUTH/*'")
 
+                original_name = DEVICE_FILE_ASSIGNMENTS.get(device.serial)
                 if original_name:
                     file_path = os.path.join(INPUT_DIR, original_name)
-                    os.makedirs(dest_base, exist_ok=True)
-                    # ใช้ชื่อที่ลบ coin tag เดิมออกแล้วเป็นฐาน แล้วแนบเลขเหรียญใหม่ต่อท้ายก่อนนามสกุล
-                    move_name = name_no_coin if name_no_coin else original_name
-                    if coin_number:
-                        b, e = os.path.splitext(move_name)
-                        move_name = f"{b}-[{coin_number}]{e}"
-                    dest_path = os.path.join(dest_base, move_name)
+                    dest_path = os.path.join(FILE_ERROR_DIR, original_name)
                     if os.path.exists(file_path):
                         if os.path.exists(dest_path):
                             os.remove(dest_path)
-                        shutil.copy2(file_path, dest_path)
+                        _safe_copy(file_path, dest_path)
                         os.remove(file_path)
-                        gui_log(device.serial, f"Moved {original_name} to {dest_label} ({move_name})", step="Fix Clear")
+                        gui_log(device.serial, f"Moved {original_name} to file-error", step="Fix Clear")
 
                 raise DeviceResetException("fixclear detected")
 
@@ -1747,7 +1720,7 @@ def get_screen_capture(device):
                     if os.path.exists(file_path):
                         if os.path.exists(dest_path):
                             os.remove(dest_path)
-                        shutil.copy2(file_path, dest_path)
+                        _safe_copy(file_path, dest_path)
                         os.remove(file_path)
                         gui_log(device.serial, f"Moved {original_name} to file-error", step="Sell ID")
 
@@ -1830,9 +1803,9 @@ def get_screen_capture(device):
             if not DEVICE_DISABLE_FIXEVENT.get(device.serial, False):
                 fe_pts = img_search(img, _P['fixevent'])
                 if fe_pts:
-                    gui_log(device.serial, "Floating: fixevent.bmp found! Checking if it persists for 15s...", step="Fix Event")
+                    gui_log(device.serial, "Floating: fixevent.bmp found! Checking if it persists for 5s...", step="Fix Event")
                     persisted = True
-                    for _ in range(15):
+                    for _ in range(5):
                         time.sleep(1)
                         img_check = fast_screencap(device)
                         if img_check is None:
@@ -1844,7 +1817,7 @@ def get_screen_capture(device):
                             break
 
                     if persisted:
-                        gui_log(device.serial, "fixevent.bmp persisted for 15s! Clicking...", step="Fix Event")
+                        gui_log(device.serial, "fixevent.bmp persisted for 5s! Clicking...", step="Fix Event")
                         img_click = fast_screencap(device)
                         if img_click is not None:
                             pts_click = img_search(img_click, _P['fixevent'])
@@ -2230,7 +2203,7 @@ def pick_next_file():
                 continue
             in_use_files.add(name)
             try:
-                shutil.copy2(f, os.path.join(RUN_FILE_DIR, name))
+                _safe_copy(f, os.path.join(RUN_FILE_DIR, name))
             except Exception:
                 pass
             return f, name
@@ -2248,9 +2221,19 @@ def release_file(name):
             except Exception:
                 pass
 
+def _safe_copy(src, dest):
+    """copy2 โดยสร้างโฟลเดอร์ปลายทางให้ก่อน (lazy creation — ไม่สร้างโฟลเดอร์ล่วงหน้า)."""
+    d = os.path.dirname(dest)
+    if d:
+        os.makedirs(d, exist_ok=True)
+    shutil.copy2(src, dest)
+
 def save_result(src, dest):
     """ย้าย src → dest แบบ 'ทับของเดิมถ้าชื่อซ้ำ' + ตั้งเวลาแก้ไขเป็นปัจจุบัน
     (ใช้แทน shutil.move ตรงๆ เพราะ Windows จะ error ถ้าปลายทางมีไฟล์ชื่อเดียวกันอยู่)."""
+    d = os.path.dirname(dest)
+    if d:
+        os.makedirs(d, exist_ok=True)   # lazy: สร้างโฟลเดอร์ปลายทางตอนเขียนจริง
     try:
         if os.path.exists(dest):
             os.remove(dest)
@@ -2731,15 +2714,11 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
     device.shell("am force-stop jp.konami.pesam")
     time.sleep(1)
 
-    import re
     clean_orig = original_name
-    # ลบ coin tag เดิมที่อาจติดมาจากรอบก่อน (กันชื่อซ้อน + กันโดน split("-") ตัดผิด)
-    #   เช่น  ASCV610701450-[110].dat  ->  ASCV610701450.dat
-    #         [110]+ASCV...            ->  ASCV...   (รูปแบบเก่า)
-    clean_orig = re.sub(r"^\[\d+\]\+", "", clean_orig)   # prefix แบบเก่า [เลข]+
-    clean_orig = re.sub(r"-\[\d+\]", "", clean_orig)      # suffix -[เลข]
-    if "+" in clean_orig: clean_orig = clean_orig.split("+")[-1]
-    elif "-" in clean_orig: clean_orig = clean_orig.split("-")[-1]
+    # ตัด hero/coin prefix (Hero+ID หรือ [เลข]+ID -> ID) แต่ "เก็บ" coin tag -[เลข] ในชื่อเดิมไว้
+    #   เช่น  Aubameyang+ASPZ...-[30].dat -> ASPZ...-[30].dat ,  ASPZ...-[30].dat -> คงเดิม
+    if "+" in clean_orig:
+        clean_orig = clean_orig.split("+")[-1]
 
     if found_heroes:
         num_heroes = len(found_heroes)
@@ -2757,16 +2736,39 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
         final_name = f"{hero_prefix}+{clean_orig}"
         gui_log(serial, f"⭐ MATCH: {hero_prefix}", step=f"⭐ {hero_prefix}")
     else:
-        # ไม่เจอฮีโร่ → ส่งไป no-hero เสมอ (ตามที่ต้องการ ไม่ใช้ file-error แล้ว)
+        l1_lower = last_lock1_text.lower()
+        l2_lower = last_lock2_text.lower()
+        l3_lower = last_lock3_text.lower()
+        
+        is_empty_state = (
+            "n 'chang trv" in l1_lower or 
+            "found ter conditions" in l2_lower or
+            "no matching" in l1_lower or
+            "no matching" in l2_lower or
+            "no matching" in l3_lower or
+            "filter conditions" in l1_lower or
+            "filter conditions" in l2_lower or
+            "filter conditions" in l3_lower or
+            "conditions" in l1_lower or
+            "conditions" in l2_lower or
+            "conditions" in l3_lower
+        )
+        
+        # ไม่ match hero อะไรเลย → ส่งไป no-hero เสมอ (ไม่ว่าจะ verify empty state ได้หรือไม่)
         dest_dir = NO_HERO_DIR
         final_name = clean_orig
-        gui_log(serial, "No hero match found → no-hero.", step="No Match")
+        if is_empty_state:
+            gui_log(serial, "No hero match found (Verified empty state).", step="No Match")
+        else:
+            gui_log(serial, "No hero match found (OCR unverified) → no-hero.", step="No Match")
 
-    # แนบเลขเหรียญที่สแกนไว้ (Gacha+Find + CHECK_COIN=1) ต่อท้ายชื่อไฟล์ก่อนนามสกุล
-    #   เช่น  Paolo Maldini+ASCV610367086.dat  ->  Paolo Maldini+ASCV610367086-[300].dat
+    # แนบเลขเหรียญที่สแกนสดมา ต่อท้ายชื่อไฟล์ก่อนนามสกุล (เฉพาะกรณีที่ส่ง coin_prefix เข้ามา)
+    #   เช่น  Paolo Maldini+ASCV610367086.dat -> Paolo Maldini+ASCV610367086-[300].dat
     if coin_prefix:
-        base, ext = os.path.splitext(final_name)
-        final_name = f"{base}-[{coin_prefix}]{ext}"
+        import re as _re_fh
+        _b, _e = os.path.splitext(final_name)
+        _b = _re_fh.sub(r"-\[\d+\]", "", _b)  # กัน coin ซ้อนถ้าชื่อมี -[เลข] อยู่แล้ว
+        final_name = f"{_b}-[{coin_prefix}]{_e}"
         gui_log(serial, f"🪙 Attaching coins to filename: {final_name}", step="Coin Tag")
 
     dest = os.path.join(dest_dir, final_name)
@@ -2775,7 +2777,7 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
         try:
             if os.path.exists(dest):
                 os.remove(dest)
-            shutil.copy2(file_path, dest)
+            _safe_copy(file_path, dest)
             os.remove(file_path)
             gui_log(serial, f"✅ Sorted: {dest_dir}", step="Sorted", status="working")
         except Exception as me:
@@ -2882,34 +2884,6 @@ def scan_coin_number(device, cycle_start, serial):
     gui_log(serial, f"🪙 Coins scanned & remembered: {coin_number}", step="Coin Match")
     print(f"[{serial}] Gacha+Find Coin Scan: {coin_number}")
     return coin_number
-
-
-def handle_notcoin(device, cycle_start, serial, img=None):
-    """
-    ถ้าเจอ not-coin.bmp (เงินไม่พอตอนสุ่ม gacha) → กด Back รัวๆ จนกว่าจะเจอ cancel.bmp
-    → คลิก → หยุด → คืน True (จัดการแล้ว). ไม่เจอ not-coin → คืน False.
-    """
-    if img is None:
-        img = get_screen_capture(device)
-    if img is None or not img_search(img, os.path.join(IMG_DIR, "not-coin.bmp")):
-        return False
-
-    gui_log(serial, "not-coin.bmp detected! Spamming Back until cancel.bmp...", step="Not-Coin")
-    deadline_cancel = time.time() + 60  # timeout กันค้าง
-    while time.time() < deadline_cancel:
-        check_device_reset(serial, cycle_start)
-        device.shell("input keyevent 4")  # KEYCODE_BACK
-        time.sleep(0.4)
-        img_c = get_screen_capture(device)
-        if img_c is not None:
-            pts_c = img_search(img_c, os.path.join(IMG_DIR, "cancel.bmp"))
-            if pts_c:
-                x, y = pts_c[0]
-                device.shell(f"input swipe {x} {y} {x} {y} 100")
-                gui_log(serial, f"cancel.bmp found at ({x},{y})! Clicked, stopping Back spam.", step="Not-Coin OK")
-                time.sleep(1.0)
-                break
-    return True
 
 
 def gacha_find_navigate_then_find_hero(device, cycle_start, serial, original_name, file_path):
@@ -3193,7 +3167,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
                 try:
                     if os.path.exists(dest):
                         os.remove(dest)
-                    shutil.copy2(file_path, dest)
+                    _safe_copy(file_path, dest)
                     os.remove(file_path)
                     gui_log(serial, f"Sorted → file-error: {original_name}", step="Sorted")
                 except Exception as e:
@@ -3443,7 +3417,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
         try:
             if os.path.exists(dest):
                 os.remove(dest)
-            shutil.copy2(file_path, dest)
+            _safe_copy(file_path, dest)
             os.remove(file_path)
             gui_log(serial, f"✅ Sorted (GachaFree): {dest_dir}", step="Sorted", status="working")
         except Exception as me:
@@ -3493,7 +3467,7 @@ def check_coin_mode(device, cycle_start, serial, original_name, file_path):
             try:
                 if os.path.exists(dest):
                     os.remove(dest)
-                shutil.copy2(file_path, dest)
+                _safe_copy(file_path, dest)
                 os.remove(file_path)
             except Exception as e:
                 print(f"[{serial}] Failed to move file to random-fail: {e}")
@@ -3543,7 +3517,7 @@ def check_coin_mode(device, cycle_start, serial, original_name, file_path):
         try:
             if os.path.exists(dest):
                 os.remove(dest)
-            shutil.copy2(file_path, dest)
+            _safe_copy(file_path, dest)
             os.remove(file_path)
             gui_log(serial, f"✅ Sorted: {final_name} -> {CHECK_COIN_DIR}", step="Sorted", status="working")
         except Exception as e:
@@ -3592,24 +3566,12 @@ def process_device_login(device):
             device.shell("am force-stop jp.konami.pesam")
             time.sleep(1)
 
-            # 0.5 ลบ save data เดิมออกก่อนเริ่มวนไฟล์ใหม่ (กันข้อมูล id เก่าค้าง)
-            device.shell("su -c 'rm -f /data/data/jp.konami.pesam/files/SaveData/AUTH/online_user_id_data.dat'")
-            time.sleep(0.3)
-
             # 1. Pick file
-            #    ถ้ามีไฟล์ค้างให้ "เข้าใหม่" จาก fixclear → ใช้ไฟล์เดิม (ไม่หยิบไฟล์ใหม่/ไม่ปล่อย lock)
-            pending = DEVICE_REENTER_FILE.pop(serial, None)
-            if pending:
-                file_path, original_name = pending
-                gui_log(serial, f"Re-entering same file: {original_name}", step="Re-enter", status="working")
-            else:
-                # ไฟล์ใหม่ปกติ → รีเซ็ตตัวนับ re-enter
-                DEVICE_REENTER_COUNT.pop(serial, None)
-                file_path, original_name = pick_next_file()
-                if file_path is None:
-                    gui_log(serial, "No files left — waiting...", step="No Files", status="idle")
-                    time.sleep(3)
-                    continue
+            file_path, original_name = pick_next_file()
+            if file_path is None:
+                gui_log(serial, "No files left — waiting...", step="No Files", status="idle")
+                time.sleep(3)
+                continue
 
             gui_log(serial, f"File: {original_name}", step="File OK", status="working")
             DEVICE_FILE_ASSIGNMENTS[serial] = original_name
@@ -4555,7 +4517,7 @@ def process_device_login(device):
                         try:
                             if os.path.exists(dest):
                                 os.remove(dest)
-                            shutil.copy2(file_path, dest)
+                            _safe_copy(file_path, dest)
                             os.remove(file_path)
                             gui_log(serial, f"✅ Sorted: {original_name} -> {dest_dir}", step="Sorted", status="working")
                         except Exception as me:
@@ -4650,10 +4612,10 @@ def process_device_login(device):
                                 break
                         time.sleep(1.2)
                 
-                # box3 — กดไปเรื่อยๆ จนกว่า box3 จะหายไปเลย แล้วค่อยไป box4
+                # box3 (กดเรื่อยๆ จนไม่เจอครบ 10s ค่อยไป box4)
                 gui_log(serial, "Waiting box3.bmp...", step="box3")
-                deadline_box3 = time.time() + 90  # safety กันค้าง
-                while time.time() < deadline_box3:
+                last_seen = time.time()
+                while time.time() - last_seen < 10:
                     check_device_reset(serial, cycle_start)
                     img = get_screen_capture(device)
                     if img is not None:
@@ -4662,22 +4624,11 @@ def process_device_login(device):
                             x, y = pts[0]
                             device.shell(f"input swipe {x} {y} {x} {y} 100")
                             gui_log(serial, "box3.bmp clicked!", step="box3")
-                            time.sleep(2)
+                            time.sleep(4)
+                            last_seen = time.time()  # รีเซ็ตนับใหม่
                             continue
-                        else:
-                            # ไม่เจอ box3 → ยืนยันสั้นๆ (~3s) ว่าหายจริง กัน flicker ระหว่าง animation
-                            confirmed_gone = True
-                            confirm_deadline = time.time() + 3
-                            while time.time() < confirm_deadline:
-                                img2 = get_screen_capture(device)
-                                if img2 is not None and img_search(img2, os.path.join(IMG_DIR, "box3.bmp")):
-                                    confirmed_gone = False
-                                    break
-                                time.sleep(0.4)
-                            if confirmed_gone:
-                                gui_log(serial, "box3.bmp gone! Moving to box4.", step="box3-done")
-                                break
-                    time.sleep(0.5)
+                    time.sleep(1)
+                gui_log(serial, "box3 not seen for 10s, moving to box4", step="box3-done")
 
                 # box4
                 gui_log(serial, "Waiting box4.bmp...", step="box4")
@@ -4693,10 +4644,22 @@ def process_device_login(device):
                             break
                     time.sleep(1)
 
-            # 7.4 Check Coin Sequence (Optional)
-            #     ข้าม standalone check-coin ถ้าเปิด Gacha+Find (เพราะสแกนเหรียญรวมอยู่ในเส้นทาง Gacha+Find แล้ว)
             DEVICE_DISABLE_FIXEVENT[serial] = True
-            if CHECK_COIN == 1 and GACHA_FIND != 1:
+
+            # 7.3.5 CheckCoin + FindHero (ไม่มี gacha) → สแกนเหรียญใหม่ แล้วหา hero
+            #       เลขเหรียญที่สแกนได้จะ "เขียนทับ" เลขเดิมใน -[เลข] (ไม่ต่อเพิ่มจนชื่อยาว)
+            #       เจอ → Hero+ชื่อ-[เลขใหม่] , ไม่เจอ → ชื่อ-[เลขใหม่]
+            if (CHECK_COIN == 1 and FIND_HERO == 1
+                    and DO_GACHA != 1 and GACHA_FIND != 1 and GACHA_CHECK != 1):
+                gui_log(serial, "CheckCoin+Find mode → scan coin then find hero...", step="Coin+Find", status="working")
+                coin_prefix = scan_coin_number(device, cycle_start, serial)
+                if find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_prefix=coin_prefix):
+                    continue  # Start next file immediately
+
+            # 7.4 Check Coin Sequence (Optional)
+            #     ข้าม standalone check-coin ถ้าเปิด Gacha+Find (สแกนเหรียญรวมในเส้นทางนั้นแล้ว)
+            #     และข้ามถ้าเปิด FindHero ด้วย (เคสนั้นไปทำในบล็อก 7.3.5 CheckCoin+Find แทน)
+            if CHECK_COIN == 1 and GACHA_FIND != 1 and FIND_HERO != 1:
                 if check_coin_mode(device, cycle_start, serial, original_name, file_path):
                     continue  # Start next file immediately
 
@@ -4768,11 +4731,6 @@ def process_device_login(device):
                         if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
                             found_g4 = "nocoin"
                             break
-
-                        # เช็ค not-coin → กด Back รัวๆจนเจอ cancel → คลิก → ข้ามไปสเต็ปต่อไป
-                        if handle_notcoin(device, cycle_start, serial, img):
-                            found_g4 = "notcoin"
-                            break
                     time.sleep(1)
 
                 if not found_g4:
@@ -4801,11 +4759,7 @@ def process_device_login(device):
                                 gacha_hero_found = h.strip()
                                 break
                     # จบรอบนี้ทันที
-                    found_g4 = False
-                elif found_g4 == "notcoin":
-                    # not-coin จัดการแล้ว (Back→cancel) → ข้าม gacha5/OCR ไปสเต็ปต่อไปเลย
-                    gui_log(serial, "not-coin handled — skipping rest of gacha.", step="Not-Coin Skip")
-                    found_g4 = False
+                    found_g4 = False 
                 else:
                     # ถ้าผ่าน nocions มาได้ (ไม่เจอ) หรือเจอ gacha4 ไปแล้ว -> ไป gacha5 ต่อ
                     gui_log(serial, "Proceeding to Gacha5...", step="G5-Flow")
@@ -4825,11 +4779,6 @@ def process_device_login(device):
                                 # กรณีเจอตอนรอ gacha5
                                 gui_log(serial, "nocions.bmp detected during Gacha5!", step="No-Coins")
                                 # (ทำ OCR เหมือนด้านบนถ้าต้องการ แต่เพื่อความสั้นจะขอ break เลย)
-                                found_g4 = False
-                                break
-
-                            # เช็ค not-coin ตอนรอ gacha5 → Back รัวๆจนเจอ cancel → ข้ามไปสเต็ปต่อไป
-                            if handle_notcoin(device, cycle_start, serial, img):
                                 found_g4 = False
                                 break
                         time.sleep(1)
@@ -4922,7 +4871,7 @@ def process_device_login(device):
                     if os.path.exists(dest):
                         os.remove(dest)
                     # ใช้ copy + remove แทน move เพื่อความชัวร์บน Windows
-                    shutil.copy2(file_path, dest)
+                    _safe_copy(file_path, dest)
                     os.remove(file_path)
                     gui_log(serial, f"✅ Sorted: {original_name} -> {dest_dir}",
                             step="Sorted", status="working")
@@ -4951,12 +4900,6 @@ def process_device_login(device):
                 except Exception as e:
                     gui_log(serial, f"Failed to move {original_name} to timeout: {e}", step="Timeout Error")
             continue
-
-        except FixClearReenterException:
-            # fixclear → เข้าใหม่ไฟล์เดิม: อย่า release_file (เก็บ lock + ไฟล์ไว้ทำต่อ)
-            gui_log(serial, "🔁 fixclear re-enter — relaunching same file...", step="Re-enter", status="working")
-            device.shell("am force-stop jp.konami.pesam")
-            time.sleep(1)
 
         except DeviceResetException:
             release_file(original_name)
