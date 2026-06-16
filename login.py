@@ -4646,9 +4646,15 @@ def process_device_login(device):
 
             DEVICE_DISABLE_FIXEVENT[serial] = True
 
+<<<<<<< HEAD
             # 7.3.5 CheckCoin + FindHero (ไม่มี gacha) → สแกนเหรียญใหม่ แล้วหา hero
             #       เลขเหรียญที่สแกนได้จะ "เขียนทับ" เลขเดิมใน -[เลข] (ไม่ต่อเพิ่มจนชื่อยาว)
             #       เจอ → Hero+ชื่อ-[เลขใหม่] , ไม่เจอ → ชื่อ-[เลขใหม่]
+=======
+            # 7.3.5 CheckCoin + FindHero (ไม่มี gacha) → ทำเหมือน Gacha+CheckCoin+Fin
+            #       แต่เริ่มตรงที่ checkcoin → fin เลย (ข้าม gacha + การ navigate next/back)
+            #       ส่งไฟล์ออกด้วยวิธีเดียวกัน (find_hero_mode แนบ [เหรียญ]+ แล้วจัดลง found-hero/no-hero)
+>>>>>>> 9540430c5b06ac0587cb2592c9544012c83c1d76
             if (CHECK_COIN == 1 and FIND_HERO == 1
                     and DO_GACHA != 1 and GACHA_FIND != 1 and GACHA_CHECK != 1):
                 gui_log(serial, "CheckCoin+Find mode → scan coin then find hero...", step="Coin+Find", status="working")
