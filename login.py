@@ -1682,47 +1682,31 @@ def get_screen_capture(device):
                 
                 raise SellScreenException("sell.bmp detected")
 
-            # เช็คควบคู่กันทั้ง 2 นามสกุล/2 ตำแหน่ง ทุกรอบ อันไหนเจอก็ทำงาน
+            # เช็คควบคู่กันทั้ง fixclear / fixclear1 ทุกนามสกุล/ตำแหน่ง ทุกรอบ อันไหนเจอก็ทำงาน
             #   - fixclear1.bmp อยู่ใน img/getquest/
             #   - fixclear1.png อยู่ใน img/ (root)
-            fc_bmp = img_search(img, os.path.join(GETQUEST_IMG_DIR, "fixclear1.bmp"), threshold=0.8)
-            fc_png = img_search(img, os.path.join(IMG_DIR, "fixclear1.png"), threshold=0.8)
-            if fc_bmp or fc_png:
+            #   - fixclear.bmp / fixclear.png อยู่ใน img/ (root)
+            fc_bmp  = img_search(img, os.path.join(GETQUEST_IMG_DIR, "fixclear1.bmp"), threshold=0.8)
+            fc_png  = img_search(img, os.path.join(IMG_DIR, "fixclear1.png"), threshold=0.8)
+            fc0_bmp = img_search(img, os.path.join(IMG_DIR, "fixclear.bmp"), threshold=0.8)
+            fc0_png = img_search(img, os.path.join(IMG_DIR, "fixclear.png"), threshold=0.8)
+            if fc_bmp or fc_png or fc0_bmp or fc0_png:
                 serial_fc = device.serial
                 original_name = DEVICE_FILE_ASSIGNMENTS.get(serial_fc)
 
-                # ── เจอ fixclear → ลองปิดเกมแล้วเข้าใหม่ก่อน (ไม่ส่ง file-error) ──
-                #    ถ้ายังเจอ fixclear อีก (เกิน FIXCLEAR_MAX_REENTER) ค่อยส่งไป file-error
-                name_cnt, cnt = DEVICE_REENTER_COUNT.get(serial_fc, (None, 0))
-                if name_cnt != original_name:
-                    cnt = 0
-                cnt += 1
-                if original_name and cnt <= FIXCLEAR_MAX_REENTER:
-                    gui_log(serial_fc, f"fixclear detected! Re-entering (attempt {cnt}/{FIXCLEAR_MAX_REENTER}) — closing & relaunching, file kept.", step="Fix Clear Re-enter")
+                # ── เจอ fixclear/fixclear1 → ปิดแอพแล้วเปิดเข้าใหม่ไฟล์เดิมเฉยๆ ──
+                #    ไม่ส่ง file-error / ไม่ล้าง AUTH / เก็บไฟล์ไว้เสมอ
+                if original_name:
+                    gui_log(serial_fc, "fixclear detected! Closing & relaunching (file kept, no file-error)...", step="Fix Clear Re-enter")
                     device.shell("am force-stop jp.konami.pesam")
                     time.sleep(1)
-                    DEVICE_REENTER_COUNT[serial_fc] = (original_name, cnt)
                     DEVICE_REENTER_FILE[serial_fc] = (os.path.join(INPUT_DIR, original_name), original_name)
                     raise FixClearReenterException("fixclear re-enter")
 
-                # ── เข้าใหม่แล้วยังเจอ fixclear → clear app + ส่งไฟล์ไป file-error ──
-                gui_log(serial_fc, "fixclear still after re-enter → moving file to file-error...", step="Fix Clear")
-                DEVICE_REENTER_COUNT.pop(serial_fc, None)
-                DEVICE_REENTER_FILE.pop(serial_fc, None)
+                # ไม่มีไฟล์ผูกกับเครื่อง → แค่ปิดแอพแล้วเริ่มรอบใหม่ (ไม่ส่ง file-error)
+                gui_log(serial_fc, "fixclear detected (no file) — closing app and restarting cycle...", step="Fix Clear")
                 device.shell("am force-stop jp.konami.pesam")
-                device.shell("su -c 'rm -f /data/data/jp.konami.pesam/files/SaveData/AUTH/online_user_id_data.dat'")
-                device.shell("su -c 'rm -rf /data/data/jp.konami.pesam/files/SaveData/AUTH/*'")
-
-                if original_name:
-                    file_path = os.path.join(INPUT_DIR, original_name)
-                    dest_path = os.path.join(FILE_ERROR_DIR, original_name)
-                    if os.path.exists(file_path):
-                        if os.path.exists(dest_path):
-                            os.remove(dest_path)
-                        _safe_copy(file_path, dest_path)
-                        os.remove(file_path)
-                        gui_log(serial_fc, f"Moved {original_name} to file-error", step="Fix Clear")
-
+                time.sleep(1)
                 raise DeviceResetException("fixclear detected")
 
             # sell-id → ทำงานเหมือน fixclear1 (เช็คควบคู่ทั้ง .png + .bmp ทุกรอบ)
