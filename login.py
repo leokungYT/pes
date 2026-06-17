@@ -115,6 +115,10 @@ try:
     from config import LOGIN_FAST
 except ImportError:
     LOGIN_FAST = 0
+try:
+    from config import GACHA_MIN_COIN
+except ImportError:
+    GACHA_MIN_COIN = 100
 
 REMOTE_AUTH_DIR   = "/data/data/jp.konami.pesam/files/SaveData/AUTH"
 REMOTE_DAT_FILE   = f"{REMOTE_AUTH_DIR}/online_user_id_data.dat"
@@ -530,6 +534,7 @@ if GUI_ENABLED:
             _toggle_row("Find Hero Mode", var_find_hero)
             var_check_coin = ctk.IntVar(value=getattr(cfg, 'CHECK_COIN', 0))
             _toggle_row("Check Coin Mode", var_check_coin)
+            entry_min_coin = _entry_row("  └─ Min coin to gacha (น้อยกว่านี้ข้ามสุ่ม)", getattr(cfg, 'GACHA_MIN_COIN', 100), width=70)
             var_login_fast = ctk.IntVar(value=getattr(cfg, 'LOGIN_FAST', 0))
             _toggle_row("Login Fast (เจอ login แล้วจบรอบทันที)", var_login_fast)
 
@@ -714,7 +719,7 @@ if GUI_ENABLED:
 
             # ── Save button (pinned at bottom, outside scrollable area) ───
             def _save():
-                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST
+                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN
                 new_event = var_event.get()
                 new_box   = var_box.get()
                 new_gacha = var_gacha.get()
@@ -738,6 +743,10 @@ if GUI_ENABLED:
                     new_gfree_loops = int(entry_gfree_loops.get())
                 except ValueError:
                     new_gfree_loops = 2
+                try:
+                    new_min_coin = int(entry_min_coin.get())
+                except ValueError:
+                    new_min_coin = 100
 
                 # เขียนลง config.py
                 cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.py")
@@ -850,6 +859,12 @@ if GUI_ENABLED:
                 else:
                     content += f"\nLOGIN_FAST = {new_login_fast}\n"
 
+                if re.search(r"^GACHA_MIN_COIN\s*=\s*\d+", content, flags=re.MULTILINE):
+                    content = re.sub(r"^GACHA_MIN_COIN\s*=\s*\d+", f"GACHA_MIN_COIN = {new_min_coin}",
+                                     content, flags=re.MULTILINE)
+                else:
+                    content += f"\nGACHA_MIN_COIN = {new_min_coin}\n"
+
                 with open(cfg_path, "w", encoding="utf-8") as f:
                     f.write(content)
                 # อัปเดต runtime ด้วย
@@ -870,10 +885,11 @@ if GUI_ENABLED:
                 GETCODE_TEXT = new_getcode_txt
                 GETQUEST = new_getquest
                 LOGIN_FAST = new_login_fast
+                GACHA_MIN_COIN = new_min_coin
                 importlib.reload(cfg)
                 label_status.configure(text=f"✅ Saved!",
                                        text_color="#4caf50")
-                self.log(f"Config saved: EVENT={new_event}, BOX={new_box}, GACHA={new_gacha}, HERO={new_find}, GFREE={new_gfree}({new_gfree_loops} loops), COIN={new_ccoin}, NOSCAN={new_noscan}, GACHACHECK={new_gacha_check}, GACHAFIND={new_gacha_find}, AUTORUN={new_autorun}, GETCODE={new_getcode}, GETCODE_TEXT={new_getcode_txt}, GETQUEST={new_getquest}")
+                self.log(f"Config saved: EVENT={new_event}, BOX={new_box}, GACHA={new_gacha}, HERO={new_find}, GFREE={new_gfree}({new_gfree_loops} loops), COIN={new_ccoin}(min {new_min_coin}), NOSCAN={new_noscan}, GACHACHECK={new_gacha_check}, GACHAFIND={new_gacha_find}, AUTORUN={new_autorun}, GETCODE={new_getcode}, GETCODE_TEXT={new_getcode_txt}, GETQUEST={new_getquest}")
 
             ctk.CTkButton(win, text="💾 Save", fg_color="#2cc985",
                           hover_color="#229f69", command=_save).pack(pady=8)
@@ -2376,16 +2392,45 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
         gui_log(serial, f"Waiting for {name_curr}...", step=f"{name_curr} Waiting")
         last_click_time = 0
         fixfind_first_seen = None
+        step_start = time.time()   # ใช้จับเวลา "ค้าง" เฉพาะ fin1
+        last_countdown = None      # วินาทีล่าสุดที่ log countdown (กัน log รัว)
         while True:
             check_device_reset(serial, cycle_start)
+
+            # ── Countdown นับถอยหลัง 10 วิ เฉพาะ fin1 (โชว์ว่ายังทำงานอยู่) ──
+            if name_curr == "fin1.bmp":
+                remaining = int(10.0 - (time.time() - step_start)) + 1
+                if remaining > 0 and remaining != last_countdown:
+                    last_countdown = remaining
+                    gui_log(serial, f"Waiting fin1.bmp... rescue in {remaining}s", step=f"fin1 ⏳{remaining}s")
+
             img = get_screen_capture(device)
             if img is not None:
                 if _check_fixteam(img):
                     continue
-                    
+
                 if img_search(img, os.path.join(IMG_DIR, name_next), threshold=0.95):
                     gui_log(serial, f"{name_next} detected! Proceeding to next step.", step=f"{name_next} Seen")
                     break
+
+                # ── ถ้าไปต่อ fin1 ไม่ได้ครบ 10 วิ → กด Back รัวๆ จนเจอ cancel.png แล้วหยุด (แล้วลองรอ fin1 ใหม่) ──
+                if name_curr == "fin1.bmp" and (time.time() - step_start) >= 10.0:
+                    last_countdown = None
+                    gui_log(serial, "fin1.bmp stuck for 10s! Spamming Back until cancel.png...", step="fin1 Rescue")
+                    while True:
+                        check_device_reset(serial, cycle_start)
+                        device.shell("input keyevent 4")  # KEYCODE_BACK
+                        time.sleep(0.4)
+                        img_b = get_screen_capture(device)
+                        if img_b is not None:
+                            pts_cb = img_search(img_b, os.path.join(IMG_DIR, "cancel.png"))
+                            if pts_cb:
+                                xb, yb = pts_cb[0]
+                                gui_log(serial, f"cancel.png found at ({xb},{yb}) — clicking & stopping Back spam.", step="fin1 Rescue OK")
+                                click_cancel_until_gone(device, serial, xb, yb, step="fin1 Rescue")
+                                break
+                    step_start = time.time()   # รีเซ็ตนาฬิกาแล้วกลับไปรอ fin1 ใหม่
+                    continue
                     
                 if name_curr == "fin5.bmp":
                     pts_ff = img_search(img, os.path.join(IMG_DIR, "fixfind.bmp"), threshold=0.95)
@@ -2826,7 +2871,7 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
     release_file(original_name)
     return True
 
-def navigate_home_then_find_hero(device, cycle_start, serial, original_name, file_path):
+def navigate_home_then_find_hero(device, cycle_start, serial, original_name, file_path, coin_prefix=None):
     """
     Navigate to Home (backhome -> backhome1) แล้วต่อด้วย find_hero_mode ทันที (ไม่ clear app).
     ใช้ร่วมกันระหว่าง GachaFree+Check (GACHA_CHECK) และ Gacha+Find (GACHA_FIND)
@@ -2872,8 +2917,15 @@ def navigate_home_then_find_hero(device, cycle_start, serial, original_name, fil
                         break
             time.sleep(1.0)
 
-    # 2. Run Find Hero sequence continuously!
-    return find_hero_mode(device, cycle_start, serial, original_name, file_path)
+    # 1c. สแกนเหรียญใหม่อีกรอบก่อนทำ fin (อัปเดตเลขหลังสุ่มไปแล้ว เพราะเหรียญลดลง)
+    if CHECK_COIN == 1:
+        gui_log(serial, "Re-scanning coins after gacha (updated value)...", step="Coin Re-scan", status="working")
+        new_coin = scan_coin_number(device, cycle_start, serial)
+        if new_coin is not None:
+            coin_prefix = new_coin
+
+    # 2. Run Find Hero sequence continuously! (แนบเลขเหรียญที่สแกนใหม่หลังสุ่มถ้ามี)
+    return find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_prefix=coin_prefix)
 
 
 def scan_coin_number(device, cycle_start, serial):
@@ -2922,13 +2974,13 @@ def scan_coin_number(device, cycle_start, serial):
     return coin_number
 
 
-def gacha_find_navigate_then_find_hero(device, cycle_start, serial, original_name, file_path):
+def gacha_find_navigate_then_find_hero(device, cycle_start, serial, original_name, file_path, coin_prefix=None):
     """
     เส้นทางหลังสุ่ม gacha ปกติ (Gacha+Find) ก่อนเริ่มค้นหา fin1:
       1) รอ next.bmp → คลิก (ปิดหน้าผลสุ่ม)
       2) กด Back รัวๆ จนกว่าจะเจอ cancel.bmp → คลิก
-      3) ถ้า CHECK_COIN=1 → แวะสแกนเลขเหรียญ (จำไว้)
-      4) เริ่ม find_hero_mode (fin1...) แล้วแนบเลขเหรียญตอน export
+      3) เริ่ม find_hero_mode (fin1...) แล้วแนบเลขเหรียญที่สแกนไว้ "ก่อน" gacha ตอน export
+    coin_prefix: เลขเหรียญที่สแกนไว้ตั้งแต่ก่อนเริ่ม gacha (ถ้าเปิด CHECK_COIN)
     """
     # 1. รอ next.bmp → คลิก
     gui_log(serial, "Waiting next.bmp (Gacha+Find)...", step="Next Wait")
@@ -2962,16 +3014,18 @@ def gacha_find_navigate_then_find_hero(device, cycle_start, serial, original_nam
                 click_cancel_until_gone(device, serial, x, y, step="Cancel OK")
                 break
 
-    # 3. ถ้าเปิด CHECK_COIN → แวะสแกนเลขเหรียญก่อน (จำไว้แนบชื่อไฟล์ตอนจบ)
-    coin_prefix = None
+    # 3. สแกนเหรียญใหม่อีกรอบก่อนทำ fin (อัปเดตเลขหลังสุ่มไปแล้ว เพราะเหรียญลดลง)
     if CHECK_COIN == 1:
-        coin_prefix = scan_coin_number(device, cycle_start, serial)
+        gui_log(serial, "Re-scanning coins after gacha (updated value)...", step="Coin Re-scan", status="working")
+        new_coin = scan_coin_number(device, cycle_start, serial)
+        if new_coin is not None:
+            coin_prefix = new_coin
 
-    # 4. เริ่มค้นหา fin1... (แนบเลขเหรียญตอน export ถ้ามี)
+    # 4. เริ่มค้นหา fin1... (แนบเลขเหรียญที่สแกนใหม่หลังสุ่มตอน export ถ้ามี)
     return find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_prefix=coin_prefix)
 
 
-def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
+def gacha_free_mode(device, cycle_start, serial, original_name, file_path, coin_prefix=None):
     """
     Gacha Free mode (G loops):
     Each loop: swipe to find gachafree1 → click → gachafree2 → click → checkpointgacha → OCR
@@ -3400,7 +3454,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
     # 3. จบตามลูปที่ตั้งค่า → Sort file
     if GACHA_CHECK == 1:
         gui_log(serial, "GachaFree finished. Gacha+Check mode active: waiting for backhome...", step="GachaFree Done")
-        return navigate_home_then_find_hero(device, cycle_start, serial, original_name, file_path)
+        return navigate_home_then_find_hero(device, cycle_start, serial, original_name, file_path, coin_prefix=coin_prefix)
 
     device.shell("am force-stop jp.konami.pesam")
     time.sleep(1)
@@ -3465,70 +3519,71 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path):
     release_file(original_name)
     return True
 
-def check_coin_mode(device, cycle_start, serial, original_name, file_path):
+def check_coin_mode(device, cycle_start, serial, original_name, file_path, coin_prefix=None):
     """
     Check Coin sequence:
-    1. Wait for checkpointcoin.bmp
-    2. OCR at Region(52, 10, 106, 41) to extract the number (digits only)
-    3. Rename file: [digits]+original_name (stripping any old [digits]+ from original name to avoid nesting)
-    4. Move file to 'check-coin' directory
-    5. Force-stop game and return True
+    1. ใช้เลขเหรียญที่สแกนไว้ "ก่อน" แล้ว (coin_prefix) — ถ้าไม่มีค่อยสแกนสด ณ จุดนี้
+    2. Rename file: [digits]+original_name (stripping any old [digits]+ from original name to avoid nesting)
+    3. Move file to 'check-coin' directory
+    4. Force-stop game and return True
     """
     import re
-    gui_log(serial, "Waiting checkpointcoin...", step="Coin Wait", status="working")
-    
-    # 1. Wait for checkpointcoin.bmp
-    deadline = time.time() + 60
-    found_cp = False
-    while time.time() < deadline:
-        check_device_reset(serial, cycle_start)
-        img = get_screen_capture(device)
-        if img is not None:
-            pts = img_search(img, os.path.join(IMG_DIR, "checkpointcoin.bmp"))
-            if pts:
-                found_cp = True
-                break
-        time.sleep(1)
-        
-    if not found_cp:
-        gui_log(serial, "checkpointcoin.bmp not found! Moving to random-fail.", step="Coin Timeout")
-        device.shell("am force-stop jp.konami.pesam")
-        time.sleep(1)
-        dest_dir = RANDOM_FAIL_DIR
-        final_name = original_name
-        dest = os.path.join(dest_dir, final_name)
-        if os.path.exists(file_path):
-            time.sleep(2)
-            try:
-                if os.path.exists(dest):
-                    os.remove(dest)
-                _safe_copy(file_path, dest)
-                os.remove(file_path)
-            except Exception as e:
-                print(f"[{serial}] Failed to move file to random-fail: {e}")
-        release_file(original_name)
-        return True
 
-    # 2. OCR at Region(52, 10, 106, 41)
-    gui_log(serial, "checkpointcoin detected! Scanning coins...", step="Scanning Coin")
-    coin_number = None
-    for attempt in range(3):
-        check_device_reset(serial, cycle_start)
-        img = get_screen_capture(device)
-        if img is not None:
-            coin_region = Region(52, 10, 106, 41)
-            ocr_text = read_screen_text(img, region=coin_region, serial=serial)
-            digits = "".join(re.findall(r"\d+", ocr_text))
-            if digits:
-                coin_number = digits
-                break
-        time.sleep(1)
+    # 1. ใช้เลขเหรียญที่สแกนไว้ก่อนหน้า (ถ้ามี) — ไม่ต้องสแกนซ้ำ
+    coin_number = coin_prefix
+
+    # 1b. กรณีไม่มีเลขที่สแกนไว้ → สแกนสด ณ จุดนี้ (fallback)
+    if not coin_number:
+        gui_log(serial, "No pre-scanned coin — waiting checkpointcoin...", step="Coin Wait", status="working")
+        deadline = time.time() + 60
+        found_cp = False
+        while time.time() < deadline:
+            check_device_reset(serial, cycle_start)
+            img = get_screen_capture(device)
+            if img is not None:
+                pts = img_search(img, os.path.join(IMG_DIR, "checkpointcoin.bmp"))
+                if pts:
+                    found_cp = True
+                    break
+            time.sleep(1)
+
+        if not found_cp:
+            gui_log(serial, "checkpointcoin.bmp not found! Moving to random-fail.", step="Coin Timeout")
+            device.shell("am force-stop jp.konami.pesam")
+            time.sleep(1)
+            dest_dir = RANDOM_FAIL_DIR
+            final_name = original_name
+            dest = os.path.join(dest_dir, final_name)
+            if os.path.exists(file_path):
+                time.sleep(2)
+                try:
+                    if os.path.exists(dest):
+                        os.remove(dest)
+                    _safe_copy(file_path, dest)
+                    os.remove(file_path)
+                except Exception as e:
+                    print(f"[{serial}] Failed to move file to random-fail: {e}")
+            release_file(original_name)
+            return True
+
+        gui_log(serial, "checkpointcoin detected! Scanning coins...", step="Scanning Coin")
+        for attempt in range(3):
+            check_device_reset(serial, cycle_start)
+            img = get_screen_capture(device)
+            if img is not None:
+                coin_region = Region(52, 10, 106, 41)
+                ocr_text = read_screen_text(img, region=coin_region, serial=serial)
+                digits = "".join(re.findall(r"\d+", ocr_text))
+                if digits:
+                    coin_number = digits
+                    break
+            time.sleep(1)
 
     if not coin_number:
         gui_log(serial, "Could not read coins via OCR! Using '0'", step="OCR Fail")
         coin_number = "0"
 
-    # 3. Rename file and strip old [digits]+ prefix
+    # 2. Rename file and strip old [digits]+ prefix
     match = re.match(r"^\[\d+\]\+(.+)$", original_name)
     if match:
         base_name = match.group(1)
@@ -3539,7 +3594,7 @@ def check_coin_mode(device, cycle_start, serial, original_name, file_path):
     gui_log(serial, f"🪙 Coins: {coin_number} -> {final_name}", step="Coin Match")
     print(f"[{serial}] Coin Scan Result: {coin_number} -> file: {final_name}")
 
-    # 4. Move file to 'check-coin' directory
+    # 3. Move file to 'check-coin' directory
     CHECK_COIN_DIR = "check-coin"
     os.makedirs(CHECK_COIN_DIR, exist_ok=True)
     
@@ -3783,6 +3838,23 @@ def process_device_login(device):
                             # กดจนกว่าจะหายไปครบ 3 วิ ค่อยไปต่อ
                             click_cancel_until_gone(device, serial, x, y, step="Cancel")
                             break
+
+            # ── Check Coin (สแกนก่อนเสมอ ถ้าเปิด) ──
+            #    ถ้าเปิด CHECK_COIN → สแกนเลขเหรียญตั้งแต่อยู่หน้า main menu "ก่อน" ทำงานอื่น
+            #    (Box / GetCode / GetQuest / Gacha / Find) แล้วจำไว้แนบชื่อไฟล์ตอนจบ
+            coin_prefix = None
+            # coin_low = เหรียญที่สแกนได้ "น้อยกว่า" เกณฑ์ GACHA_MIN_COIN → จะใช้ข้ามการสุ่ม
+            coin_low = False
+            if CHECK_COIN == 1:
+                gui_log(serial, "Check Coin enabled → scanning coins first (before other steps)...", step="Coin First", status="working")
+                coin_prefix = scan_coin_number(device, cycle_start, serial)
+                if coin_prefix is not None:
+                    try:
+                        coin_low = int(coin_prefix) < int(GACHA_MIN_COIN)
+                    except (ValueError, TypeError):
+                        coin_low = False
+                    if coin_low:
+                        gui_log(serial, f"🪙 Coins {coin_prefix} < {GACHA_MIN_COIN} → will SKIP gacha.", step="Low Coin")
 
             # 6.5 Get Code Sequence (Optional — ก่อน Box)
             if GETCODE == 1:
@@ -4642,13 +4714,12 @@ def process_device_login(device):
 
             DEVICE_DISABLE_FIXEVENT[serial] = True
 
-            # 7.3.5 CheckCoin + FindHero (ไม่มี gacha) → สแกนเหรียญใหม่ แล้วหา hero
+            # 7.3.5 CheckCoin + FindHero (ไม่มี gacha) → ใช้เลขเหรียญที่สแกนไว้ก่อนแล้ว → หา hero
             #       เลขเหรียญที่สแกนได้จะ "เขียนทับ" เลขเดิมใน -[เลข] (ไม่ต่อเพิ่มจนชื่อยาว)
             #       เจอ → Hero+ชื่อ-[เลขใหม่] , ไม่เจอ → ชื่อ-[เลขใหม่]
             if (CHECK_COIN == 1 and FIND_HERO == 1
                     and DO_GACHA != 1 and GACHA_FIND != 1 and GACHA_CHECK != 1):
-                gui_log(serial, "CheckCoin+Find mode → scan coin then find hero...", step="Coin+Find", status="working")
-                coin_prefix = scan_coin_number(device, cycle_start, serial)
+                gui_log(serial, "CheckCoin+Find mode → using pre-scanned coin, find hero...", step="Coin+Find", status="working")
                 if find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_prefix=coin_prefix):
                     continue  # Start next file immediately
 
@@ -4656,23 +4727,48 @@ def process_device_login(device):
             #     ข้าม standalone check-coin ถ้าเปิด Gacha+Find (สแกนเหรียญรวมในเส้นทางนั้นแล้ว)
             #     และข้ามถ้าเปิด FindHero ด้วย (เคสนั้นไปทำในบล็อก 7.3.5 CheckCoin+Find แทน)
             if CHECK_COIN == 1 and GACHA_FIND != 1 and FIND_HERO != 1:
-                if check_coin_mode(device, cycle_start, serial, original_name, file_path):
+                if check_coin_mode(device, cycle_start, serial, original_name, file_path, coin_prefix=coin_prefix):
                     continue  # Start next file immediately
 
             # 7.5 Find Hero Sequence (Optional)
             if FIND_HERO == 1 and GACHA_CHECK != 1 and GACHA_FIND != 1:
-                if find_hero_mode(device, cycle_start, serial, original_name, file_path):
+                if find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_prefix=coin_prefix):
                     continue  # Start next file immediately
 
             # 7.6 Gacha Free Sequence (Optional)
             #     ถ้าเปิด Gacha+Find (GACHA_FIND) → ข้าม free-gacha ไปทำ gacha ปกติ (gacha3) แทน
             if (GACHA_FREE == 1 or GACHA_CHECK == 1) and GACHA_FIND != 1:
-                if gacha_free_mode(device, cycle_start, serial, original_name, file_path):
+                # ── เหรียญน้อยกว่าเกณฑ์ → ข้ามการสุ่มฟรี ──
+                if coin_low:
+                    if GACHA_CHECK == 1:
+                        # find เปิดอยู่ → ข้ามสุ่ม ไปทำ fin เลย (เริ่มจากหน้า main menu)
+                        gui_log(serial, f"Low coin → skip Gacha Free, go Find Hero...", step="Low Coin → Find")
+                        if find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_prefix=coin_prefix):
+                            continue  # Start next file immediately
+                    else:
+                        # สุ่มอย่างเดียว → จบรอบ (บันทึกเลขเหรียญลง check-coin)
+                        gui_log(serial, f"Low coin → skip Gacha Free, end cycle.", step="Low Coin → End")
+                        if check_coin_mode(device, cycle_start, serial, original_name, file_path, coin_prefix=coin_prefix):
+                            continue  # Start next file immediately
+                elif gacha_free_mode(device, cycle_start, serial, original_name, file_path, coin_prefix=coin_prefix):
                     continue  # Start next file immediately
+
+            # ── เหรียญน้อยกว่าเกณฑ์ + เปิด Gacha mode → ข้ามการสุ่ม ──
+            if DO_GACHA == 1 and coin_low:
+                if GACHA_FIND == 1:
+                    # find เปิดอยู่ → ข้ามสุ่ม ไปทำ fin เลย (เริ่มจากหน้า main menu)
+                    gui_log(serial, f"Low coin → skip Gacha, go Find Hero...", step="Low Coin → Find")
+                    if find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_prefix=coin_prefix):
+                        continue  # Start next file immediately
+                else:
+                    # สุ่มอย่างเดียว → จบรอบ (บันทึกเลขเหรียญลง check-coin)
+                    gui_log(serial, f"Low coin → skip Gacha, end cycle.", step="Low Coin → End")
+                    if check_coin_mode(device, cycle_start, serial, original_name, file_path, coin_prefix=coin_prefix):
+                        continue  # Start next file immediately
 
             # 8. Gacha Sequence (Optional)
             gacha_hero_found = None
-            if DO_GACHA == 1:
+            if DO_GACHA == 1 and not coin_low:
                 gui_log(serial, "Gacha sequence started...", step="Gacha Mode", status="working")
                 
                 # gacha1 -> gacha2
@@ -4827,9 +4923,9 @@ def process_device_login(device):
 
             # 8.5 Gacha + Find Hero (Optional) — หลังสุ่มกาชาเสร็จ "ไม่ clear app"
             #      next → กด Back รัวๆจนเจอ cancel → คลิก → แล้วค่อยค้นหา fin1
-            if DO_GACHA == 1 and GACHA_FIND == 1:
+            if DO_GACHA == 1 and GACHA_FIND == 1 and not coin_low:
                 gui_log(serial, "Gacha finished. Gacha+Find mode active: next → Back→cancel → Find Hero...", step="Gacha+Find")
-                if gacha_find_navigate_then_find_hero(device, cycle_start, serial, original_name, file_path):
+                if gacha_find_navigate_then_find_hero(device, cycle_start, serial, original_name, file_path, coin_prefix=coin_prefix):
                     continue  # find_hero_mode จัดการปิดแอป + ย้ายไฟล์ + จบรอบให้แล้ว
 
             # 9. Done & File Sorting

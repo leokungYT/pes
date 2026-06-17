@@ -16,7 +16,7 @@ DO_BOX = 0
 # ── Gacha Sequence (login.py) ──────────────────────
 # 1 = สุ่มกาชา (ต่อจากจบ box4)
 # 0 = ไม่สุ่มกาชา (จบงานปกติ)
-DO_GACHA = 0
+DO_GACHA = 1
 
 # ── Gacha + Check Mode ──────────────────────────────
 # 1 = สุ่มกาชาเสร็จแล้วกด backhome ต่อด้วยค้นหาฮีโร่ทันที
@@ -27,7 +27,7 @@ GACHA_CHECK = 0
 # 1 = สุ่มกาชาแบบเสียเงิน (DO_GACHA) เสร็จแล้ว "ไม่ต้อง clear app"
 #     กด backhome ต่อด้วยค้นหาฮีโร่ทันที (ทำงานเหมือน gachafree+check)
 # 0 = ข้าม (สุ่มกาชาเสร็จแล้วปิดแอปจบรอบตามปกติ)
-GACHA_FIND = 0
+GACHA_FIND = 1
 
 # รายชื่อนักเตะที่ต้องการเก็บ (Backup-id)
 HERO_LIST = [
@@ -47,7 +47,7 @@ LOGIN_SUCCESS_DIR = "login-success"
 # ── Find Hero Sequence ─────────────────────────────
 # 1 = ทำงาน fin1-fin8 และค้นหาฮีโร่ตามภาพ
 # 0 = ข้าม
-FIND_HERO = 1
+FIND_HERO = 0
 
 # แมพไฟล์ภาพฮีโร่เข้ากับชื่อฮีโร่
 HERO_IMG_MAP = {
@@ -126,6 +126,13 @@ DEBUG_OCR = 0
 # 1 = ทำงานสแกนเหรียญ (หา checkpointcoin.bmp → OCR สแกนหาเลขเหรียญที่ Region(52, 10, 106, 41) → บันทึกลง check-coin)
 # 0 = ข้าม
 CHECK_COIN = 1
+
+# ── Min Coin to Gacha (ใช้ร่วมกับ Check Coin) ──────
+# เลขเหรียญขั้นต่ำที่จะ "สุ่ม" — ถ้าสแกนเหรียญได้ "น้อยกว่า" ค่านี้:
+#   • ถ้าเปิด Find  → ข้ามขั้นตอนสุ่ม (gacha/gacha free) ไปทำขั้นตอน fin เลย
+#   • ถ้าไม่เปิด Find (สุ่มอย่างเดียว) → จบรอบทันที (ไม่สุ่ม)
+# ใช้ทั้งใน Gacha mode และ Gacha Free mode (ทำงานเฉพาะเมื่อเปิด Check Coin)
+GACHA_MIN_COIN = 100
 
 # ── No Scan Mode ──────────────────────────────────
 # 1 = ข้ามขั้นตอน checkpointgacha (ไม่สแกน OCR)
