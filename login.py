@@ -119,6 +119,14 @@ try:
     from config import GACHA_MIN_COIN
 except ImportError:
     GACHA_MIN_COIN = 100
+try:
+    from config import MOVE_LS_ENABLE
+except ImportError:
+    MOVE_LS_ENABLE = 0
+try:
+    from config import MOVE_LS_TIME
+except ImportError:
+    MOVE_LS_TIME = "09:00"
 
 REMOTE_AUTH_DIR   = "/data/data/jp.konami.pesam/files/SaveData/AUTH"
 REMOTE_DAT_FILE   = f"{REMOTE_AUTH_DIR}/online_user_id_data.dat"
@@ -265,6 +273,8 @@ if GUI_ENABLED:
             self.after(200,   self._process_gui_queue)   # queue poller — 200ms
             self.after(500,   self._periodic_log_flush)  # log flush — 500ms
             self.after(120000, self._periodic_gc)        # GC every 2 min — ป้องกัน memory leak
+            self.after(30000, self._check_move_schedule) # ตรวจเวลาย้าย login-success → input-id ทุก 30 วิ
+            threading.Thread(target=_sync_net_time, daemon=True).start()  # sync เวลาโลก (internet) ตอนเริ่ม
             self.update_check_seconds = 60
             self.after(1000, self.tick_update_timer)
             self.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -612,6 +622,49 @@ if GUI_ENABLED:
             ctk.CTkSegmentedButton(row_update, values=["keep", "clean"],
                                    variable=var_update_mode).pack(side="right")
 
+            # ════════ Move login-success → input-id (ตั้งเวลา) ════════
+            _section("📤 Move login-success → input-id")
+            var_move_ls = ctk.IntVar(value=getattr(cfg, 'MOVE_LS_ENABLE', 0))
+            _toggle_row("Auto-move ทุกวันตามเวลา", var_move_ls)
+            entry_move_time = _entry_row("  ↳ เวลา (24h หรือ AM/PM)", getattr(cfg, 'MOVE_LS_TIME', '09:00'), width=80)
+            # ── นับถอยหลังสด (อิงเวลาโลก internet ถ้า sync ได้) ──
+            lbl_countdown = ctk.CTkLabel(scroll_cfg, text="",
+                                         font=ctk.CTkFont(size=12, weight="bold"), text_color="#ffa726")
+            lbl_countdown.pack(fill="x", padx=18, pady=(0, 0))
+            def _update_countdown():
+                try:
+                    if not lbl_countdown.winfo_exists():
+                        return
+                    if var_move_ls.get() == 1:
+                        from datetime import timedelta
+                        now = real_now()
+                        hhmm = parse_time_to_hhmm(entry_move_time.get())
+                        if hhmm:
+                            sh, sm = [int(x) for x in hhmm.split(":")]
+                            sched = now.replace(hour=sh, minute=sm, second=0, microsecond=0)
+                            src = "🌐net" if _NET_TIME_SYNCED else "🖥local"
+                            nxt = sched if now < sched else sched + timedelta(days=1)
+                            rem = max(0, int((nxt - now).total_seconds()))
+                            hh, rr = divmod(rem, 3600); mm, ss = divmod(rr, 60)
+                            lbl_countdown.configure(text=f"⏳ อีก {hh:02d}:{mm:02d}:{ss:02d} → {hhmm}  ({src} {now.strftime('%H:%M:%S')})")
+                        else:
+                            lbl_countdown.configure(text="⚠️ เวลาไม่ถูกต้อง (เช่น 21:46 หรือ 9:46PM)")
+                    else:
+                        lbl_countdown.configure(text="(ปิด auto-move อยู่)")
+                    win.after(1000, _update_countdown)
+                except Exception:
+                    pass
+            _update_countdown()
+            lbl_move = ctk.CTkLabel(scroll_cfg, text="ย้ายไฟล์ทั้งหมด login-success → input-id",
+                                    font=ctk.CTkFont(size=11, slant="italic"), text_color="gray")
+            lbl_move.pack(fill="x", padx=18, pady=(0, 2))
+            def _move_now():
+                moved = move_login_success_to_input()
+                lbl_move.configure(text=f"📤 ย้าย {moved} ไฟล์แล้ว (login-success → input-id)", text_color="#4caf50")
+                self.log(f"Move now: {moved} files login-success → input-id")
+            ctk.CTkButton(scroll_cfg, text="📤 ย้ายตอนนี้ (login-success → input-id)",
+                          command=_move_now, height=30).pack(fill="x", padx=14, pady=(2, 6))
+
             # ════════ Import Zip → input-id ════════
             _section("📦 Import Zip → input-id")
             lbl_zip = ctk.CTkLabel(scroll_cfg, text="เอา .zip ไปวางในโฟลเดอร์ zip/ แล้วกดปุ่ม → แตกเข้า input-id",
@@ -719,7 +772,7 @@ if GUI_ENABLED:
 
             # ── Save button (pinned at bottom, outside scrollable area) ───
             def _save():
-                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN
+                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, MOVE_LS_ENABLE, MOVE_LS_TIME
                 new_event = var_event.get()
                 new_box   = var_box.get()
                 new_gacha = var_gacha.get()
@@ -865,6 +918,20 @@ if GUI_ENABLED:
                 else:
                     content += f"\nGACHA_MIN_COIN = {new_min_coin}\n"
 
+                new_move_ls = var_move_ls.get()
+                # parse เวลา (รองรับ 24h และ AM/PM เช่น 9:46PM) → HH:MM ; ผิดรูปแบบ → คงค่าเดิม
+                new_move_time = parse_time_to_hhmm(entry_move_time.get()) or (str(getattr(cfg, 'MOVE_LS_TIME', '09:00')).strip() or "09:00")
+                if re.search(r"^MOVE_LS_ENABLE\s*=\s*\d", content, flags=re.MULTILINE):
+                    content = re.sub(r"^MOVE_LS_ENABLE\s*=\s*\d", f"MOVE_LS_ENABLE = {new_move_ls}",
+                                     content, flags=re.MULTILINE)
+                else:
+                    content += f"\nMOVE_LS_ENABLE = {new_move_ls}\n"
+                if re.search(r'^MOVE_LS_TIME\s*=\s*["\'].*["\']', content, flags=re.MULTILINE):
+                    content = re.sub(r'^MOVE_LS_TIME\s*=\s*["\'].*["\']', f'MOVE_LS_TIME = "{new_move_time}"',
+                                     content, flags=re.MULTILINE)
+                else:
+                    content += f'\nMOVE_LS_TIME = "{new_move_time}"\n'
+
                 with open(cfg_path, "w", encoding="utf-8") as f:
                     f.write(content)
                 # อัปเดต runtime ด้วย
@@ -886,6 +953,8 @@ if GUI_ENABLED:
                 GETQUEST = new_getquest
                 LOGIN_FAST = new_login_fast
                 GACHA_MIN_COIN = new_min_coin
+                MOVE_LS_ENABLE = new_move_ls
+                MOVE_LS_TIME = new_move_time
                 importlib.reload(cfg)
                 label_status.configure(text=f"✅ Saved!",
                                        text_color="#4caf50")
@@ -955,6 +1024,51 @@ if GUI_ENABLED:
                     pass
             threading.Thread(target=_bg_gc, daemon=True).start()
             self.after(120000, self._periodic_gc)
+
+        def _check_move_schedule(self):
+            # ย้าย login-success → input-id อัตโนมัติ เมื่อถึงเวลา MOVE_LS_TIME (วันละครั้ง)
+            # + log นับถอยหลังว่าใกล้ถึงเวลายัง
+            try:
+                # re-sync เวลาโลก (internet) ทุก ~1 ชม. แบบ background
+                if time.time() - _net_time_last_sync > 3600:
+                    threading.Thread(target=_sync_net_time, daemon=True).start()
+                if MOVE_LS_ENABLE == 1:
+                    from datetime import timedelta
+                    now = real_now()   # อิงเวลาโลก (internet) ถ้า sync ได้ ไม่งั้นเวลาเครื่อง
+                    try:
+                        sh, sm = [int(x) for x in str(MOVE_LS_TIME).strip().split(":")[:2]]
+                    except Exception:
+                        sh, sm = 9, 0
+                    sched = now.replace(hour=sh, minute=sm, second=0, microsecond=0)
+                    today = now.strftime("%Y-%m-%d")
+                    # กันย้ายซ้ำ "ต่อ (วัน+เวลาที่ตั้ง)" → เปลี่ยนเวลาใหม่ = ได้ย้ายใหม่
+                    move_key = (today, f"{sh:02d}:{sm:02d}")
+                    already = (getattr(self, "_last_move_key", None) == move_key)
+
+                    # edge-trigger: ย้ายเฉพาะตอน "นาฬิกาเดินข้ามเวลาที่ตั้ง" ขณะโปรแกรมรันอยู่
+                    #   รอบแรกหลังเปิดโปรแกรม (prev = None) จะไม่ย้าย → กันย้ายเองตอนเพิ่งเปิด/เวลาเพิ่งผ่าน
+                    prev = getattr(self, "_sched_prev_now", None)
+                    self._sched_prev_now = now
+                    crossed = (prev is not None and prev < sched <= now)
+
+                    if crossed and not already:
+                        self._last_move_key = move_key
+                        self._last_cd_min = None
+                        moved = move_login_success_to_input()
+                        self.log(f"⏰ Auto-move {moved} files: login-success → input-id (at {MOVE_LS_TIME})")
+                    else:
+                        # นับถอยหลังถึงรอบถัดไป (ถ้าเลยเวลา/ย้ายแล้ววันนี้ → พรุ่งนี้)
+                        nxt = sched if (now < sched and not already) else sched + timedelta(days=1)
+                        mins = max(0, int((nxt - now).total_seconds()) // 60)
+                        last = getattr(self, "_last_cd_min", None)
+                        # ใกล้ (<=60 นาที) log ทุกนาที , ไกล log ทุก 30 นาที
+                        if last != mins and (mins <= 60 or mins % 30 == 0):
+                            self._last_cd_min = mins
+                            h, m = divmod(mins, 60)
+                            self.log(f"⏳ Move login-success in {h}h {m:02d}m (at {MOVE_LS_TIME})")
+            except Exception as e:
+                self.log(f"Move schedule error: {e}")
+            self.after(30000, self._check_move_schedule)
 
         def add_stat_row(self, name, count, is_error=False):
             if name not in self.stat_rows:
@@ -2280,6 +2394,83 @@ def _safe_copy(src, dest):
     if d:
         os.makedirs(d, exist_ok=True)
     shutil.copy2(src, dest)
+
+_NET_TIME_OFFSET   = 0.0     # วินาที = (เวลาโลกจริง) - (เวลาเครื่อง)
+_NET_TIME_SYNCED   = False
+_net_time_last_sync = 0.0
+
+def _sync_net_time():
+    """ดึงเวลาโลกจาก HTTP Date header → คำนวณ offset เทียบเวลาเครื่อง (เงียบ ถ้าเน็ตล่มก็ข้าม)."""
+    global _NET_TIME_OFFSET, _NET_TIME_SYNCED, _net_time_last_sync
+    import urllib.request, email.utils
+    for url in ("https://www.google.com", "https://www.cloudflare.com"):
+        try:
+            req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=5) as r:
+                date_hdr = r.headers.get("Date")
+            if date_hdr:
+                real_epoch = email.utils.mktime_tz(email.utils.parsedate_tz(date_hdr))
+                _NET_TIME_OFFSET = real_epoch - time.time()
+                _NET_TIME_SYNCED = True
+                _net_time_last_sync = time.time()
+                return True
+        except Exception:
+            continue
+    _net_time_last_sync = time.time()
+    return False
+
+def real_now():
+    """datetime ปัจจุบันอิงเวลาโลก (internet) ถ้า sync ได้ ไม่งั้น fallback เวลาเครื่อง."""
+    from datetime import datetime
+    return datetime.fromtimestamp(time.time() + _NET_TIME_OFFSET)
+
+def parse_time_to_hhmm(raw):
+    """แปลงเวลาที่พิมพ์ → 'HH:MM' (24 ชม.) รองรับทั้ง 24h และ AM/PM
+       เช่น 9:46PM → 21:46 , 9:46 → 09:46 , 946 → 09:46 ; ผิดรูปแบบ → None."""
+    import re as _re_t
+    s = str(raw).strip().lower().replace(".", ":")
+    ampm = None
+    if "am" in s:
+        ampm = "am"; s = s.replace("am", "")
+    elif "pm" in s:
+        ampm = "pm"; s = s.replace("pm", "")
+    s = s.strip()
+    m = _re_t.match(r"^(\d{1,2})\s*:\s*(\d{1,2})$", s)
+    if m:
+        h, mm = int(m.group(1)), int(m.group(2))
+    elif _re_t.fullmatch(r"\d{3,4}", s):     # เลขล้วน เช่น 946 / 0946
+        s2 = s.zfill(4); h, mm = int(s2[:2]), int(s2[2:])
+    else:
+        return None
+    if ampm == "am" and h == 12:
+        h = 0
+    elif ampm == "pm" and h != 12:
+        h += 12
+    if 0 <= h <= 23 and 0 <= mm <= 59:
+        return f"{h:02d}:{mm:02d}"
+    return None
+
+def move_login_success_to_input():
+    """ย้ายไฟล์ทั้งหมดจาก login-success/ → input-id/ (คืนจำนวนไฟล์ที่ย้าย)."""
+    moved = 0
+    base = os.path.dirname(os.path.abspath(__file__))
+    src_dir = os.path.join(base, LOGIN_SUCCESS_DIR)
+    dst_dir = os.path.join(base, INPUT_DIR)
+    if not os.path.isdir(src_dir):
+        return 0
+    os.makedirs(dst_dir, exist_ok=True)
+    for f in glob.glob(os.path.join(src_dir, "*")):
+        if not os.path.isfile(f):
+            continue
+        dest = os.path.join(dst_dir, os.path.basename(f))
+        try:
+            if os.path.exists(dest):
+                os.remove(dest)
+            shutil.move(f, dest)
+            moved += 1
+        except Exception:
+            pass
+    return moved
 
 def save_result(src, dest):
     """ย้าย src → dest แบบ 'ทับของเดิมถ้าชื่อซ้ำ' + ตั้งเวลาแก้ไขเป็นปัจจุบัน

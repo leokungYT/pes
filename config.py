@@ -16,7 +16,7 @@ DO_BOX = 0
 # ── Gacha Sequence (login.py) ──────────────────────
 # 1 = สุ่มกาชา (ต่อจากจบ box4)
 # 0 = ไม่สุ่มกาชา (จบงานปกติ)
-DO_GACHA = 1
+DO_GACHA = 0
 
 # ── Gacha + Check Mode ──────────────────────────────
 # 1 = สุ่มกาชาเสร็จแล้วกด backhome ต่อด้วยค้นหาฮีโร่ทันที
@@ -27,7 +27,7 @@ GACHA_CHECK = 0
 # 1 = สุ่มกาชาแบบเสียเงิน (DO_GACHA) เสร็จแล้ว "ไม่ต้อง clear app"
 #     กด backhome ต่อด้วยค้นหาฮีโร่ทันที (ทำงานเหมือน gachafree+check)
 # 0 = ข้าม (สุ่มกาชาเสร็จแล้วปิดแอปจบรอบตามปกติ)
-GACHA_FIND = 1
+GACHA_FIND = 0
 
 # รายชื่อนักเตะที่ต้องการเก็บ (Backup-id)
 HERO_LIST = [
@@ -125,7 +125,7 @@ DEBUG_OCR = 0
 # ── Check Coin Sequence ───────────────────────────
 # 1 = ทำงานสแกนเหรียญ (หา checkpointcoin.bmp → OCR สแกนหาเลขเหรียญที่ Region(52, 10, 106, 41) → บันทึกลง check-coin)
 # 0 = ข้าม
-CHECK_COIN = 1
+CHECK_COIN = 0
 
 # ── Min Coin to Gacha (ใช้ร่วมกับ Check Coin) ──────
 # เลขเหรียญขั้นต่ำที่จะ "สุ่ม" — ถ้าสแกนเหรียญได้ "น้อยกว่า" ค่านี้:
@@ -150,7 +150,7 @@ SKIPANIMATION = 1
 # ── Login Fast Mode ───────────────────────────────
 # 1 = เจอ checkpointlogin ปุ๊บ clear app จบรอบทันที (เร็วสุด)
 # 0 = ทำงานปกติ (กด checkpointlogin แล้วไปต่อ)
-LOGIN_FAST = 0
+LOGIN_FAST = 1
 
 # ── Timeout ───────────────────────────────────────
 # 1 = Enable, 0 = Disable
@@ -193,3 +193,10 @@ SEND_CODE = "M-CBFTKHBALEF"
 
 # โฟลเดอร์รูป getquest (อยู่ใน img/getquest/)
 GETQUEST_IMG_DIR = "img/getquest"
+
+# ── Move login-success → input-id (ตั้งเวลา) ────────
+# 1 = ย้ายไฟล์ทั้งหมดจาก login-success → input-id อัตโนมัติทุกวันตามเวลา MOVE_LS_TIME
+# 0 = ปิด (ย้ายเองด้วยปุ่มในหน้า config ได้ตลอด)
+MOVE_LS_ENABLE = 1
+# เวลาที่จะย้ายอัตโนมัติ (รูปแบบ HH:MM 24 ชั่วโมง เช่น "09:00")
+MOVE_LS_TIME = "09:00"
