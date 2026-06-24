@@ -3977,16 +3977,13 @@ def process_device_login(device):
                             continue
                             
                         x, y = pts[0]
-                        # กดให้ติด: แตะซ้ำ 3 ครั้งเร็วๆ กันกดไม่ติด (play8 กดไม่ติดบ่อย)
-                        for _ in range(3):
-                            device.shell(f"input tap {x} {y}")
-                            time.sleep(0.25)
-                        gui_log(serial, f"Found {matched_name}! Tapped x3.", step="play8")
+                        device.shell(f"input swipe {x} {y} {x} {y} 100")
+                        gui_log(serial, f"Found {matched_name}! Clicked.", step="play8")
                         play8_clicked = True
-                        time.sleep(3)
+                        time.sleep(0.5)   # กดรัวๆ: รอสั้นๆ แล้ววนกดซ้ำทันที
                     elif play8_clicked:
                         break
-                time.sleep(1.5)
+                time.sleep(0.5)
 
             # 5. Wait checkpointlogin
             gui_log(serial, "Waiting checkpointlogin...", step="Checkpoint")
