@@ -120,6 +120,16 @@ try:
 except ImportError:
     GACHA_MIN_COIN = 100
 try:
+    from config import DEBUG_CONSOLE
+except ImportError:
+    DEBUG_CONSOLE = 0
+
+
+def cprint(*args, **kwargs):
+    """print ลง console เฉพาะตอน DEBUG_CONSOLE=1 (รันจริงปิดไว้ กัน cmd ค้าง + เบาเครื่อง)"""
+    if DEBUG_CONSOLE:
+        print(*args, **kwargs)
+try:
     from config import MOVE_LS_ENABLE
 except ImportError:
     MOVE_LS_ENABLE = 0
@@ -1459,7 +1469,7 @@ def update_gui(serial, **kwargs):
 _GUI_LOG_INTERVAL = 5  # seconds — ส่ง text update ไป GUI ทุก 5 วินาทีต่อ device (ลด queue spam กับ 20+ จอ)
 
 def gui_log(serial, msg, step=None, status=None):
-    print(f"{Fore.CYAN}[{serial}] {msg}{Style.RESET_ALL}")
+    cprint(f"{Fore.CYAN}[{serial}] {msg}{Style.RESET_ALL}")
     now = time.time()
     last = _gui_last_update.get(serial, 0)
     if status or (now - last >= _GUI_LOG_INTERVAL):
@@ -2208,7 +2218,7 @@ def _read_screen_text_locked(img, serial):
     if easyocr is not None:
         global _reader
         try:
-            print(f"[OCR] [{serial}] Attempting EasyOCR...")
+            cprint(f"[OCR] [{serial}] Attempting EasyOCR...")
             if _reader is None:
                 _reader = easyocr.Reader(['en'], gpu=False)
             
@@ -2220,16 +2230,16 @@ def _read_screen_text_locked(img, serial):
             results = _reader.readtext(resized_easy, detail=0)
             res = " ".join(results).strip()
             if res:
-                print(f"[OCR] [{serial}] EasyOCR Result: '{res}'")
+                cprint(f"[OCR] [{serial}] EasyOCR Result: '{res}'")
                 return res
         except Exception as e:
-            print(f"[OCR] EasyOCR Error: {e}")
+            cprint(f"[OCR] EasyOCR Error: {e}")
             pass
 
     # 2. Fallback to Pytesseract — Enhanced multi-pass
     if pytesseract is not None:
         try:
-            print(f"[OCR] Attempting Pytesseract (Enhanced)...")
+            cprint(f"[OCR] Attempting Pytesseract (Enhanced)...")
             # แปลงเป็นเทา
             if len(img.shape) == 3:
                 img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -2256,17 +2266,17 @@ def _read_screen_text_locked(img, serial):
                 )
                 res = text.strip()
                 if res:
-                    print(f"[OCR] {label}: '{res}'")
+                    cprint(f"[OCR] {label}: '{res}'")
                     all_results.append(res)
             
             combined_result = " | ".join(all_results)
             if combined_result:
-                print(f"[OCR] ★ Combined Result: '{combined_result}'")
+                cprint(f"[OCR] ★ Combined Result: '{combined_result}'")
             else:
-                print(f"[OCR] Pytesseract returned EMPTY string (all methods)")
+                cprint(f"[OCR] Pytesseract returned EMPTY string (all methods)")
             return combined_result
         except Exception as e:
-            print(f"[OCR] Pytesseract Error: {e}")
+            cprint(f"[OCR] Pytesseract Error: {e}")
             pass
             
     return ""
@@ -3193,7 +3203,7 @@ def scan_coin_number(device, cycle_start, serial):
         coin_number = "0"
 
     gui_log(serial, f"🪙 Coins scanned & remembered: {coin_number}", step="Coin Match")
-    print(f"[{serial}] Gacha+Find Coin Scan: {coin_number}")
+    cprint(f"[{serial}] Gacha+Find Coin Scan: {coin_number}")
     return coin_number
 
 
@@ -3614,7 +3624,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path, coin_
                         ocr_text = read_screen_text(img, region=gacha_region, serial=serial)
                         display_text = ocr_text if ocr_text else "<EMPTY>"
                         gui_log(serial, f"[Loop {loop_num}] OCR Result: {display_text}", step="OCR Done")
-                        print(f"[{serial}] GachaFree Loop{loop_num} OCR: {display_text}")
+                        cprint(f"[{serial}] GachaFree Loop{loop_num} OCR: {display_text}")
  
                         for h in target_heroes:
                             if is_hero_match(h, ocr_text):
@@ -3785,7 +3795,7 @@ def check_coin_mode(device, cycle_start, serial, original_name, file_path, coin_
                     _safe_copy(file_path, dest)
                     os.remove(file_path)
                 except Exception as e:
-                    print(f"[{serial}] Failed to move file to random-fail: {e}")
+                    cprint(f"[{serial}] Failed to move file to random-fail: {e}")
             release_file(original_name)
             return True
 
@@ -3815,7 +3825,7 @@ def check_coin_mode(device, cycle_start, serial, original_name, file_path, coin_
 
     final_name = f"[{coin_number}]+{base_name}"
     gui_log(serial, f"🪙 Coins: {coin_number} -> {final_name}", step="Coin Match")
-    print(f"[{serial}] Coin Scan Result: {coin_number} -> file: {final_name}")
+    cprint(f"[{serial}] Coin Scan Result: {coin_number} -> file: {final_name}")
 
     # 3. Move file to 'check-coin' directory
     CHECK_COIN_DIR = "check-coin"
@@ -5119,7 +5129,7 @@ def process_device_login(device):
                                 ocr_text = read_screen_text(img, region=gacha_region, serial=serial)
                                 display_text = ocr_text if ocr_text else "<EMPTY>"
                                 gui_log(serial, f"OCR Result: {display_text}", step="OCR Done")
-                                print(f"[{serial}] Gacha OCR: {display_text}")
+                                cprint(f"[{serial}] Gacha OCR: {display_text}")
                                 
                                 for h in HERO_LIST:
                                     if is_hero_match(h, ocr_text):
@@ -5270,7 +5280,35 @@ def process_device_login(device):
 # ═════════════════════════════════════════════════════════════════════════════
 # Entry point
 # ═════════════════════════════════════════════════════════════════════════════
+def _disable_console_quickedit():
+    """
+    ปิด QuickEdit Mode ของ Windows Console กัน cmd "ค้าง" เวลารันนานๆ
+    ปัญหา: ถ้าเผลอคลิก/ลากเลือกข้อความในหน้าต่าง cmd → Windows จะหยุด stdout
+    ทำให้ thread ที่กำลัง print ค้าง และทุก thread ค้างตามทั้งหมด (บอตหยุดทำงาน)
+    แก้โดยลบ flag ENABLE_QUICK_EDIT_MODE ออก (ปลอดภัย, ไม่มีผลบนระบบที่ไม่ใช่ Windows)
+    """
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+        from ctypes import wintypes
+        kernel32 = ctypes.windll.kernel32
+        STD_INPUT_HANDLE = -10
+        ENABLE_EXTENDED_FLAGS = 0x0080
+        ENABLE_QUICK_EDIT_MODE = 0x0040
+        ENABLE_INSERT_MODE = 0x0020
+        hStdin = kernel32.GetStdHandle(STD_INPUT_HANDLE)
+        mode = wintypes.DWORD()
+        if kernel32.GetConsoleMode(hStdin, ctypes.byref(mode)):
+            new_mode = (mode.value | ENABLE_EXTENDED_FLAGS) & ~ENABLE_QUICK_EDIT_MODE & ~ENABLE_INSERT_MODE
+            kernel32.SetConsoleMode(hStdin, new_mode)
+            print(f"{Fore.GREEN}[Console] QuickEdit disabled (ป้องกัน cmd ค้างตอนคลิก/ลากเมาส์){Style.RESET_ALL}")
+    except Exception as e:
+        print(f"{Fore.YELLOW}[Console] Could not disable QuickEdit: {e}{Style.RESET_ALL}")
+
+
 def main():
+    _disable_console_quickedit()
     if GUI_ENABLED:
         LoginBotGUI().mainloop()
     else:

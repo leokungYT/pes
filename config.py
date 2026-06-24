@@ -122,6 +122,12 @@ HERO_LIST_FREE = list_find_hero
 # 0 = ไม่บันทึก
 DEBUG_OCR = 0
 
+# ── Debug Console ─────────────────────────────────
+# 1 = โชว์ log ลงหน้าต่าง cmd (ไว้ดูตอน debug)
+# 0 = ไม่ print ลง cmd เลย (รันจริง — กัน cmd ค้างจาก console + เบาเครื่อง)
+#     *** log ยังถูกเซฟลงไฟล์ในโฟลเดอร์ logs/ ครบทุกกรณี ***
+DEBUG_CONSOLE = 0
+
 # ── Check Coin Sequence ───────────────────────────
 # 1 = ทำงานสแกนเหรียญ (หา checkpointcoin.bmp → OCR สแกนหาเลขเหรียญที่ Region(52, 10, 106, 41) → บันทึกลง check-coin)
 # 0 = ข้าม
