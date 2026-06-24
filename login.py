@@ -612,6 +612,8 @@ if GUI_ENABLED:
             _section("🔧 Setting")
             var_autorun = ctk.IntVar(value=getattr(cfg, 'AUTORUN', 0))
             _toggle_row("Auto Run on Launch (รันอัตโนมัติเมื่อเปิด)", var_autorun)
+            var_debug_console = ctk.IntVar(value=getattr(cfg, 'DEBUG_CONSOLE', 0))
+            _toggle_row("Debug Console (โชว์ log ลง cmd — ปิดไว้ตอนรันจริง)", var_debug_console)
             var_event = ctk.IntVar(value=cfg.EVENT_IMG)
             _toggle_row("Event Image (play22→play31)", var_event)
             var_noscan = ctk.IntVar(value=getattr(cfg, 'NOSCAN', 0))
@@ -782,7 +784,7 @@ if GUI_ENABLED:
 
             # ── Save button (pinned at bottom, outside scrollable area) ───
             def _save():
-                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, MOVE_LS_ENABLE, MOVE_LS_TIME
+                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME
                 new_event = var_event.get()
                 new_box   = var_box.get()
                 new_gacha = var_gacha.get()
@@ -942,6 +944,13 @@ if GUI_ENABLED:
                 else:
                     content += f'\nMOVE_LS_TIME = "{new_move_time}"\n'
 
+                new_debug_console = var_debug_console.get()
+                if re.search(r"^DEBUG_CONSOLE\s*=\s*\d", content, flags=re.MULTILINE):
+                    content = re.sub(r"^DEBUG_CONSOLE\s*=\s*\d", f"DEBUG_CONSOLE = {new_debug_console}",
+                                     content, flags=re.MULTILINE)
+                else:
+                    content += f"\nDEBUG_CONSOLE = {new_debug_console}\n"
+
                 with open(cfg_path, "w", encoding="utf-8") as f:
                     f.write(content)
                 # อัปเดต runtime ด้วย
@@ -965,6 +974,7 @@ if GUI_ENABLED:
                 GACHA_MIN_COIN = new_min_coin
                 MOVE_LS_ENABLE = new_move_ls
                 MOVE_LS_TIME = new_move_time
+                DEBUG_CONSOLE = new_debug_console
                 importlib.reload(cfg)
                 label_status.configure(text=f"✅ Saved!",
                                        text_color="#4caf50")
