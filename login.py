@@ -1781,6 +1781,38 @@ def get_screen_capture(device):
                         
                     raise RestartFromQuest8Exception("backquest3 detected")
 
+            # === fixdow1 floating check (download/update popup) ===
+            #   เจอ fixdow1 → clear app (force-stop) แล้วเข้าใหม่ (relaunch)
+            #   จากนั้นหา fixdow2 ต่อ (timeout 30s) เจอก็คลิก, ไม่เจอข้าม ทำงานต่อปกติ
+            fixdow1_pts = img_search(img, os.path.join(IMG_DIR, "fixdow1.bmp"))
+            if fixdow1_pts:
+                gui_log(device.serial, "Floating: fixdow1 found! Clearing app & relaunching...", step="Fix Download")
+                device.shell("am force-stop jp.konami.pesam")
+                time.sleep(2)
+                launch_game(device, settle=8)
+
+                gui_log(device.serial, "Waiting fixdow2 (up to 30s)...", step="Fix Download 2")
+                deadline_fd2 = time.time() + 30
+                found_fd2 = False
+                while time.time() < deadline_fd2:
+                    img_fd2 = fast_screencap(device)
+                    if img_fd2 is not None:
+                        fd2_pts = img_search(img_fd2, os.path.join(IMG_DIR, "fixdow2.bmp"))
+                        if fd2_pts:
+                            xd, yd = fd2_pts[0]
+                            device.shell(f"input swipe {xd} {yd} {xd} {yd} 100")
+                            gui_log(device.serial, f"Clicked fixdow2 at ({xd},{yd})", step="Fix Download 2")
+                            time.sleep(2)
+                            found_fd2 = True
+                            break
+                    time.sleep(0.5)
+                if not found_fd2:
+                    gui_log(device.serial, "fixdow2 not found in 30s — skipping, continue normally.", step="Fix Download Skip")
+
+                img = fast_screencap(device)
+                if img is None:
+                    return None
+
             dl_pts = img_search(img, os.path.join(IMG_DIR, "download.bmp"))
             if dl_pts:
                 gui_log(device.serial, "Floating: download.bmp found! Clicking...", step="Floating")
@@ -3945,10 +3977,13 @@ def process_device_login(device):
                             continue
                             
                         x, y = pts[0]
-                        device.shell(f"input swipe {x} {y} {x} {y} 100")
-                        gui_log(serial, f"Found {matched_name}! Clicked.", step="play8")
+                        # กดให้ติด: แตะซ้ำ 3 ครั้งเร็วๆ กันกดไม่ติด (play8 กดไม่ติดบ่อย)
+                        for _ in range(3):
+                            device.shell(f"input tap {x} {y}")
+                            time.sleep(0.25)
+                        gui_log(serial, f"Found {matched_name}! Tapped x3.", step="play8")
                         play8_clicked = True
-                        time.sleep(5)
+                        time.sleep(3)
                     elif play8_clicked:
                         break
                 time.sleep(1.5)
