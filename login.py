@@ -1531,13 +1531,20 @@ def update_gui(serial, **kwargs):
         if _gui_queue.qsize() < 400:  # drop เมื่อ queue เริ่มล้น ป้องกัน Not Responding
             _gui_queue.put(('device_update', (serial, kwargs)))
 
-_GUI_LOG_INTERVAL = 5  # seconds — ส่ง text update ไป GUI ทุก 5 วินาทีต่อ device (ลด queue spam กับ 20+ จอ)
+_GUI_LOG_INTERVAL = 5
+_gui_last_step = {}
 
 def gui_log(serial, msg, step=None, status=None):
     cprint(f"{Fore.CYAN}[{serial}] {msg}{Style.RESET_ALL}")
     now = time.time()
     last = _gui_last_update.get(serial, 0)
-    if status or (now - last >= _GUI_LOG_INTERVAL):
+    last_step = _gui_last_step.get(serial, None)
+    
+    step_changed = step and (step != last_step)
+    if step_changed:
+        _gui_last_step[serial] = step
+        
+    if status or step_changed or (now - last >= _GUI_LOG_INTERVAL):
         _gui_last_update[serial] = now
         update_gui(serial, log=msg, step=step, status=status)
         # บันทึก log ลงไฟล์เฉพาะรอบที่ส่ง GUI update (ลด file I/O 50 จอ)
