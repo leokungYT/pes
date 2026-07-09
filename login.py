@@ -1841,6 +1841,7 @@ def check_and_click_fixback(device, img, serial):
     คืนค่า img ล่าสุดหลังจากจบการกด (หรือ img เดิมถ้าไม่มีการกด)
     """
     # 1. เช็ค fixback-gacha1.bmp
+    found_g1 = False
     while True:
         pts = img_search(img, os.path.join(IMG_DIR, "fixback-gacha1.bmp"))
         if pts:
@@ -1848,25 +1849,27 @@ def check_and_click_fixback(device, img, serial):
             device.shell(f"input swipe {x} {y} {x} {y} 100")
             gui_log(serial, "Clicking fixback-gacha1.bmp...", step="FixBack1")
             time.sleep(2)
+            found_g1 = True
             img = get_screen_capture(device)
             if img is None:
                 break
         else:
             break
             
-    # 2. เช็ค fixback-gacha2.bmp
-    while True:
-        pts = img_search(img, os.path.join(IMG_DIR, "fixback-gacha2.bmp"))
-        if pts:
-            x, y = pts[0]
-            device.shell(f"input swipe {x} {y} {x} {y} 100")
-            gui_log(serial, "Clicking fixback-gacha2.bmp...", step="FixBack2")
-            time.sleep(2)
-            img = get_screen_capture(device)
-            if img is None:
+    # 2. เช็ค fixback-gacha2.bmp (จะเช็ค/กดเฉพาะเมื่อเจอ fixback-gacha1 มาก่อนเท่านั้น)
+    if found_g1:
+        while True:
+            pts = img_search(img, os.path.join(IMG_DIR, "fixback-gacha2.bmp"))
+            if pts:
+                x, y = pts[0]
+                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                gui_log(serial, "Clicking fixback-gacha2.bmp...", step="FixBack2")
+                time.sleep(2)
+                img = get_screen_capture(device)
+                if img is None:
+                    break
+            else:
                 break
-        else:
-            break
             
     return img
 
