@@ -5296,6 +5296,7 @@ def process_device_login(device):
                         # 1. Wait/Click gacha4.bmp
                         gui_log(serial, "Waiting gacha4.bmp (Custom)...", step="G4-Custom")
                         found_g4 = False
+                        g4_click_count = 0
                         while True:
                             check_device_reset(serial, cycle_start)
                             img = get_screen_capture(device)
@@ -5304,7 +5305,8 @@ def process_device_login(device):
                                 if pts:
                                     x, y = pts[0]
                                     device.shell(f"input swipe {x} {y} {x} {y} 100")
-                                    gui_log(serial, "Clicking gacha4.bmp...", step="G4-Click")
+                                    g4_click_count += 1
+                                    gui_log(serial, f"Clicking gacha4.bmp... (count: {g4_click_count})", step="G4-Click")
                                     time.sleep(2)
                                     found_g4 = True
                                     continue
@@ -5312,13 +5314,22 @@ def process_device_login(device):
                                     if found_g4:
                                         break
                                 
+                                if g4_click_count > 10:
+                                    if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
+                                        gui_log(serial, "outloop.bmp detected after 10+ gacha4 clicks!", step="G4-Outloop")
+                                        found_g4 = "outloop"
+                                        break
+
                                 if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
                                     found_g4 = "nocoin"
                                     break
                             time.sleep(1)
                         
-                        if found_g4 == "nocoin":
-                            gui_log(serial, "nocions.bmp detected during Custom Gacha!", step="No-Coins")
+                        if found_g4 in ["nocoin", "outloop"]:
+                            if found_g4 == "nocoin":
+                                gui_log(serial, "nocions.bmp detected during Custom Gacha!", step="No-Coins")
+                            else:
+                                gui_log(serial, "outloop.bmp detected during Custom Gacha!", step="Outloop Exit")
                             break
                         
                         # 2. Wait 10s delay (as requested: "ให้มัน delayด้วยดิ 10วิ")
@@ -5374,6 +5385,7 @@ def process_device_login(device):
                 else:
                     # Normal Gacha Flow (CUSTOM_GACHA == 0)
                     found_g4 = False
+                    g4_click_count = 0
                     gui_log(serial, "Waiting gacha4.bmp (10s)...", step="Gacha4")
                     deadline_g4 = time.time() + 10
                     while time.time() < deadline_g4:
@@ -5384,7 +5396,8 @@ def process_device_login(device):
                             if pts:
                                 x, y = pts[0]
                                 device.shell(f"input swipe {x} {y} {x} {y} 100")
-                                gui_log(serial, "Clicking gacha4.bmp...", step="G4-Click")
+                                g4_click_count += 1
+                                gui_log(serial, f"Clicking gacha4.bmp... (count: {g4_click_count})", step="G4-Click")
                                 time.sleep(2)
                                 found_g4 = True
                                 # ขยายเวลา deadline ออกไปถ้ายังคงเจอ เพื่อให้กดจนกว่าจะหายไป
@@ -5394,6 +5407,12 @@ def process_device_login(device):
                                 if found_g4:
                                     break
                             
+                            if g4_click_count > 10:
+                                if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
+                                    gui_log(serial, "outloop.bmp detected after 10+ gacha4 clicks!", step="G4-Outloop")
+                                    found_g4 = "outloop"
+                                    break
+
                             # เช็ค nocions ระหว่างรอ
                             if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
                                 found_g4 = "nocoin"
@@ -5413,18 +5432,21 @@ def process_device_login(device):
                                     break
                             time.sleep(1)
                     
-                    # จัดการกรณีเจอ nocions.bmp (ไม่ว่าจะเจอตอนไหน)
-                    if found_g4 == "nocoin":
-                        gui_log(serial, "nocions.bmp detected! Scanning screen...", step="No-Coins")
-                        img = get_screen_capture(device)
-                        if img is not None:
-                            gacha_region = Region(68, 28, 579, 57)
-                            ocr_text = read_screen_text(img, region=gacha_region, serial=serial)
-                            gui_log(serial, f"OCR Result (at No-Coins): {ocr_text}", step="OCR Done")
-                            for h in HERO_LIST:
-                                if is_hero_match(h, ocr_text):
-                                    gacha_hero_found = h.strip()
-                                    break
+                    # จัดการกรณีเจอ nocions.bmp หรือ outloop.bmp (ไม่ว่าจะเจอตอนไหน)
+                    if found_g4 in ["nocoin", "outloop"]:
+                        if found_g4 == "nocoin":
+                            gui_log(serial, "nocions.bmp detected! Scanning screen...", step="No-Coins")
+                            img = get_screen_capture(device)
+                            if img is not None:
+                                gacha_region = Region(68, 28, 579, 57)
+                                ocr_text = read_screen_text(img, region=gacha_region, serial=serial)
+                                gui_log(serial, f"OCR Result (at No-Coins): {ocr_text}", step="OCR Done")
+                                for h in HERO_LIST:
+                                    if is_hero_match(h, ocr_text):
+                                        gacha_hero_found = h.strip()
+                                        break
+                        else:
+                            gui_log(serial, "outloop.bmp detected! Ending gacha flow.", step="Outloop Exit")
                         # จบรอบนี้ทันที
                         found_g4 = False 
                     else:
