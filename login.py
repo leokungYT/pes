@@ -5301,6 +5301,12 @@ def process_device_login(device):
                             check_device_reset(serial, cycle_start)
                             img = get_screen_capture(device)
                             if img is not None:
+                                # เช็ค outloop.bmp ก่อนเสมอ เจอแล้วจบการทำงานทันที
+                                if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
+                                    gui_log(serial, "outloop.bmp detected while waiting/clicking gacha4!", step="G4-Outloop")
+                                    found_g4 = "outloop"
+                                    break
+
                                 pts = img_search(img, os.path.join(IMG_DIR, "gacha4.bmp"))
                                 if pts:
                                     x, y = pts[0]
@@ -5310,17 +5316,12 @@ def process_device_login(device):
                                     time.sleep(2)
                                     found_g4 = True
                                     continue
-                                else:
-                                    if found_g4:
-                                        break
                                 
-                                if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
-                                    gui_log(serial, "outloop.bmp detected while waiting/clicking gacha4!", step="G4-Outloop")
-                                    found_g4 = "outloop"
-                                    break
-
                                 if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
                                     found_g4 = "nocoin"
+                                    break
+
+                                if found_g4:
                                     break
                             time.sleep(1)
                         
@@ -5340,6 +5341,12 @@ def process_device_login(device):
                             check_device_reset(serial, cycle_start)
                             img = get_screen_capture(device)
                             if img is not None:
+                                # เช็ค outloop.bmp ก่อนเสมอ เจอแล้วจบการทำงานทันที
+                                if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
+                                    gui_log(serial, "outloop.bmp detected during Gacha5 (Custom)!", step="G5-Outloop")
+                                    found_g4 = "outloop"
+                                    break
+
                                 pts = img_search(img, os.path.join(IMG_DIR, "gacha5.bmp"))
                                 if pts:
                                     x, y = pts[0]
@@ -5347,11 +5354,6 @@ def process_device_login(device):
                                     time.sleep(4)
                                     break
                                 
-                                if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
-                                    gui_log(serial, "outloop.bmp detected during Gacha5 (Custom)!", step="G5-Outloop")
-                                    found_g4 = "outloop"
-                                    break
-
                                 if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
                                     found_g4 = "nocoin"
                                     break
@@ -5397,6 +5399,12 @@ def process_device_login(device):
                         check_device_reset(serial, cycle_start)
                         img = get_screen_capture(device)
                         if img is not None:
+                            # เช็ค outloop.bmp ก่อนเสมอ เจอแล้วจบการทำงานทันที
+                            if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
+                                gui_log(serial, "outloop.bmp detected while waiting/clicking gacha4!", step="G4-Outloop")
+                                found_g4 = "outloop"
+                                break
+
                             pts = img_search(img, os.path.join(IMG_DIR, "gacha4.bmp"))
                             if pts:
                                 x, y = pts[0]
@@ -5408,18 +5416,13 @@ def process_device_login(device):
                                 # ขยายเวลา deadline ออกไปถ้ายังคงเจอ เพื่อให้กดจนกว่าจะหายไป
                                 deadline_g4 = time.time() + 10
                                 continue
-                            else:
-                                if found_g4:
-                                    break
                             
-                            if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
-                                gui_log(serial, "outloop.bmp detected while waiting/clicking gacha4!", step="G4-Outloop")
-                                found_g4 = "outloop"
-                                break
-
                             # เช็ค nocions ระหว่างรอ
                             if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
                                 found_g4 = "nocoin"
+                                break
+
+                            if found_g4:
                                 break
                         time.sleep(1)
 
@@ -5461,6 +5464,12 @@ def process_device_login(device):
                             check_device_reset(serial, cycle_start)
                             img = get_screen_capture(device)
                             if img is not None:
+                                # เช็ค outloop.bmp ก่อนเสมอ เจอแล้วจบการทำงานทันที
+                                if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
+                                    gui_log(serial, "outloop.bmp detected during Gacha5!", step="Outloop Exit")
+                                    found_g4 = False
+                                    break
+
                                 pts = img_search(img, os.path.join(IMG_DIR, "gacha5.bmp"))
                                 if pts:
                                     x, y = pts[0]
@@ -5469,11 +5478,6 @@ def process_device_login(device):
                                     found_g4 = True # ติ๊กให้ทำ checkpointgacha ต่อ
                                     break
                                 
-                                if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
-                                    gui_log(serial, "outloop.bmp detected during Gacha5!", step="Outloop Exit")
-                                    found_g4 = False
-                                    break
-
                                 if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
                                     # กรณีเจอตอนรอ gacha5
                                     gui_log(serial, "nocions.bmp detected during Gacha5!", step="No-Coins")
