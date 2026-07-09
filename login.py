@@ -4262,11 +4262,11 @@ def process_device_login(device):
                         device.shell(f"input swipe {x} {y} {x} {y} 100")
                         gui_log(serial, f"Found {matched_name}! Clicked.", step="play8")
                         play8_clicked = True
-                        time.sleep(0.5)   # กด 1 ครั้ง → delay 0.5 → เช็คใหม่ ถ้าเจออีกค่อยกดอีกรอบ
+                        time.sleep(2.0)   # กด 1 ครั้ง → delay 2.0 → เช็คใหม่ ถ้าเจออีกค่อยกดอีกรอบ
                         continue
                     elif play8_clicked:
                         break
-                time.sleep(0.5)
+                time.sleep(1.0)
 
             # 5. Wait checkpointlogin
             gui_log(serial, "Waiting checkpointlogin...", step="Checkpoint")
