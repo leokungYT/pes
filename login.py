@@ -5353,10 +5353,13 @@ def process_device_login(device):
                                 if pts_loop:
                                     x, y = pts_loop[0]
                                     device.shell(f"input swipe {x} {y} {x} {y} 100")
-                                    gui_log(serial, f"loopgacha1.bmp found! Clicking ({x},{y}) to repeat.", step="LoopGacha1")
-                                    time.sleep(4)
+                                    gui_log(serial, f"loopgacha1.bmp found! Clicking ({x},{y})...", step="LoopGacha1")
+                                    time.sleep(2)
                                     action_taken = "loop"
-                                    break
+                                    continue
+                                else:
+                                    if action_taken == "loop":
+                                        break
                             time.sleep(1)
                         
                         if action_taken == "outloop":
