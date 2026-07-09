@@ -5268,6 +5268,7 @@ def process_device_login(device):
 
                 # swipe until gacha3
                 gui_log(serial, "Swiping from 618,308 to 54,306 for gacha3...", step="Swipe Gacha")
+                found_g3 = False
                 while True:
                     check_device_reset(serial, cycle_start)
                     img = get_screen_capture(device)
@@ -5276,8 +5277,13 @@ def process_device_login(device):
                         if pts:
                             x, y = pts[0]
                             device.shell(f"input swipe {x} {y} {x} {y} 100")
-                            time.sleep(4)
-                            break
+                            gui_log(serial, "Clicking gacha3.bmp...", step="G3-Click")
+                            time.sleep(2)
+                            found_g3 = True
+                            continue
+                        else:
+                            if found_g3:
+                                break
                     # Swipe (drag) action
                     device.shell("input swipe 618 308 54 306 3000")
                     time.sleep(2)
