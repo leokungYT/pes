@@ -2608,10 +2608,12 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
         pts_team = img_search(img_current, os.path.join(IMG_DIR, "fixteam.bmp"), threshold=0.95)
         if pts_team:
             gui_log(serial, "fixteam.bmp detected! Spamming Back...", step="Fix Team")
-            while True:
+            deadline_fixteam = time.time() + 60
+            fixteam_cancel_found = False
+            while time.time() < deadline_fixteam:
                 check_device_reset(serial, cycle_start)
                 device.shell("input keyevent 4")
-                time.sleep(0.4)
+                time.sleep(1.0)
                 img_c = get_screen_capture(device)
                 if img_c is not None:
                     pts_c = img_search(img_c, os.path.join(IMG_DIR, "cancel.bmp"))
@@ -2619,7 +2621,13 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
                         x, y = pts_c[0]
                         gui_log(serial, f"cancel.bmp found at ({x},{y})! Clicking and stopping back spam.", step="Fix Team Stop")
                         click_cancel_until_gone(device, serial, x, y, step="Fix Team Stop")
+                        fixteam_cancel_found = True
                         break
+            if not fixteam_cancel_found:
+                gui_log(serial, "Timeout waiting for cancel.bmp in fixteam. Force stopping app...", step="Fix Team Timeout")
+                device.shell("am force-stop jp.konami.pesam")
+                time.sleep(1)
+                raise DeviceResetException("fixteam timeout")
             return True
         return False
 
@@ -4067,12 +4075,14 @@ def process_device_login(device):
                             break
                     time.sleep(0.5)
 
-                # กด Back รัวๆ จนเจอ cancel.bmp
+                # กด Back รัวๆ จนเจอ cancel.bmp (timeout 60s กันค้าง)
                 gui_log(serial, "Spamming Back until cancel.bmp...", step="Cancel")
-                while True:
+                deadline_cancel = time.time() + 60
+                cancel_found = False
+                while time.time() < deadline_cancel:
                     check_device_reset(serial, cycle_start)
                     device.shell("input keyevent 4")   # KEYCODE_BACK
-                    time.sleep(0.4)
+                    time.sleep(1.0)
                     img = get_screen_capture(device)
                     if img is not None:
                         pts = img_search(img, os.path.join(IMG_DIR, "cancel.bmp"))
@@ -4081,7 +4091,13 @@ def process_device_login(device):
                             gui_log(serial, f"cancel.bmp found — clicking ({x},{y})", step="Click Cancel")
                             # กดจนกว่าจะหายไปครบ 3 วิ ค่อยไปต่อ
                             click_cancel_until_gone(device, serial, x, y, step="Cancel")
+                            cancel_found = True
                             break
+                if not cancel_found:
+                    gui_log(serial, "Timeout waiting for cancel.bmp. Force stopping app...", step="Cancel Timeout")
+                    device.shell("am force-stop jp.konami.pesam")
+                    time.sleep(1)
+                    raise DeviceResetException("cancel timeout")
 
             # ── Check Coin (สแกนก่อนเสมอ ถ้าเปิด) ──
             #    ถ้าเปิด CHECK_COIN → สแกนเลขเหรียญตั้งแต่อยู่หน้า main menu "ก่อน" ทำงานอื่น
