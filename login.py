@@ -5298,9 +5298,14 @@ def process_device_login(device):
                                 if pts:
                                     x, y = pts[0]
                                     device.shell(f"input swipe {x} {y} {x} {y} 100")
-                                    time.sleep(4)
+                                    gui_log(serial, "Clicking gacha4.bmp...", step="G4-Click")
+                                    time.sleep(2)
                                     found_g4 = True
-                                    break
+                                    continue
+                                else:
+                                    if found_g4:
+                                        break
+                                
                                 if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
                                     found_g4 = "nocoin"
                                     break
@@ -5370,9 +5375,15 @@ def process_device_login(device):
                             if pts:
                                 x, y = pts[0]
                                 device.shell(f"input swipe {x} {y} {x} {y} 100")
-                                time.sleep(4)
+                                gui_log(serial, "Clicking gacha4.bmp...", step="G4-Click")
+                                time.sleep(2)
                                 found_g4 = True
-                                break
+                                # ขยายเวลา deadline ออกไปถ้ายังคงเจอ เพื่อให้กดจนกว่าจะหายไป
+                                deadline_g4 = time.time() + 10
+                                continue
+                            else:
+                                if found_g4:
+                                    break
                             
                             # เช็ค nocions ระหว่างรอ
                             if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
