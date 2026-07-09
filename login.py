@@ -142,6 +142,28 @@ try:
 except ImportError:
     MOVE_LS_TIME = "09:00"
 
+try:
+    from config import USE_MUMU_ROOT
+except ImportError:
+    USE_MUMU_ROOT = True
+try:
+    from config import MUMU_MANAGER
+except ImportError:
+    MUMU_MANAGER = r"D:\Program Files\Netease\MuMuPlayerGlobal-12.0\nx_main\MuMuManager.exe"
+try:
+    from config import MUMU_INDEX
+except ImportError:
+    MUMU_INDEX = "1"
+try:
+    from config import USE_SU
+except ImportError:
+    USE_SU = True
+try:
+    from config import ROOT_TOGGLE_WAIT
+except ImportError:
+    ROOT_TOGGLE_WAIT = 3
+
+
 REMOTE_AUTH_DIR   = "/data/data/jp.konami.pesam/files/SaveData/AUTH"
 REMOTE_DAT_FILE   = f"{REMOTE_AUTH_DIR}/online_user_id_data.dat"
 
@@ -1646,6 +1668,165 @@ def try_reconnect_device(serial):
                        capture_output=True, text=True, timeout=5, **kwargs)
     except Exception:
         pass
+
+# ── Root Toggle Helpers (ported from cookie-run) ──────────────────────
+SERIAL_TO_INDEX = {}
+
+def find_mumu_manager():
+    """หา path ของ MuMuManager.exe — ลอง config ก่อน แล้วค่อยไล่หา/glob ตาม install ทั่วไป"""
+    if MUMU_MANAGER and os.path.exists(MUMU_MANAGER):
+        return MUMU_MANAGER
+    bases = [r"C:\Program Files\Netease", r"C:\Program Files (x86)\Netease",
+             r"D:\Program Files\Netease", r"E:\Program Files\Netease"]
+    subs = [r"MuMuPlayer\nx_main\MuMuManager.exe",
+            r"MuMuPlayerGlobal-12.0\nx_main\MuMuManager.exe",
+            r"MuMuPlayer-12.0\nx_main\MuMuManager.exe",
+            r"MuMuPlayerGlobal-12.0\shell\MuMuManager.exe",
+            r"MuMu Player 12\shell\MuMuManager.exe",
+            r"MuMuPlayer\shell\MuMuManager.exe"]
+    for b in bases:
+        for s in subs:
+            p = os.path.join(b, s)
+            if os.path.exists(p):
+                return p
+    for b in bases:
+        if os.path.isdir(b):
+            try:
+                for r, _dirs, files in os.walk(b):
+                    if "MuMuManager.exe" in files:
+                        return os.path.join(r, "MuMuManager.exe")
+            except Exception:
+                pass
+    return None
+
+def _mumu(args, timeout=60):
+    exe = find_mumu_manager() or MUMU_MANAGER
+    kwargs = {'creationflags': 0x08000000} if os.name == 'nt' else {}
+    try:
+        return subprocess.run([exe] + args, capture_output=True,
+                              text=True, timeout=timeout, **kwargs)
+    except Exception as e:
+        cprint(f"{Fore.RED}[MuMu] error: {e}{Style.RESET_ALL}")
+        return None
+
+def get_mumu_instances():
+    """
+    อ่าน MuMuManager info -v all → คืน list ของ (index, serial) เฉพาะ instance ที่รันอยู่
+    """
+    import json
+    r = _mumu(["info", "-v", "all"])
+    if r is None:
+        cprint(f"{Fore.RED}[MuMu] เรียก MuMuManager ไม่ได้ (เช็ค MUMU_MANAGER path){Style.RESET_ALL}")
+        return []
+    raw = (r.stdout or "").strip()
+    if not raw:
+        cprint(f"{Fore.RED}[MuMu] info ไม่มี output. stderr={ (r.stderr or '').strip()[:200] }{Style.RESET_ALL}")
+        return []
+    try:
+        data = json.loads(raw)
+    except Exception as e:
+        cprint(f"{Fore.RED}[MuMu] parse info error: {e} | raw={raw[:200]}{Style.RESET_ALL}")
+        return []
+    if "index" in data and "adb_port" in data:
+        data = {str(data.get("index", "0")): data}
+    out, skipped = [], []
+    for key, inf in data.items():
+        if not isinstance(inf, dict):
+            continue
+        idx = str(inf.get("index", key))
+        if inf.get("is_android_started") and inf.get("adb_port"):
+            ip = inf.get("adb_host_ip", "127.0.0.1")
+            out.append((idx, f"{ip}:{inf['adb_port']}"))
+        else:
+            skipped.append(idx)
+    return out
+
+def mumu_set_root(index, on):
+    """ตั้ง root_permission ของ MuMu instance ตาม index — มีผลทันที (live) ไม่ต้อง restart"""
+    _mumu(["setting", "-v", str(index), "-k", "root_permission",
+           "-val", "true" if on else "false"])
+
+def su_wrap(cmd):
+    """wrap คำสั่ง shell ด้วย su -c ถ้าตั้ง USE_SU"""
+    return f"su -c '{cmd}'" if USE_SU else cmd
+
+def _adb_host(serial, args, timeout=30):
+    """เรียกคำสั่ง adb host-side (เช่น root/unroot/wait-for-device)"""
+    kwargs = {'creationflags': 0x08000000} if os.name == 'nt' else {}
+    cmd = [adb_path, "-s", serial] + args
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True,
+                              timeout=timeout, **kwargs)
+    except Exception as e:
+        gui_log(serial, f"adb {' '.join(args)} error: {e}", step="Root Error")
+        return None
+
+def is_root(device):
+    """เช็คว่า adb shell เป็น root จริงไหม (uid=0) — ถ้า USE_SU เช็คผ่าน su"""
+    try:
+        out = device.shell(su_wrap("id") if USE_SU else "id")
+        return "uid=0" in out
+    except Exception:
+        return False
+
+def enable_root(device):
+    """เปิด root (MuMu: root_permission=true, live ไม่ต้อง restart)"""
+    serial = device.serial
+    if USE_MUMU_ROOT:
+        # พยายามดึง index จาก instance ที่คุยผ่าน adb port
+        if not SERIAL_TO_INDEX:
+            try:
+                for idx, s in get_mumu_instances():
+                    SERIAL_TO_INDEX[s] = idx
+            except Exception:
+                pass
+        idx = SERIAL_TO_INDEX.get(serial, MUMU_INDEX)
+        gui_log(serial, f"เปิด root (MuMu idx={idx} root_permission=true)...", step="Root Enable")
+        mumu_set_root(idx, True)
+        time.sleep(1)
+    else:
+        gui_log(serial, "เปิด root (adb root)...", step="Root Enable")
+        r = _adb_host(serial, ["root"])
+        if r is not None:
+            msg = (r.stdout or "").strip() or (r.stderr or "").strip()
+            if msg:
+                gui_log(serial, f"  {msg}", step="Root Msg")
+        _adb_host(serial, ["wait-for-device"], timeout=30)
+        time.sleep(ROOT_TOGGLE_WAIT)
+    if is_root(device):
+        gui_log(serial, "  ✓ root พร้อม (uid=0)", step="Root OK")
+    else:
+        gui_log(serial, "  ✗ su ไม่ทำงาน! (เช็ค MUMU_INDEX / root ของ MuMu)", step="Root Fail")
+    return device
+
+def disable_root(device):
+    """ปิด root (MuMu: root_permission=false, live ไม่ต้อง restart)"""
+    serial = device.serial
+    if USE_MUMU_ROOT:
+        if not SERIAL_TO_INDEX:
+            try:
+                for idx, s in get_mumu_instances():
+                    SERIAL_TO_INDEX[s] = idx
+            except Exception:
+                pass
+        idx = SERIAL_TO_INDEX.get(serial, MUMU_INDEX)
+        gui_log(serial, f"ปิด root (MuMu idx={idx} root_permission=false)...", step="Root Disable")
+        mumu_set_root(idx, False)
+        time.sleep(1)
+    else:
+        gui_log(serial, "ปิด root (adb unroot)...", step="Root Disable")
+        r = _adb_host(serial, ["unroot"])
+        if r is not None:
+            msg = (r.stdout or "").strip() or (r.stderr or "").strip()
+            if msg:
+                gui_log(serial, f"  {msg}", step="Root Msg")
+        _adb_host(serial, ["wait-for-device"], timeout=30)
+        time.sleep(ROOT_TOGGLE_WAIT)
+        if is_root(device):
+            gui_log(serial, "  ✗ ยังเป็น root อยู่", step="Root Fail")
+        else:
+            gui_log(serial, "  ✓ ปิด root แล้ว (uid≠0)", step="Root OK")
+    return device
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Screen / image
@@ -3934,6 +4115,11 @@ def process_device_login(device):
                 continue
 
             gui_log(serial, "--- Starting New Cycle ---", step="New Cycle", status="working")
+
+            # เช็ค root ก่อนเข้าเกม (ลบข้อมูล + push + เข้าเกม)
+            if not is_root(device):
+                gui_log(serial, "root ยังไม่เปิด → เปิด root...", step="Root Check")
+                device = enable_root(device)
 
             # 0. Force-stop
             gui_log(serial, "Force closing app...", step="Cleanup", status="working")

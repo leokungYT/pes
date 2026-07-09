@@ -218,3 +218,27 @@ MOVE_LS_TIME = "09:00"
 # 1 = (ALL) เก็บไฟล์ .dat + รูป .png ลงในโฟลเดอร์ cap-id-result ตรงๆ (ไม่มีโฟลเดอร์ย่อย)
 # 0 = แยกโฟลเดอร์ย่อยตามชื่อไฟล์ .dat เดิม → cap-id-result/<ชื่อ>/<uid>.png|.dat
 CAP_ALL = 0
+
+# ── เปิด/ปิด root ─────────────────────────────────────────────────────
+# MuMu Player ตรวจ root จาก root_permission setting (ไม่ใช่ adb root)
+# toggle root_permission ผ่าน MuMuManager มีผล "ทันที (live)" ไม่ต้อง restart
+#   root_permission=false → เกมไม่เจอ root (เปิดเกมผ่าน)
+#   su -c ยังใช้ได้เสมอจาก adb shell ไม่ว่า root_permission จะ true/false
+#
+# USE_MUMU_ROOT = True  → เปิด/ปิด root ผ่าน MuMuManager (สำหรับ MuMu)
+# USE_MUMU_ROOT = False → ใช้ adb root/unroot (สำหรับ AVD ธรรมดา)
+USE_MUMU_ROOT = True
+
+# path ของ MuMuManager.exe (ดูจาก info: nx_main\MuMuManager.exe)
+MUMU_MANAGER = r"D:\Program Files\Netease\MuMuPlayerGlobal-12.0\nx_main\MuMuManager.exe"
+# index ของ instance — ดูได้จาก:  MuMuManager.exe info -v all  (instance ที่รันจริงคือ index 1)
+MUMU_INDEX = "1"
+
+# จัดการไฟล์ด้วย su -c หรือไม่
+#   True  = MuMu (root ผ่าน su, adb shell ไม่ใช่ root)  ← ต้องเป็น True เมื่อ USE_MUMU_ROOT
+#   False = adb root mode (adb shell เป็น root อยู่แล้ว)
+USE_SU = True
+
+# เวลารอหลัง adb root/unroot (เฉพาะโหมด adb root, USE_MUMU_ROOT=False) (วินาที)
+ROOT_TOGGLE_WAIT = 3
+
