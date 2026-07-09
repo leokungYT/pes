@@ -1828,6 +1828,41 @@ def disable_root(device):
             gui_log(serial, "  ✓ ปิด root แล้ว (uid≠0)", step="Root OK")
     return device
 
+def check_and_click_fixback(device, img, serial):
+    """
+    เช็คและกด fixback-gacha1.bmp และ fixback-gacha2.bmp ซ้ำๆ จนกว่าจะหายไป
+    คืนค่า img ล่าสุดหลังจากจบการกด (หรือ img เดิมถ้าไม่มีการกด)
+    """
+    # 1. เช็ค fixback-gacha1.bmp
+    while True:
+        pts = img_search(img, os.path.join(IMG_DIR, "fixback-gacha1.bmp"))
+        if pts:
+            x, y = pts[0]
+            device.shell(f"input swipe {x} {y} {x} {y} 100")
+            gui_log(serial, "Clicking fixback-gacha1.bmp...", step="FixBack1")
+            time.sleep(2)
+            img = get_screen_capture(device)
+            if img is None:
+                break
+        else:
+            break
+            
+    # 2. เช็ค fixback-gacha2.bmp
+    while True:
+        pts = img_search(img, os.path.join(IMG_DIR, "fixback-gacha2.bmp"))
+        if pts:
+            x, y = pts[0]
+            device.shell(f"input swipe {x} {y} {x} {y} 100")
+            gui_log(serial, "Clicking fixback-gacha2.bmp...", step="FixBack2")
+            time.sleep(2)
+            img = get_screen_capture(device)
+            if img is None:
+                break
+        else:
+            break
+            
+    return img
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Screen / image
 # ═════════════════════════════════════════════════════════════════════════════
@@ -5258,6 +5293,9 @@ def process_device_login(device):
                         check_device_reset(serial, cycle_start)
                         img = get_screen_capture(device)
                         if img is not None:
+                            img = check_and_click_fixback(device, img, serial)
+                            if img is None:
+                                continue
                             pts = img_search(img, os.path.join(IMG_DIR, name))
                             if pts:
                                 x, y = pts[0]
@@ -5273,6 +5311,9 @@ def process_device_login(device):
                     check_device_reset(serial, cycle_start)
                     img = get_screen_capture(device)
                     if img is not None:
+                        img = check_and_click_fixback(device, img, serial)
+                        if img is None:
+                            continue
                         pts = img_search(img, os.path.join(IMG_DIR, "gacha3.bmp"))
                         if pts:
                             x, y = pts[0]
@@ -5301,6 +5342,9 @@ def process_device_login(device):
                             check_device_reset(serial, cycle_start)
                             img = get_screen_capture(device)
                             if img is not None:
+                                img = check_and_click_fixback(device, img, serial)
+                                if img is None:
+                                    continue
                                 # เช็ค outloop.bmp ก่อนเสมอ เจอแล้วจบการทำงานทันที
                                 if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
                                     gui_log(serial, "outloop.bmp detected while waiting/clicking gacha4!", step="G4-Outloop")
@@ -5341,6 +5385,9 @@ def process_device_login(device):
                             check_device_reset(serial, cycle_start)
                             img = get_screen_capture(device)
                             if img is not None:
+                                img = check_and_click_fixback(device, img, serial)
+                                if img is None:
+                                    continue
                                 # เช็ค outloop.bmp ก่อนเสมอ เจอแล้วจบการทำงานทันที
                                 if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
                                     gui_log(serial, "outloop.bmp detected during Gacha5 (Custom)!", step="G5-Outloop")
@@ -5369,6 +5416,9 @@ def process_device_login(device):
                             check_device_reset(serial, cycle_start)
                             img = get_screen_capture(device)
                             if img is not None:
+                                img = check_and_click_fixback(device, img, serial)
+                                if img is None:
+                                    continue
                                 if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
                                     gui_log(serial, "outloop.bmp detected! Ending Custom Gacha.", step="Outloop Found")
                                     action_taken = "outloop"
@@ -5399,6 +5449,9 @@ def process_device_login(device):
                         check_device_reset(serial, cycle_start)
                         img = get_screen_capture(device)
                         if img is not None:
+                            img = check_and_click_fixback(device, img, serial)
+                            if img is None:
+                                continue
                             # เช็ค outloop.bmp ก่อนเสมอ เจอแล้วจบการทำงานทันที
                             if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
                                 gui_log(serial, "outloop.bmp detected while waiting/clicking gacha4!", step="G4-Outloop")
@@ -5434,6 +5487,9 @@ def process_device_login(device):
                             check_device_reset(serial, cycle_start)
                             img = get_screen_capture(device)
                             if img is not None:
+                                img = check_and_click_fixback(device, img, serial)
+                                if img is None:
+                                    continue
                                 if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
                                     found_g4 = "nocoin"
                                     break
@@ -5464,6 +5520,9 @@ def process_device_login(device):
                             check_device_reset(serial, cycle_start)
                             img = get_screen_capture(device)
                             if img is not None:
+                                img = check_and_click_fixback(device, img, serial)
+                                if img is None:
+                                    continue
                                 # เช็ค outloop.bmp ก่อนเสมอ เจอแล้วจบการทำงานทันที
                                 if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
                                     gui_log(serial, "outloop.bmp detected during Gacha5!", step="Outloop Exit")
@@ -5495,6 +5554,9 @@ def process_device_login(device):
                         check_device_reset(serial, cycle_start)
                         img = get_screen_capture(device)
                         if img is not None:
+                            img = check_and_click_fixback(device, img, serial)
+                            if img is None:
+                                continue
                             # 1. เช็ค checkpointgacha ปกติ
                             pts = img_search(img, os.path.join(IMG_DIR, "checkpointgacha.bmp"))
                             if pts:
