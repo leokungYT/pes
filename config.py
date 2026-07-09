@@ -11,12 +11,17 @@ EVENT_IMG = 0
 # ── Box Sequence (main-pes.py) ────────────────────
 # 1 = เปิดกล่อง (ทำ play26-play31 และ box1-box4)
 # 0 = ข้ามการเปิดกล่อง (จบที่ play25 แล้วส่งไฟล์เลย)
-DO_BOX = 1
+DO_BOX = 0
 
 # ── Gacha Sequence (login.py) ──────────────────────
 # 1 = สุ่มกาชา (ต่อจากจบ box4)
 # 0 = ไม่สุ่มกาชา (จบงานปกติ)
 DO_GACHA = 1
+
+# ── Custom Gacha Loop Mode ──────────────────────────
+# 1 = เปิดโหมด Custom Gacha (loopgacha1 -> gacha4 -> gacha5 -> loop จนเจอ outloop)
+# 0 = ปิดโหมด
+CUSTOM_GACHA = 1
 
 # ── Gacha + Check Mode ──────────────────────────────
 # 1 = สุ่มกาชาเสร็จแล้วกด backhome ต่อด้วยค้นหาฮีโร่ทันที
@@ -27,7 +32,7 @@ GACHA_CHECK = 0
 # 1 = สุ่มกาชาแบบเสียเงิน (DO_GACHA) เสร็จแล้ว "ไม่ต้อง clear app"
 #     กด backhome ต่อด้วยค้นหาฮีโร่ทันที (ทำงานเหมือน gachafree+check)
 # 0 = ข้าม (สุ่มกาชาเสร็จแล้วปิดแอปจบรอบตามปกติ)
-GACHA_FIND = 1
+GACHA_FIND = 0
 
 # รายชื่อนักเตะที่ต้องการเก็บ (Backup-id)
 HERO_LIST = [
@@ -128,12 +133,12 @@ DEBUG_OCR = 0
 # 1 = โชว์ log ลงหน้าต่าง cmd (ไว้ดูตอน debug)
 # 0 = ไม่ print ลง cmd เลย (รันจริง — กัน cmd ค้างจาก console + เบาเครื่อง)
 #     *** log ยังถูกเซฟลงไฟล์ในโฟลเดอร์ logs/ ครบทุกกรณี ***
-DEBUG_CONSOLE = 0
+DEBUG_CONSOLE = 1
 
 # ── Check Coin Sequence ───────────────────────────
 # 1 = ทำงานสแกนเหรียญ (หา checkpointcoin.bmp → OCR สแกนหาเลขเหรียญที่ Region(52, 10, 106, 41) → บันทึกลง check-coin)
 # 0 = ข้าม
-CHECK_COIN = 1
+CHECK_COIN = 0
 
 # ── Min Coin to Gacha (ใช้ร่วมกับ Check Coin) ──────
 # เลขเหรียญขั้นต่ำที่จะ "สุ่ม" — ถ้าสแกนเหรียญได้ "น้อยกว่า" ค่านี้:

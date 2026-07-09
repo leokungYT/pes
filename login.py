@@ -123,6 +123,10 @@ try:
     from config import DEBUG_CONSOLE
 except ImportError:
     DEBUG_CONSOLE = 0
+try:
+    from config import CUSTOM_GACHA
+except ImportError:
+    CUSTOM_GACHA = 0
 
 
 def cprint(*args, **kwargs):
@@ -562,6 +566,8 @@ if GUI_ENABLED:
             _section("🎰 Gacha Mode")
             var_gacha = ctk.IntVar(value=cfg.DO_GACHA)
             _toggle_row("Gacha Mode", var_gacha)
+            var_custom_gacha = ctk.IntVar(value=getattr(cfg, 'CUSTOM_GACHA', 0))
+            _toggle_row("Custom Gacha Loop Mode (outloop)", var_custom_gacha)
             var_gacha_find = ctk.IntVar(value=getattr(cfg, 'GACHA_FIND', 0))
             def _sync_gacha_find():
                 # Gacha+Find ต้องอาศัย DO_GACHA + Check Coin → เปิดให้อัตโนมัติ
@@ -613,7 +619,26 @@ if GUI_ENABLED:
             var_autorun = ctk.IntVar(value=getattr(cfg, 'AUTORUN', 0))
             _toggle_row("Auto Run on Launch (รันอัตโนมัติเมื่อเปิด)", var_autorun)
             var_debug_console = ctk.IntVar(value=getattr(cfg, 'DEBUG_CONSOLE', 0))
-            _toggle_row("Debug Console (โชว์ log ลง cmd — ปิดไว้ตอนรันจริง)", var_debug_console)
+            def _on_toggle_debug_console():
+                global DEBUG_CONSOLE
+                DEBUG_CONSOLE = var_debug_console.get()
+                try:
+                    cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.py")
+                    with open(cfg_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    import re
+                    if re.search(r"^DEBUG_CONSOLE\s*=\s*\d", content, flags=re.MULTILINE):
+                        content = re.sub(r"^DEBUG_CONSOLE\s*=\s*\d", f"DEBUG_CONSOLE = {DEBUG_CONSOLE}",
+                                         content, flags=re.MULTILINE)
+                    else:
+                        content += f"\nDEBUG_CONSOLE = {DEBUG_CONSOLE}\n"
+                    with open(cfg_path, "w", encoding="utf-8") as f:
+                        f.write(content)
+                    import importlib
+                    importlib.reload(cfg)
+                except Exception:
+                    pass
+            _toggle_row("Debug Console (โชว์ log ลง cmd — ปิดไว้ตอนรันจริง)", var_debug_console, command=_on_toggle_debug_console)
             var_event = ctk.IntVar(value=cfg.EVENT_IMG)
             _toggle_row("Event Image (play22→play31)", var_event)
             var_noscan = ctk.IntVar(value=getattr(cfg, 'NOSCAN', 0))
@@ -784,7 +809,7 @@ if GUI_ENABLED:
 
             # ── Save button (pinned at bottom, outside scrollable area) ───
             def _save():
-                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME
+                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA
                 new_event = var_event.get()
                 new_box   = var_box.get()
                 new_gacha = var_gacha.get()
@@ -951,9 +976,17 @@ if GUI_ENABLED:
                 else:
                     content += f"\nDEBUG_CONSOLE = {new_debug_console}\n"
 
+                new_custom_gacha = var_custom_gacha.get()
+                if re.search(r"^CUSTOM_GACHA\s*=\s*\d", content, flags=re.MULTILINE):
+                    content = re.sub(r"^CUSTOM_GACHA\s*=\s*\d", f"CUSTOM_GACHA = {new_custom_gacha}",
+                                     content, flags=re.MULTILINE)
+                else:
+                    content += f"\nCUSTOM_GACHA = {new_custom_gacha}\n"
+
                 with open(cfg_path, "w", encoding="utf-8") as f:
                     f.write(content)
                 # อัปเดต runtime ด้วย
+                CUSTOM_GACHA = new_custom_gacha
                 EVENT_IMG  = new_event
                 DO_BOX     = new_box
                 DO_GACHA   = new_gacha
@@ -5064,76 +5097,152 @@ def process_device_login(device):
                     time.sleep(2)
 
                 # gacha4
-                found_g4 = False
-                gui_log(serial, "Waiting gacha4.bmp (10s)...", step="Gacha4")
-                deadline_g4 = time.time() + 10
-                while time.time() < deadline_g4:
-                    check_device_reset(serial, cycle_start)
-                    img = get_screen_capture(device)
-                    if img is not None:
-                        pts = img_search(img, os.path.join(IMG_DIR, "gacha4.bmp"))
-                        if pts:
-                            x, y = pts[0]
-                            device.shell(f"input swipe {x} {y} {x} {y} 100")
-                            time.sleep(4)
-                            found_g4 = True
+                if CUSTOM_GACHA == 1:
+                    # Custom Gacha Loop Mode
+                    gui_log(serial, "Custom Gacha mode active...", step="Custom Gacha")
+                    while True:
+                        # 1. Wait/Click gacha4.bmp
+                        gui_log(serial, "Waiting gacha4.bmp (Custom)...", step="G4-Custom")
+                        found_g4 = False
+                        while True:
+                            check_device_reset(serial, cycle_start)
+                            img = get_screen_capture(device)
+                            if img is not None:
+                                pts = img_search(img, os.path.join(IMG_DIR, "gacha4.bmp"))
+                                if pts:
+                                    x, y = pts[0]
+                                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                    time.sleep(4)
+                                    found_g4 = True
+                                    break
+                                if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
+                                    found_g4 = "nocoin"
+                                    break
+                            time.sleep(1)
+                        
+                        if found_g4 == "nocoin":
+                            gui_log(serial, "nocions.bmp detected during Custom Gacha!", step="No-Coins")
                             break
                         
-                        # เช็ค nocions ระหว่างรอ
-                        if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
-                            found_g4 = "nocoin"
+                        # 2. Wait 10s delay (as requested: "ให้มัน delayด้วยดิ 10วิ")
+                        gui_log(serial, "Proceeding to Gacha5 (Custom)... Delaying 10s...", step="G5-Custom")
+                        time.sleep(10)
+                        
+                        # 3. Wait/Click gacha5.bmp
+                        while True:
+                            check_device_reset(serial, cycle_start)
+                            img = get_screen_capture(device)
+                            if img is not None:
+                                pts = img_search(img, os.path.join(IMG_DIR, "gacha5.bmp"))
+                                if pts:
+                                    x, y = pts[0]
+                                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                    time.sleep(4)
+                                    break
+                                if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
+                                    found_g4 = "nocoin"
+                                    break
+                            time.sleep(1)
+                        
+                        if found_g4 == "nocoin":
                             break
-                    time.sleep(1)
 
-                if not found_g4:
-                    # ไม่เจอ gacha4 ใน 10s -> แวะเช็ค nocions ต่ออีก 10s
-                    gui_log(serial, "gacha4 not found, checking nocions (10s)...", step="Check-NC")
-                    deadline_nc = time.time() + 10
-                    while time.time() < deadline_nc:
-                        check_device_reset(serial, cycle_start)
-                        img = get_screen_capture(device)
-                        if img is not None:
-                            if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
-                                found_g4 = "nocoin"
-                                break
-                        time.sleep(1)
-                
-                # จัดการกรณีเจอ nocions.bmp (ไม่ว่าจะเจอตอนไหน)
-                if found_g4 == "nocoin":
-                    gui_log(serial, "nocions.bmp detected! Scanning screen...", step="No-Coins")
-                    img = get_screen_capture(device)
-                    if img is not None:
-                        gacha_region = Region(68, 28, 579, 57)
-                        ocr_text = read_screen_text(img, region=gacha_region, serial=serial)
-                        gui_log(serial, f"OCR Result (at No-Coins): {ocr_text}", step="OCR Done")
-                        for h in HERO_LIST:
-                            if is_hero_match(h, ocr_text):
-                                gacha_hero_found = h.strip()
-                                break
-                    # จบรอบนี้ทันที
-                    found_g4 = False 
+                        # 4. Wait for loopgacha1.bmp or outloop.bmp
+                        gui_log(serial, "Waiting for loopgacha1.bmp or outloop.bmp...", step="Loop-Check")
+                        action_taken = False
+                        while True:
+                            check_device_reset(serial, cycle_start)
+                            img = get_screen_capture(device)
+                            if img is not None:
+                                if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
+                                    gui_log(serial, "outloop.bmp detected! Ending Custom Gacha.", step="Outloop Found")
+                                    action_taken = "outloop"
+                                    break
+                                pts_loop = img_search(img, os.path.join(IMG_DIR, "loopgacha1.bmp"))
+                                if pts_loop:
+                                    x, y = pts_loop[0]
+                                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                    gui_log(serial, f"loopgacha1.bmp found! Clicking ({x},{y}) to repeat.", step="LoopGacha1")
+                                    time.sleep(4)
+                                    action_taken = "loop"
+                                    break
+                            time.sleep(1)
+                        
+                        if action_taken == "outloop":
+                            break
+                    found_g4 = False # จบ Custom Gacha ไม่ต้องทำ OCR (ข้าม checkpointgacha)
                 else:
-                    # ถ้าผ่าน nocions มาได้ (ไม่เจอ) หรือเจอ gacha4 ไปแล้ว -> ไป gacha5 ต่อ
-                    gui_log(serial, "Proceeding to Gacha5...", step="G5-Flow")
-                    while True:
+                    # Normal Gacha Flow (CUSTOM_GACHA == 0)
+                    found_g4 = False
+                    gui_log(serial, "Waiting gacha4.bmp (10s)...", step="Gacha4")
+                    deadline_g4 = time.time() + 10
+                    while time.time() < deadline_g4:
                         check_device_reset(serial, cycle_start)
                         img = get_screen_capture(device)
                         if img is not None:
-                            pts = img_search(img, os.path.join(IMG_DIR, "gacha5.bmp"))
+                            pts = img_search(img, os.path.join(IMG_DIR, "gacha4.bmp"))
                             if pts:
                                 x, y = pts[0]
                                 device.shell(f"input swipe {x} {y} {x} {y} 100")
                                 time.sleep(4)
-                                found_g4 = True # ติ๊กให้ทำ checkpointgacha ต่อ
+                                found_g4 = True
                                 break
                             
+                            # เช็ค nocions ระหว่างรอ
                             if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
-                                # กรณีเจอตอนรอ gacha5
-                                gui_log(serial, "nocions.bmp detected during Gacha5!", step="No-Coins")
-                                # (ทำ OCR เหมือนด้านบนถ้าต้องการ แต่เพื่อความสั้นจะขอ break เลย)
-                                found_g4 = False
+                                found_g4 = "nocoin"
                                 break
                         time.sleep(1)
+
+                    if not found_g4:
+                        # ไม่เจอ gacha4 ใน 10s -> แวะเช็ค nocions ต่ออีก 10s
+                        gui_log(serial, "gacha4 not found, checking nocions (10s)...", step="Check-NC")
+                        deadline_nc = time.time() + 10
+                        while time.time() < deadline_nc:
+                            check_device_reset(serial, cycle_start)
+                            img = get_screen_capture(device)
+                            if img is not None:
+                                if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
+                                    found_g4 = "nocoin"
+                                    break
+                            time.sleep(1)
+                    
+                    # จัดการกรณีเจอ nocions.bmp (ไม่ว่าจะเจอตอนไหน)
+                    if found_g4 == "nocoin":
+                        gui_log(serial, "nocions.bmp detected! Scanning screen...", step="No-Coins")
+                        img = get_screen_capture(device)
+                        if img is not None:
+                            gacha_region = Region(68, 28, 579, 57)
+                            ocr_text = read_screen_text(img, region=gacha_region, serial=serial)
+                            gui_log(serial, f"OCR Result (at No-Coins): {ocr_text}", step="OCR Done")
+                            for h in HERO_LIST:
+                                if is_hero_match(h, ocr_text):
+                                    gacha_hero_found = h.strip()
+                                    break
+                        # จบรอบนี้ทันที
+                        found_g4 = False 
+                    else:
+                        # ถ้าผ่าน nocions มาได้ (ไม่เจอ) หรือเจอ gacha4 ไปแล้ว -> ไป gacha5 ต่อ
+                        gui_log(serial, "Proceeding to Gacha5...", step="G5-Flow")
+                        time.sleep(10) # 10s delay requested by user
+                        while True:
+                            check_device_reset(serial, cycle_start)
+                            img = get_screen_capture(device)
+                            if img is not None:
+                                pts = img_search(img, os.path.join(IMG_DIR, "gacha5.bmp"))
+                                if pts:
+                                    x, y = pts[0]
+                                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                    time.sleep(4)
+                                    found_g4 = True # ติ๊กให้ทำ checkpointgacha ต่อ
+                                    break
+                                
+                                if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
+                                    # กรณีเจอตอนรอ gacha5
+                                    gui_log(serial, "nocions.bmp detected during Gacha5!", step="No-Coins")
+                                    found_g4 = False
+                                    break
+                            time.sleep(1)
                 # checkpointgacha -> OCR (ข้ามถ้าไม่เจอ gacha4)
                 # NOSCAN=1 → ข้ามขั้นตอน checkpointgacha/OCR ทั้งหมด (ทำงานเหมือน gachafree)
                 if found_g4 and NOSCAN == 1:
