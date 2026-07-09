@@ -5420,10 +5420,16 @@ def process_device_login(device):
                                     found_g4 = "outloop"
                                     break
 
+                                # หากเจอ loopgacha1.bmp แสดงว่าเลย gacha5 ไปแล้ว ให้หลุดลูปทันที
+                                if img_search(img, os.path.join(IMG_DIR, "loopgacha1.bmp")):
+                                    gui_log(serial, "loopgacha1.bmp detected during Gacha5 (Custom)! Proceeding.", step="G5-Skip")
+                                    break
+
                                 pts = img_search(img, os.path.join(IMG_DIR, "gacha5.bmp"))
                                 if pts:
                                     x, y = pts[0]
                                     device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                    gui_log(serial, "Clicking gacha5.bmp... (Custom)", step="G5-Click")
                                     time.sleep(4)
                                     break
                                 
@@ -5555,10 +5561,17 @@ def process_device_login(device):
                                     found_g4 = False
                                     break
 
+                                # หากเจอ checkpointgacha.bmp แสดงว่าเลย gacha5 ไปแล้ว ให้หลุดลูปทันที
+                                if img_search(img, os.path.join(IMG_DIR, "checkpointgacha.bmp")):
+                                    gui_log(serial, "checkpointgacha.bmp detected during Gacha5! Proceeding.", step="G5-Skip")
+                                    found_g4 = True
+                                    break
+
                                 pts = img_search(img, os.path.join(IMG_DIR, "gacha5.bmp"))
                                 if pts:
                                     x, y = pts[0]
                                     device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                    gui_log(serial, "Clicking gacha5.bmp...", step="G5-Click")
                                     time.sleep(4)
                                     found_g4 = True # ติ๊กให้ทำ checkpointgacha ต่อ
                                     break
