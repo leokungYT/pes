@@ -11,12 +11,12 @@ EVENT_IMG = 0
 # ── Box Sequence (main-pes.py) ────────────────────
 # 1 = เปิดกล่อง (ทำ play26-play31 และ box1-box4)
 # 0 = ข้ามการเปิดกล่อง (จบที่ play25 แล้วส่งไฟล์เลย)
-DO_BOX = 0
+DO_BOX = 1
 
 # ── Gacha Sequence (login.py) ──────────────────────
 # 1 = สุ่มกาชา (ต่อจากจบ box4)
 # 0 = ไม่สุ่มกาชา (จบงานปกติ)
-DO_GACHA = 0
+DO_GACHA = 1
 
 # ── Gacha + Check Mode ──────────────────────────────
 # 1 = สุ่มกาชาเสร็จแล้วกด backhome ต่อด้วยค้นหาฮีโร่ทันที
@@ -27,16 +27,16 @@ GACHA_CHECK = 0
 # 1 = สุ่มกาชาแบบเสียเงิน (DO_GACHA) เสร็จแล้ว "ไม่ต้อง clear app"
 #     กด backhome ต่อด้วยค้นหาฮีโร่ทันที (ทำงานเหมือน gachafree+check)
 # 0 = ข้าม (สุ่มกาชาเสร็จแล้วปิดแอปจบรอบตามปกติ)
-GACHA_FIND = 0
+GACHA_FIND = 1
 
 # รายชื่อนักเตะที่ต้องการเก็บ (Backup-id)
 HERO_LIST = [
     "Gareth Bale",
     "Aubameyang",
     "Marcelo",
-    "", # ว่างไว้ถ้าไม่ใช้
-    "",
-    ""
+    "Lilian Thuram", # ว่างไว้ถ้าไม่ใช้
+    "Patrick Vieira",
+    "Marcel Desailly"
 ]
 
 # ── Path ──────────────────────────────────────────
@@ -109,7 +109,9 @@ list_find_hero = [
     "Gianluigi Buffon",
     "Andrea Pirlo",
     "Gialuca Zambrotta",
-    ""
+    "Lilian Thuram", 
+    "Patrick Vieira",
+    "Marcel Desailly"
 ]
 
 # แชร์ list เดียวกัน — แก้ที่ list_find_hero อย่างเดียวพอ
@@ -131,7 +133,7 @@ DEBUG_CONSOLE = 0
 # ── Check Coin Sequence ───────────────────────────
 # 1 = ทำงานสแกนเหรียญ (หา checkpointcoin.bmp → OCR สแกนหาเลขเหรียญที่ Region(52, 10, 106, 41) → บันทึกลง check-coin)
 # 0 = ข้าม
-CHECK_COIN = 0
+CHECK_COIN = 1
 
 # ── Min Coin to Gacha (ใช้ร่วมกับ Check Coin) ──────
 # เลขเหรียญขั้นต่ำที่จะ "สุ่ม" — ถ้าสแกนเหรียญได้ "น้อยกว่า" ค่านี้:
@@ -156,7 +158,7 @@ SKIPANIMATION = 1
 # ── Login Fast Mode ───────────────────────────────
 # 1 = เจอ checkpointlogin ปุ๊บ clear app จบรอบทันที (เร็วสุด)
 # 0 = ทำงานปกติ (กด checkpointlogin แล้วไปต่อ)
-LOGIN_FAST = 1
+LOGIN_FAST = 0
 
 # ── Timeout ───────────────────────────────────────
 # 1 = Enable, 0 = Disable
@@ -206,3 +208,8 @@ GETQUEST_IMG_DIR = "img/getquest"
 MOVE_LS_ENABLE = 1
 # เวลาที่จะย้ายอัตโนมัติ (รูปแบบ HH:MM 24 ชั่วโมง เช่น "09:00")
 MOVE_LS_TIME = "09:00"
+
+# ── cap-id.py: รูปแบบการเก็บผลลัพธ์ ────────────────
+# 1 = (ALL) เก็บไฟล์ .dat + รูป .png ลงในโฟลเดอร์ cap-id-result ตรงๆ (ไม่มีโฟลเดอร์ย่อย)
+# 0 = แยกโฟลเดอร์ย่อยตามชื่อไฟล์ .dat เดิม → cap-id-result/<ชื่อ>/<uid>.png|.dat
+CAP_ALL = 0
