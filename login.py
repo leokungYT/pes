@@ -4169,6 +4169,39 @@ def process_device_login(device):
             DEVICE_DISABLE_FIXEVENT[serial] = False
             check_device_reset(serial)
 
+            # ── Reload config at the start of every cycle ──
+            try:
+                import importlib
+                import config as cfg
+                importlib.reload(cfg)
+                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA
+                EVENT_IMG = getattr(cfg, 'EVENT_IMG', 0)
+                DO_BOX = getattr(cfg, 'DO_BOX', 0)
+                DO_GACHA = getattr(cfg, 'DO_GACHA', 0)
+                FIND_HERO = getattr(cfg, 'FIND_HERO', 0)
+                GACHA_FREE = getattr(cfg, 'GACHA_FREE', 0)
+                CHECK_COIN = getattr(cfg, 'CHECK_COIN', 0)
+                GACHA_FREE_LOOPS = getattr(cfg, 'GACHA_FREE_LOOPS', 2)
+                NOSCAN = getattr(cfg, 'NOSCAN', 0)
+                SKIPANIMATION = getattr(cfg, 'SKIPANIMATION', 0)
+                GACHA_CHECK = getattr(cfg, 'GACHA_CHECK', 0)
+                GACHA_FIND = getattr(cfg, 'GACHA_FIND', 0)
+                AUTORUN = getattr(cfg, 'AUTORUN', 0)
+                SILENT_UPDATE_MODE = getattr(cfg, 'SILENT_UPDATE_MODE', 'normal')
+                OVERWRITE_CONFIG_ON_UPDATE = getattr(cfg, 'OVERWRITE_CONFIG_ON_UPDATE', False)
+                GETCODE = getattr(cfg, 'GETCODE', 0)
+                GETCODE_TEXT = getattr(cfg, 'GETCODE_TEXT', 'eFCONNECT')
+                GETQUEST = getattr(cfg, 'GETQUEST', 0)
+                LOGIN_FAST = getattr(cfg, 'LOGIN_FAST', 0)
+                GACHA_MIN_COIN = getattr(cfg, 'GACHA_MIN_COIN', 100)
+                DEBUG_CONSOLE = getattr(cfg, 'DEBUG_CONSOLE', 0)
+                MOVE_LS_ENABLE = getattr(cfg, 'MOVE_LS_ENABLE', 0)
+                MOVE_LS_TIME = getattr(cfg, 'MOVE_LS_TIME', '09:00')
+                CUSTOM_GACHA = getattr(cfg, 'CUSTOM_GACHA', 0)
+                NEW_GACHA = getattr(cfg, 'NEW_GACHA', 0)
+            except Exception as ce:
+                gui_log(serial, f"⚠️ Config reload failed: {ce}", step="Reload Error")
+
             # ── ด่านเช็ค device online ก่อนเริ่ม cycle ──
             # กัน 2 อาการ: (1) spin วน cycle รัวๆ ตอนเครื่องตาย
             #              (2) เริ่มทำงาน/ย้ายไฟล์มั่วบนเครื่องที่ offline/ค้าง
