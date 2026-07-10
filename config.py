@@ -18,6 +18,11 @@ DO_BOX = 0
 # 0 = ไม่สุ่มกาชา (จบงานปกติ)
 DO_GACHA = 1
 
+# ── New Gacha Sequence (login.py) ──────────────────
+# 1 = เปิดการทำงาน new-gacha1 -> เลื่อนหา net-gacha1 -> ข้ามไป gacha4.bmp
+# 0 = ปิด
+NEW_GACHA = 0
+
 # ── Custom Gacha Loop Mode ──────────────────────────
 # 1 = เปิดโหมด Custom Gacha (loopgacha1 -> gacha4 -> gacha5 -> loop จนเจอ outloop)
 # 0 = ปิดโหมด

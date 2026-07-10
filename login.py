@@ -127,6 +127,10 @@ try:
     from config import CUSTOM_GACHA
 except ImportError:
     CUSTOM_GACHA = 0
+try:
+    from config import NEW_GACHA
+except ImportError:
+    NEW_GACHA = 0
 
 
 def cprint(*args, **kwargs):
@@ -5135,22 +5139,6 @@ def process_device_login(device):
                 box2_found = False
                 while not box2_found:
                     check_device_reset(serial, cycle_start)
-                    # play26 - play31 (リードアップ)
-                    for i in range(26, 32):
-                        name = f"play{i}.bmp"
-                        gui_log(serial, f"Waiting {name} (Box path)...", step=name)
-                        deadline = time.time() + 4
-                        while time.time() < deadline:
-                            check_device_reset(serial, cycle_start)
-                            img = get_screen_capture(device)
-                            if img is not None:
-                                pts = img_search(img, os.path.join(IMG_DIR, name))
-                                if pts:
-                                    x, y = pts[0]
-                                    device.shell(f"input swipe {x} {y} {x} {y} 100")
-                                    time.sleep(2.5)
-                                    break
-                            time.sleep(0.5)
                     
                     # box1
                     gui_log(serial, "Waiting box1.bmp...", step="box1")
@@ -5298,27 +5286,20 @@ def process_device_login(device):
 
             # 8. Gacha Sequence (Optional)
             gacha_hero_found = None
-            if DO_GACHA == 1 and not coin_low:
+            if (DO_GACHA == 1 or NEW_GACHA == 1) and not coin_low:
                 gui_log(serial, "Gacha sequence started...", step="Gacha Mode", status="working")
                 
-                # gacha1 -> gacha2
-                goto_gacha4 = False
-                for i in range(1, 3):
-                    if goto_gacha4:
-                        break
-                    name = f"gacha{i}.bmp"
-                    gui_log(serial, f"Waiting {name}...", step=name)
+                if NEW_GACHA == 1:
+                    # 1. รอ/คลิก new-gacha1.bmp
+                    gui_log(serial, "Waiting new-gacha1.bmp...", step="new-g1")
                     while True:
                         check_device_reset(serial, cycle_start)
                         img = get_screen_capture(device)
                         if img is not None:
-                            img, force_g4 = check_and_click_fixback(device, img, serial)
-                            if force_g4:
-                                goto_gacha4 = True
-                                break
+                            img, _ = check_and_click_fixback(device, img, serial)
                             if img is None:
                                 continue
-                            pts = img_search(img, os.path.join(IMG_DIR, name))
+                            pts = img_search(img, os.path.join(IMG_DIR, "new-gacha1.bmp"))
                             if pts:
                                 x, y = pts[0]
                                 device.shell(f"input swipe {x} {y} {x} {y} 100")
@@ -5326,34 +5307,81 @@ def process_device_login(device):
                                 break
                         time.sleep(1)
 
-                # swipe until gacha3
-                if not goto_gacha4:
-                    gui_log(serial, "Swiping from 618,308 to 54,306 for gacha3...", step="Swipe Gacha")
-                    found_g3 = False
+                    # 2. หา net-gacha1.bmp
+                    gui_log(serial, "Waiting net-gacha1.bmp...", step="net-g1")
                     while True:
                         check_device_reset(serial, cycle_start)
                         img = get_screen_capture(device)
                         if img is not None:
-                            img, force_g4 = check_and_click_fixback(device, img, serial)
-                            if force_g4:
-                                goto_gacha4 = True
-                                break
+                            img, _ = check_and_click_fixback(device, img, serial)
                             if img is None:
                                 continue
-                            pts = img_search(img, os.path.join(IMG_DIR, "gacha3.bmp"))
+                            pts = img_search(img, os.path.join(IMG_DIR, "net-gacha1.bmp"))
                             if pts:
                                 x, y = pts[0]
                                 device.shell(f"input swipe {x} {y} {x} {y} 100")
-                                gui_log(serial, "Clicking gacha3.bmp...", step="G3-Click")
-                                time.sleep(2)
-                                found_g3 = True
-                                continue
+                                time.sleep(4)
+                                break
                             else:
-                                if found_g3:
+                                # เลื่อนตำแหน่ง 259 344 679 349
+                                gui_log(serial, "net-gacha1 not found, swiping 259 344 -> 679 349...", step="Swipe NetG")
+                                device.shell("input swipe 259 344 679 349 1000")
+                                time.sleep(2)
+                        time.sleep(1)
+                else:
+                    # gacha1 -> gacha2
+                    goto_gacha4 = False
+                    for i in range(1, 3):
+                        if goto_gacha4:
+                            break
+                        name = f"gacha{i}.bmp"
+                        gui_log(serial, f"Waiting {name}...", step=name)
+                        while True:
+                            check_device_reset(serial, cycle_start)
+                            img = get_screen_capture(device)
+                            if img is not None:
+                                img, force_g4 = check_and_click_fixback(device, img, serial)
+                                if force_g4:
+                                    goto_gacha4 = True
                                     break
-                        # Swipe (drag) action
-                        device.shell("input swipe 618 308 54 306 3000")
-                        time.sleep(2)
+                                if img is None:
+                                    continue
+                                pts = img_search(img, os.path.join(IMG_DIR, name))
+                                if pts:
+                                    x, y = pts[0]
+                                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                    time.sleep(4)
+                                    break
+                            time.sleep(1)
+
+                    # swipe until gacha3
+                    if not goto_gacha4:
+                        gui_log(serial, "Swiping from 618,308 to 54,306 for gacha3...", step="Swipe Gacha")
+                        found_g3 = False
+                        while True:
+                            check_device_reset(serial, cycle_start)
+                            img = get_screen_capture(device)
+                            if img is not None:
+                                img, force_g4 = check_and_click_fixback(device, img, serial)
+                                if force_g4:
+                                    goto_gacha4 = True
+                                    break
+                                if img is None:
+                                    continue
+                                pts = img_search(img, os.path.join(IMG_DIR, "gacha3.bmp"))
+                                if pts:
+                                    x, y = pts[0]
+                                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                    gui_log(serial, "Clicking gacha3.bmp...", step="G3-Click")
+                                    time.sleep(2)
+                                    found_g3 = True
+                                    continue
+                                else:
+                                    if found_g3:
+                                        break
+                            # Swipe (drag) action
+                            device.shell("input swipe 618 308 54 306 3000")
+                            time.sleep(2)
 
                 # gacha4
                 if CUSTOM_GACHA == 1:

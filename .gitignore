@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE / VS Code
+.vscode/
+.idea/
+.vs/
+
+# Bot folders containing sensitive user credentials and temporary logs
+input-id/
+login-success/
+backup/
+fast-random/
+backup-id/
+logs/
+debug-ocr/
+cap-id-result/
+
+# Dat files / zip archives / installer files
+*.dat
+*.zip
+*.exe
