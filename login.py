@@ -5425,478 +5425,504 @@ def process_device_login(device):
             if (DO_GACHA == 1 or NEW_GACHA == 1) and not coin_low:
                 gui_log(serial, "Gacha sequence started...", step="Gacha Mode", status="working")
                 
-                if NEW_GACHA == 1:
-                    global in_new_gacha_loop
-                    in_new_gacha_loop = True
+                while True:
                     try:
-                        while True:
+                        if NEW_GACHA == 1:
+                            global in_new_gacha_loop
+                            in_new_gacha_loop = True
                             try:
-                                # 1. รอ/คลิก new-gacha1.bmp
-                                gui_log(serial, "Waiting new-gacha1.bmp...", step="new-g1")
-                                new_g1_swipe_count = 0
-                                fixswap_first_seen = None
-                                fixswap_triggered = False
                                 while True:
-                                    check_device_reset(serial, cycle_start)
-                                    img = get_screen_capture(device)
-                                    if img is not None:
-                                        img, _ = check_and_click_fixback(device, img, serial)
-                                        if img is None:
-                                            continue
-                            
-                                        # 1. เช็ค fixswap.bmp ก่อน (หาแบบลอยๆ ตลอดเวลา)
-                                        pts_fixswap = img_search(img, os.path.join(IMG_DIR, "fixswap.bmp"))
-                                        if pts_fixswap:
-                                            if fixswap_triggered:
-                                                x_fs, y_fs = pts_fixswap[0]
-                                                device.shell(f"input swipe {x_fs} {y_fs} {x_fs} {y_fs} 100")
-                                                gui_log(serial, "fixswap.bmp still visible! Re-clicking it immediately...", step="FixSwap ReClick")
-                                                new_g1_swipe_count = 0  # เริ่มลื่นหน้าจอใหม่อีกรอบ
-                                                time.sleep(4)
-                                                continue
-                                            else:
-                                                if fixswap_first_seen is None:
-                                                    fixswap_first_seen = time.time()
-                                                    gui_log(serial, "fixswap.bmp detected, starting 10s timer...", step="FixSwap Timer")
-                                                else:
-                                                    elapsed = time.time() - fixswap_first_seen
-                                                    if elapsed >= 10.0:
+                                    try:
+                                        # 1. รอ/คลิก new-gacha1.bmp
+                                        gui_log(serial, "Waiting new-gacha1.bmp...", step="new-g1")
+                                        new_g1_swipe_count = 0
+                                        fixswap_first_seen = None
+                                        fixswap_triggered = False
+                                        while True:
+                                            check_device_reset(serial, cycle_start)
+                                            img = get_screen_capture(device)
+                                            if img is not None:
+                                                img, _ = check_and_click_fixback(device, img, serial)
+                                                if img is None:
+                                                    continue
+
+                                                # 1. เช็ค fixswap.bmp ก่อน (หาแบบลอยๆ ตลอดเวลา)
+                                                pts_fixswap = img_search(img, os.path.join(IMG_DIR, "fixswap.bmp"))
+                                                if pts_fixswap:
+                                                    if fixswap_triggered:
                                                         x_fs, y_fs = pts_fixswap[0]
                                                         device.shell(f"input swipe {x_fs} {y_fs} {x_fs} {y_fs} 100")
-                                                        gui_log(serial, f"fixswap.bmp detected for {elapsed:.1f}s. Clicking it!", step="FixSwap Click")
+                                                        gui_log(serial, "fixswap.bmp still visible! Re-clicking it immediately...", step="FixSwap ReClick")
                                                         new_g1_swipe_count = 0  # เริ่มลื่นหน้าจอใหม่อีกรอบ
                                                         time.sleep(4)
-                                                        fixswap_triggered = True
                                                         continue
-                                        else:
-                                            # หากไม่พบ fixswap.bmp ให้รีเซ็ตตัวจับเวลาและสถานะปุ่มกดซ้ำ
-                                            fixswap_first_seen = None
-                                            fixswap_triggered = False
+                                                    else:
+                                                        if fixswap_first_seen is None:
+                                                            fixswap_first_seen = time.time()
+                                                            gui_log(serial, "fixswap.bmp detected, starting 10s timer...", step="FixSwap Timer")
+                                                        else:
+                                                            elapsed = time.time() - fixswap_first_seen
+                                                            if elapsed >= 10.0:
+                                                                x_fs, y_fs = pts_fixswap[0]
+                                                                device.shell(f"input swipe {x_fs} {y_fs} {x_fs} {y_fs} 100")
+                                                                gui_log(serial, f"fixswap.bmp detected for {elapsed:.1f}s. Clicking it!", step="FixSwap Click")
+                                                                new_g1_swipe_count = 0  # เริ่มลื่นหน้าจอใหม่อีกรอบ
+                                                                time.sleep(4)
+                                                                fixswap_triggered = True
+                                                                continue
+                                                else:
+                                                    # หากไม่พบ fixswap.bmp ให้รีเซ็ตตัวจับเวลาและสถานะปุ่มกดซ้ำ
+                                                    fixswap_first_seen = None
+                                                    fixswap_triggered = False
 
-                                        # 1.5 เช็ค fixgachanew1.bmp (หาแบบลอยๆ ตลอดเวลา - เจอให้กด fixswap ทันที)
-                                        pts_fixgachanew = img_search(img, os.path.join(IMG_DIR, "fixgachanew1.bmp"))
-                                        if pts_fixgachanew:
-                                            pts_fs_fallback = img_search(img, os.path.join(IMG_DIR, "fixswap.bmp"))
-                                            if pts_fs_fallback:
-                                                x_click, y_click = pts_fs_fallback[0]
-                                                click_name = "fixswap.bmp"
-                                            else:
-                                                x_click, y_click = pts_fixgachanew[0]
-                                                click_name = "fixgachanew1.bmp"
-                                            device.shell(f"input swipe {x_click} {y_click} {x_click} {y_click} 100")
-                                            gui_log(serial, f"fixgachanew1.bmp detected! Clicking {click_name} immediately...", step="FixGachaNew Instant")
-                                            new_g1_swipe_count = 0  # เริ่มลื่นหน้าจอใหม่อีกรอบ
-                                            time.sleep(4)
-                                            continue
+                                                # 1.5 เช็ค fixgachanew1.bmp (หาแบบลอยๆ ตลอดเวลา - เจอให้กด fixswap ทันที)
+                                                pts_fixgachanew = img_search(img, os.path.join(IMG_DIR, "fixgachanew1.bmp"))
+                                                if pts_fixgachanew:
+                                                    pts_fs_fallback = img_search(img, os.path.join(IMG_DIR, "fixswap.bmp"))
+                                                    if pts_fs_fallback:
+                                                        x_click, y_click = pts_fs_fallback[0]
+                                                        click_name = "fixswap.bmp"
+                                                    else:
+                                                        x_click, y_click = pts_fixgachanew[0]
+                                                        click_name = "fixgachanew1.bmp"
+                                                    device.shell(f"input swipe {x_click} {y_click} {x_click} {y_click} 100")
+                                                    gui_log(serial, f"fixgachanew1.bmp detected! Clicking {click_name} immediately...", step="FixGachaNew Instant")
+                                                    new_g1_swipe_count = 0  # เริ่มลื่นหน้าจอใหม่อีกรอบ
+                                                    time.sleep(4)
+                                                    continue
 
-                                        # 2. เช็ค new-gacha1.bmp (หากเจอแล้วจะหลุดลูปและหยุดหา fixswap)
-                                        pts = img_search(img, os.path.join(IMG_DIR, "new-gacha1.bmp"))
-                                        if pts:
-                                            x, y = pts[0]
-                                            device.shell(f"input swipe {x} {y} {x} {y} 100")
-                                            time.sleep(4)
-                                            break
+                                                # 2. เช็ค new-gacha1.bmp (หากเจอแล้วจะหลุดลูปและหยุดหา fixswap)
+                                                pts = img_search(img, os.path.join(IMG_DIR, "new-gacha1.bmp"))
+                                                if pts:
+                                                    x, y = pts[0]
+                                                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                                    time.sleep(4)
+                                                    break
 
-                                        new_g1_swipe_count += 1
-                                        log_msg = f"new-gacha1 not found (swipe {new_g1_swipe_count}). Swiping 144 243 -> 699 233 (250ms)..."
-                                        gui_log(serial, log_msg, step="Swipe NewG1")
-                                        print(f"[{serial}] {log_msg}")
-                                        res = device.shell("input swipe 144 243 699 233 250")
-                                        print(f"[{serial}] ADB swipe command executed. Result: {res.strip() if res else 'OK'}")
-                                        time.sleep(0.2)
-                                    time.sleep(0.3)
+                                                new_g1_swipe_count += 1
+                                                log_msg = f"new-gacha1 not found (swipe {new_g1_swipe_count}). Swiping 144 243 -> 699 233 (250ms)..."
+                                                gui_log(serial, log_msg, step="Swipe NewG1")
+                                                print(f"[{serial}] {log_msg}")
+                                                res = device.shell("input swipe 144 243 699 233 250")
+                                                print(f"[{serial}] ADB swipe command executed. Result: {res.strip() if res else 'OK'}")
+                                                time.sleep(0.2)
+                                            time.sleep(0.3)
 
-                                # 2. หา net-gacha1.bmp (วนหา/เลื่อนไม่เกิน 3 รอบ)
-                                gui_log(serial, "Waiting net-gacha1.bmp (max 3 loops)...", step="net-g1")
-                                swipe_count = 0
+                                        # 2. หา net-gacha1.bmp (วนหา/เลื่อนไม่เกิน 3 รอบ)
+                                        gui_log(serial, "Waiting net-gacha1.bmp (max 3 loops)...", step="net-g1")
+                                        swipe_count = 0
+                                        while True:
+                                            check_device_reset(serial, cycle_start)
+                                            img = get_screen_capture(device)
+                                            if img is not None:
+                                                img, _ = check_and_click_fixback(device, img, serial)
+                                                if img is None:
+                                                    continue
+                                                pts = img_search(img, os.path.join(IMG_DIR, "net-gacha1.bmp"))
+                                                if pts:
+                                                    x, y = pts[0]
+                                                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                                    time.sleep(4)
+                                                    break
+                                                else:
+                                                    swipe_count += 1
+                                                    if swipe_count > 3:
+                                                        log_limit = "net-gacha1 not found after 3 swipes. Jumping to Gacha4."
+                                                        gui_log(serial, log_limit, step="NetG-Limit")
+                                                        print(f"[{serial}] {log_limit}")
+                                                        break
+                                                    # เลื่อนตำแหน่ง 144 243 -> 699 233
+                                                    log_msg = f"net-gacha1 not found (swipe {swipe_count}/3). Swiping 144 243 -> 699 233 (250ms)..."
+                                                    gui_log(serial, log_msg, step="Swipe NetG")
+                                                    print(f"[{serial}] {log_msg}")
+                                                    res = device.shell("input swipe 144 243 699 233 250")
+                                                    print(f"[{serial}] ADB swipe command executed. Result: {res.strip() if res else 'OK'}")
+                                                    time.sleep(0.2)
+                                            time.sleep(0.3)
+                                        break
+                                    except ResetGachaException:
+                                        gui_log(serial, "Resetting Gacha sequence to step 1 due to fixgachanew1...", step="ResetGacha")
+                                        time.sleep(1)
+                                        continue
+                            finally:
+                                in_new_gacha_loop = False
+                        else:
+                            # gacha1 -> gacha2
+                            goto_gacha4 = False
+                            for i in range(1, 3):
+                                if goto_gacha4:
+                                    break
+                                name = f"gacha{i}.bmp"
+                                gui_log(serial, f"Waiting {name}...", step=name)
                                 while True:
                                     check_device_reset(serial, cycle_start)
                                     img = get_screen_capture(device)
                                     if img is not None:
-                                        img, _ = check_and_click_fixback(device, img, serial)
+                                        img, force_g4 = check_and_click_fixback(device, img, serial)
+                                        if force_g4:
+                                            goto_gacha4 = True
+                                            break
                                         if img is None:
                                             continue
-                                        pts = img_search(img, os.path.join(IMG_DIR, "net-gacha1.bmp"))
+                                        pts = img_search(img, os.path.join(IMG_DIR, name))
                                         if pts:
                                             x, y = pts[0]
                                             device.shell(f"input swipe {x} {y} {x} {y} 100")
                                             time.sleep(4)
                                             break
+                                    time.sleep(1)
+
+                            # swipe until gacha3
+                            if not goto_gacha4:
+                                gui_log(serial, "Swiping from 618,308 to 54,306 for gacha3...", step="Swipe Gacha")
+                                found_g3 = False
+                                while True:
+                                    check_device_reset(serial, cycle_start)
+                                    img = get_screen_capture(device)
+                                    if img is not None:
+                                        img, force_g4 = check_and_click_fixback(device, img, serial)
+                                        if force_g4:
+                                            goto_gacha4 = True
+                                            break
+                                        if img is None:
+                                            continue
+                                        pts = img_search(img, os.path.join(IMG_DIR, "gacha3.bmp"))
+                                        if pts:
+                                            x, y = pts[0]
+                                            device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                            gui_log(serial, "Clicking gacha3.bmp...", step="G3-Click")
+                                            time.sleep(2)
+                                            found_g3 = True
+                                            continue
                                         else:
-                                            swipe_count += 1
-                                            if swipe_count > 3:
-                                                log_limit = "net-gacha1 not found after 3 swipes. Jumping to Gacha4."
-                                                gui_log(serial, log_limit, step="NetG-Limit")
-                                                print(f"[{serial}] {log_limit}")
+                                            if found_g3:
                                                 break
-                                            # เลื่อนตำแหน่ง 144 243 -> 699 233
-                                            log_msg = f"net-gacha1 not found (swipe {swipe_count}/3). Swiping 144 243 -> 699 233 (250ms)..."
-                                            gui_log(serial, log_msg, step="Swipe NetG")
-                                            print(f"[{serial}] {log_msg}")
-                                            res = device.shell("input swipe 144 243 699 233 250")
-                                            print(f"[{serial}] ADB swipe command executed. Result: {res.strip() if res else 'OK'}")
-                                            time.sleep(0.2)
-                                    time.sleep(0.3)
-                                break
-                            except ResetGachaException:
-                                gui_log(serial, "Resetting Gacha sequence to step 1 due to fixgachanew1...", step="ResetGacha")
-                                time.sleep(1)
-                                continue
-                    finally:
-                        in_new_gacha_loop = False
-                else:
-                    # gacha1 -> gacha2
-                    goto_gacha4 = False
-                    for i in range(1, 3):
-                        if goto_gacha4:
-                            break
-                        name = f"gacha{i}.bmp"
-                        gui_log(serial, f"Waiting {name}...", step=name)
-                        while True:
-                            check_device_reset(serial, cycle_start)
-                            img = get_screen_capture(device)
-                            if img is not None:
-                                img, force_g4 = check_and_click_fixback(device, img, serial)
-                                if force_g4:
-                                    goto_gacha4 = True
-                                    break
-                                if img is None:
-                                    continue
-                                pts = img_search(img, os.path.join(IMG_DIR, name))
-                                if pts:
-                                    x, y = pts[0]
-                                    device.shell(f"input swipe {x} {y} {x} {y} 100")
-                                    time.sleep(4)
-                                    break
-                            time.sleep(1)
-
-                    # swipe until gacha3
-                    if not goto_gacha4:
-                        gui_log(serial, "Swiping from 618,308 to 54,306 for gacha3...", step="Swipe Gacha")
-                        found_g3 = False
-                        while True:
-                            check_device_reset(serial, cycle_start)
-                            img = get_screen_capture(device)
-                            if img is not None:
-                                img, force_g4 = check_and_click_fixback(device, img, serial)
-                                if force_g4:
-                                    goto_gacha4 = True
-                                    break
-                                if img is None:
-                                    continue
-                                pts = img_search(img, os.path.join(IMG_DIR, "gacha3.bmp"))
-                                if pts:
-                                    x, y = pts[0]
-                                    device.shell(f"input swipe {x} {y} {x} {y} 100")
-                                    gui_log(serial, "Clicking gacha3.bmp...", step="G3-Click")
+                                    # Swipe (drag) action
+                                    device.shell("input swipe 618 308 54 306 3000")
                                     time.sleep(2)
-                                    found_g3 = True
-                                    continue
-                                else:
-                                    if found_g3:
-                                        break
-                            # Swipe (drag) action
-                            device.shell("input swipe 618 308 54 306 3000")
-                            time.sleep(2)
 
-                # gacha4
-                if CUSTOM_GACHA == 1:
-                    # Custom Gacha Loop Mode
-                    gui_log(serial, "Custom Gacha mode active...", step="Custom Gacha")
-                    while True:
-                        # 1. Wait/Click gacha4.bmp
-                        gui_log(serial, "Waiting gacha4.bmp (Custom)...", step="G4-Custom")
-                        found_g4 = False
-                        g4_click_count = 0
-                        while True:
-                            check_device_reset(serial, cycle_start)
-                            img = get_screen_capture(device)
-                            if img is not None:
-                                img, _ = check_and_click_fixback(device, img, serial, check_g1=False)
-                                if img is None:
-                                    continue
-                                # เช็ค outloop.bmp ก่อนเสมอ เจอแล้วจบการทำงานทันที
-                                if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
-                                    gui_log(serial, "outloop.bmp detected while waiting/clicking gacha4!", step="G4-Outloop")
-                                    found_g4 = "outloop"
-                                    break
+                        # gacha4
+                        if CUSTOM_GACHA == 1:
+                            # Custom Gacha Loop Mode
+                            gui_log(serial, "Custom Gacha mode active...", step="Custom Gacha")
+                            while True:
+                                # 1. Wait/Click gacha4.bmp
+                                gui_log(serial, "Waiting gacha4.bmp (Custom)...", step="G4-Custom")
+                                found_g4 = False
+                                g4_click_count = 0
+                                while True:
+                                    check_device_reset(serial, cycle_start)
+                                    img = get_screen_capture(device)
+                                    if img is not None:
+                                        img, _ = check_and_click_fixback(device, img, serial, check_g1=False)
+                                        if img is None:
+                                            continue
+                                        # เช็ค outloop.bmp ก่อนเสมอ เจอแล้วจบการทำงานทันที
+                                        if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
+                                            gui_log(serial, "outloop.bmp detected while waiting/clicking gacha4!", step="G4-Outloop")
+                                            found_g4 = "outloop"
+                                            break
 
-                                pts = img_search(img, os.path.join(IMG_DIR, "gacha4.bmp"))
-                                if pts:
-                                    x, y = pts[0]
-                                    device.shell(f"input swipe {x} {y} {x} {y} 100")
-                                    g4_click_count += 1
-                                    gui_log(serial, f"Clicking gacha4.bmp... (count: {g4_click_count})", step="G4-Click")
-                                    time.sleep(2)
-                                    found_g4 = True
-                                    continue
-                                
-                                if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
-                                    found_g4 = "nocoin"
-                                    break
-
-                                if found_g4:
-                                    break
-                            time.sleep(1)
-                        
-                        if found_g4 in ["nocoin", "outloop"]:
-                            if found_g4 == "nocoin":
-                                gui_log(serial, "nocions.bmp detected during Custom Gacha!", step="No-Coins")
-                            else:
-                                gui_log(serial, "outloop.bmp detected during Custom Gacha!", step="Outloop Exit")
-                            break
-                        
-                        # 2. Wait 10s delay (as requested: "ให้มัน delayด้วยดิ 10วิ")
-                        gui_log(serial, "Proceeding to Gacha5 (Custom)... Delaying 10s...", step="G5-Custom")
-                        time.sleep(10)
-                        
-                        # 3. Wait/Click gacha5.bmp
-                        while True:
-                            check_device_reset(serial, cycle_start)
-                            img = get_screen_capture(device)
-                            if img is not None:
-                                img, _ = check_and_click_fixback(device, img, serial, check_g1=False)
-                                if img is None:
-                                    continue
-                                # เช็ค outloop.bmp ก่อนเสมอ เจอแล้วจบการทำงานทันที
-                                if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
-                                    gui_log(serial, "outloop.bmp detected during Gacha5 (Custom)!", step="G5-Outloop")
-                                    found_g4 = "outloop"
-                                    break
-
-                                # หากเจอ loopgacha1.bmp แสดงว่าเลย gacha5 ไปแล้ว ให้หลุดลูปทันที
-                                if img_search(img, os.path.join(IMG_DIR, "loopgacha1.bmp")):
-                                    gui_log(serial, "loopgacha1.bmp detected during Gacha5 (Custom)! Proceeding.", step="G5-Skip")
-                                    break
-
-                                pts = img_search(img, os.path.join(IMG_DIR, "gacha5.bmp"))
-                                if pts:
-                                    x, y = pts[0]
-                                    device.shell(f"input swipe {x} {y} {x} {y} 100")
-                                    gui_log(serial, "Clicking gacha5.bmp... (Custom)", step="G5-Click")
-                                    time.sleep(4)
-                                    break
-                                
-                                if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
-                                    found_g4 = "nocoin"
-                                    break
-                            time.sleep(1)
-                        
-                        if found_g4 in ["nocoin", "outloop"]:
-                            break
-
-                        # 4. Wait for loopgacha1.bmp or outloop.bmp
-                        gui_log(serial, "Waiting for loopgacha1.bmp or outloop.bmp...", step="Loop-Check")
-                        action_taken = False
-                        while True:
-                            check_device_reset(serial, cycle_start)
-                            img = get_screen_capture(device)
-                            if img is not None:
-                                img, _ = check_and_click_fixback(device, img, serial, check_g1=False)
-                                if img is None:
-                                    continue
-                                if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
-                                    gui_log(serial, "outloop.bmp detected! Ending Custom Gacha.", step="Outloop Found")
-                                    action_taken = "outloop"
-                                    break
-                                pts_loop = img_search(img, os.path.join(IMG_DIR, "loopgacha1.bmp"))
-                                if pts_loop:
-                                    x, y = pts_loop[0]
-                                    
-                                    # แวะหา unlock-hero1.bmp 3 วิ
-                                    gui_log(serial, "loopgacha1 found! Checking for unlock-hero1.bmp (3s)...", step="Check-Unlock")
-                                    print(f"[{serial}] loopgacha1 found! Checking for unlock-hero1.bmp (3s)...")
-                                    deadline_unlock = time.time() + 3
-                                    while time.time() < deadline_unlock:
-                                        check_device_reset(serial, cycle_start)
-                                        img_unlock = get_screen_capture(device)
-                                        if img_unlock is not None:
-                                            pts_unlock = img_search(img_unlock, os.path.join(IMG_DIR, "unlock-hero1.bmp"))
-                                            if pts_unlock:
-                                                x_un, y_un = pts_unlock[0]
-                                                device.shell(f"input swipe {x_un} {y_un} {x_un} {y_un} 100")
-                                                gui_log(serial, "unlock-hero1.bmp found! Clicking it.", step="Unlock-Hero")
-                                                print(f"[{serial}] unlock-hero1.bmp found! Clicking it.")
+                                        pts = img_search(img, os.path.join(IMG_DIR, "gacha4.bmp"))
+                                        if pts:
+                                            pts_cp4 = img_search(img, os.path.join(IMG_DIR, "checkpoint-gacha4.bmp"))
+                                            if pts_cp4:
+                                                x, y = pts[0]
+                                                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                                g4_click_count += 1
+                                                gui_log(serial, f"Clicking gacha4.bmp... (count: {g4_click_count})", step="G4-Click")
                                                 time.sleep(2)
+                                                found_g4 = True
+                                                continue
+                                            else:
+                                                gui_log(serial, "checkpoint-gacha4.bmp not found! Resetting gacha sequence...", step="G4-Failed")
+                                                pts_fg2 = img_search(img, os.path.join(IMG_DIR, "fixgachanew2.bmp"))
+                                                if pts_fg2:
+                                                    x2, y2 = pts_fg2[0]
+                                                    device.shell(f"input swipe {x2} {y2} {x2} {y2} 100")
+                                                    gui_log(serial, "Clicked fixgachanew2.bmp", step="G4-Failed")
+                                                    time.sleep(2)
+                                                raise ResetGachaException("checkpoint-gacha4 not found")
+                                        if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
+                                            found_g4 = "nocoin"
+                                            break
+
+                                        if found_g4:
+                                            break
+                                    time.sleep(1)
+
+                                if found_g4 in ["nocoin", "outloop"]:
+                                    if found_g4 == "nocoin":
+                                        gui_log(serial, "nocions.bmp detected during Custom Gacha!", step="No-Coins")
+                                    else:
+                                        gui_log(serial, "outloop.bmp detected during Custom Gacha!", step="Outloop Exit")
+                                    break
+
+                                # 2. Wait 10s delay (as requested: "ให้มัน delayด้วยดิ 10วิ")
+                                gui_log(serial, "Proceeding to Gacha5 (Custom)... Delaying 10s...", step="G5-Custom")
+                                time.sleep(10)
+
+                                # 3. Wait/Click gacha5.bmp
+                                while True:
+                                    check_device_reset(serial, cycle_start)
+                                    img = get_screen_capture(device)
+                                    if img is not None:
+                                        img, _ = check_and_click_fixback(device, img, serial, check_g1=False)
+                                        if img is None:
+                                            continue
+                                        # เช็ค outloop.bmp ก่อนเสมอ เจอแล้วจบการทำงานทันที
+                                        if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
+                                            gui_log(serial, "outloop.bmp detected during Gacha5 (Custom)!", step="G5-Outloop")
+                                            found_g4 = "outloop"
+                                            break
+
+                                        # หากเจอ loopgacha1.bmp แสดงว่าเลย gacha5 ไปแล้ว ให้หลุดลูปทันที
+                                        if img_search(img, os.path.join(IMG_DIR, "loopgacha1.bmp")):
+                                            gui_log(serial, "loopgacha1.bmp detected during Gacha5 (Custom)! Proceeding.", step="G5-Skip")
+                                            break
+
+                                        pts = img_search(img, os.path.join(IMG_DIR, "gacha5.bmp"))
+                                        if pts:
+                                            x, y = pts[0]
+                                            device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                            gui_log(serial, "Clicking gacha5.bmp... (Custom)", step="G5-Click")
+                                            time.sleep(4)
+                                            break
+
+                                        if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
+                                            found_g4 = "nocoin"
+                                            break
+                                    time.sleep(1)
+
+                                if found_g4 in ["nocoin", "outloop"]:
+                                    break
+
+                                # 4. Wait for loopgacha1.bmp or outloop.bmp
+                                gui_log(serial, "Waiting for loopgacha1.bmp or outloop.bmp...", step="Loop-Check")
+                                action_taken = False
+                                while True:
+                                    check_device_reset(serial, cycle_start)
+                                    img = get_screen_capture(device)
+                                    if img is not None:
+                                        img, _ = check_and_click_fixback(device, img, serial, check_g1=False)
+                                        if img is None:
+                                            continue
+                                        if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
+                                            gui_log(serial, "outloop.bmp detected! Ending Custom Gacha.", step="Outloop Found")
+                                            action_taken = "outloop"
+                                            break
+                                        pts_loop = img_search(img, os.path.join(IMG_DIR, "loopgacha1.bmp"))
+                                        if pts_loop:
+                                            x, y = pts_loop[0]
+
+                                            # แวะหา unlock-hero1.bmp 3 วิ
+                                            gui_log(serial, "loopgacha1 found! Checking for unlock-hero1.bmp (3s)...", step="Check-Unlock")
+                                            print(f"[{serial}] loopgacha1 found! Checking for unlock-hero1.bmp (3s)...")
+                                            deadline_unlock = time.time() + 3
+                                            while time.time() < deadline_unlock:
+                                                check_device_reset(serial, cycle_start)
+                                                img_unlock = get_screen_capture(device)
+                                                if img_unlock is not None:
+                                                    pts_unlock = img_search(img_unlock, os.path.join(IMG_DIR, "unlock-hero1.bmp"))
+                                                    if pts_unlock:
+                                                        x_un, y_un = pts_unlock[0]
+                                                        device.shell(f"input swipe {x_un} {y_un} {x_un} {y_un} 100")
+                                                        gui_log(serial, "unlock-hero1.bmp found! Clicking it.", step="Unlock-Hero")
+                                                        print(f"[{serial}] unlock-hero1.bmp found! Clicking it.")
+                                                        time.sleep(2)
+                                                        break
+                                                time.sleep(0.5)
+
+                                            # แล้วค่อยกด loopgacha1
+                                            device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                            gui_log(serial, f"loopgacha1.bmp found! Clicking ({x},{y})...", step="LoopGacha1")
+                                            print(f"[{serial}] Clicking loopgacha1.bmp at ({x},{y})...")
+                                            time.sleep(2)
+                                            action_taken = "loop"
+                                            continue
+                                        else:
+                                            if action_taken == "loop":
                                                 break
-                                        time.sleep(0.5)
-                                    
-                                    # แล้วค่อยกด loopgacha1
-                                    device.shell(f"input swipe {x} {y} {x} {y} 100")
-                                    gui_log(serial, f"loopgacha1.bmp found! Clicking ({x},{y})...", step="LoopGacha1")
-                                    print(f"[{serial}] Clicking loopgacha1.bmp at ({x},{y})...")
-                                    time.sleep(2)
-                                    action_taken = "loop"
-                                    continue
-                                else:
-                                    if action_taken == "loop":
-                                        break
-                            time.sleep(1)
-                        
-                        if action_taken == "outloop":
-                            break
-                    found_g4 = False # จบ Custom Gacha ไม่ต้องทำ OCR (ข้าม checkpointgacha)
-                else:
-                    # Normal Gacha Flow (CUSTOM_GACHA == 0)
-                    found_g4 = False
-                    g4_click_count = 0
-                    gui_log(serial, "Waiting gacha4.bmp (10s)...", step="Gacha4")
-                    deadline_g4 = time.time() + 10
-                    while time.time() < deadline_g4:
-                        check_device_reset(serial, cycle_start)
-                        img = get_screen_capture(device)
-                        if img is not None:
-                            img, _ = check_and_click_fixback(device, img, serial, check_g1=False)
-                            if img is None:
-                                continue
-                            # เช็ค outloop.bmp ก่อนเสมอ เจอแล้วจบการทำงานทันที
-                            if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
-                                gui_log(serial, "outloop.bmp detected while waiting/clicking gacha4!", step="G4-Outloop")
-                                found_g4 = "outloop"
-                                break
+                                    time.sleep(1)
 
-                            pts = img_search(img, os.path.join(IMG_DIR, "gacha4.bmp"))
-                            if pts:
-                                x, y = pts[0]
-                                device.shell(f"input swipe {x} {y} {x} {y} 100")
-                                g4_click_count += 1
-                                gui_log(serial, f"Clicking gacha4.bmp... (count: {g4_click_count})", step="G4-Click")
-                                time.sleep(2)
-                                found_g4 = True
-                                # ขยายเวลา deadline ออกไปถ้ายังคงเจอ เพื่อให้กดจนกว่าจะหายไป
-                                deadline_g4 = time.time() + 10
-                                continue
-                            
-                            # เช็ค nocions ระหว่างรอ
-                            if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
-                                found_g4 = "nocoin"
-                                break
-
-                            if found_g4:
-                                break
-                        time.sleep(1)
-
-                    if not found_g4:
-                        # ไม่เจอ gacha4 ใน 10s -> แวะเช็ค nocions ต่ออีก 10s
-                        gui_log(serial, "gacha4 not found, checking nocions (10s)...", step="Check-NC")
-                        deadline_nc = time.time() + 10
-                        while time.time() < deadline_nc:
-                            check_device_reset(serial, cycle_start)
-                            img = get_screen_capture(device)
-                            if img is not None:
-                                img, _ = check_and_click_fixback(device, img, serial, check_g1=False)
-                                if img is None:
-                                    continue
-                                if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
-                                    found_g4 = "nocoin"
+                                if action_taken == "outloop":
                                     break
-                            time.sleep(1)
-                    
-                    # จัดารกรณีเจอ nocions.bmp หรือ outloop.bmp (ไม่ว่าจะเจอตอนไหน)
-                    if found_g4 in ["nocoin", "outloop"]:
-                        if found_g4 == "nocoin":
-                            gui_log(serial, "nocions.bmp detected! Scanning screen...", step="No-Coins")
-                            img = get_screen_capture(device)
-                            if img is not None:
-                                gacha_region = Region(68, 28, 579, 57)
-                                ocr_text = read_screen_text(img, region=gacha_region, serial=serial)
-                                gui_log(serial, f"OCR Result (at No-Coins): {ocr_text}", step="OCR Done")
-                                for h in HERO_LIST:
-                                    if is_hero_match(h, ocr_text):
-                                        gacha_hero_found = h.strip()
-                                        break
+                            found_g4 = False # จบ Custom Gacha ไม่ต้องทำ OCR (ข้าม checkpointgacha)
                         else:
-                            gui_log(serial, "outloop.bmp detected! Ending gacha flow.", step="Outloop Exit")
-                        # จบรอบนี้ทันที
-                        found_g4 = False 
-                    else:
-                        # ถ้าผ่าน nocions มาได้ (ไม่เจอ) หรือเจอ gacha4 ไปแล้ว -> ไป gacha5 ต่อ
-                        gui_log(serial, "Proceeding to Gacha5...", step="G5-Flow")
-                        time.sleep(10) # 10s delay requested by user
-                        while True:
-                            check_device_reset(serial, cycle_start)
-                            img = get_screen_capture(device)
-                            if img is not None:
-                                img, _ = check_and_click_fixback(device, img, serial, check_g1=False)
-                                if img is None:
-                                    continue
-                                # เช็ค outloop.bmp ก่อนเสมอ เจอแล้วจบการทำงานทันที
-                                if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
-                                    gui_log(serial, "outloop.bmp detected during Gacha5!", step="Outloop Exit")
-                                    found_g4 = False
-                                    break
-
-                                # หากเจอ checkpointgacha.bmp แสดงว่าเลย gacha5 ไปแล้ว ให้หลุดลูปทันที
-                                if img_search(img, os.path.join(IMG_DIR, "checkpointgacha.bmp")):
-                                    gui_log(serial, "checkpointgacha.bmp detected during Gacha5! Proceeding.", step="G5-Skip")
-                                    found_g4 = True
-                                    break
-
-                                pts = img_search(img, os.path.join(IMG_DIR, "gacha5.bmp"))
-                                if pts:
-                                    x, y = pts[0]
-                                    device.shell(f"input swipe {x} {y} {x} {y} 100")
-                                    gui_log(serial, "Clicking gacha5.bmp...", step="G5-Click")
-                                    time.sleep(4)
-                                    found_g4 = True # ติ๊กให้ทำ checkpointgacha ต่อ
-                                    break
-                                
-                                if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
-                                    # กรณีเจอตอนรอ gacha5
-                                    gui_log(serial, "nocions.bmp detected during Gacha5!", step="No-Coins")
-                                    found_g4 = False
-                                    break
-                            time.sleep(1)
-                # checkpointgacha -> OCR (ข้ามถ้าไม่เจอ gacha4)
-                # NOSCAN=1 → ข้ามขั้นตอน checkpointgacha/OCR ทั้งหมด (ทำงานเหมือน gachafree)
-                if found_g4 and NOSCAN == 1:
-                    gui_log(serial, "NOSCAN=1 → Skipping checkpointgacha/OCR (Gacha)", step="NoScan Skip")
-                elif found_g4:
-                    gui_log(serial, "Waiting checkpointgacha or fixcheckpointgacha (OCR)...", step="OCR Wait")
-                    deadline_ocr = time.time() + 60
-                    while time.time() < deadline_ocr:
-                        check_device_reset(serial, cycle_start)
-                        img = get_screen_capture(device)
-                        if img is not None:
-                            img, _ = check_and_click_fixback(device, img, serial, check_g1=False)
-                            if img is None:
-                                continue
-                            # 1. เช็ค checkpointgacha ปกติ
-                            pts = img_search(img, os.path.join(IMG_DIR, "checkpointgacha.bmp"))
-                            if pts:
-                                time.sleep(1.2)  # ให้หน้าจอและตัวหนังสือเฟดอินจนเสร็จเรียบร้อย ป้องกันภาพเบลอ
+                            # Normal Gacha Flow (CUSTOM_GACHA == 0)
+                            found_g4 = False
+                            g4_click_count = 0
+                            gui_log(serial, "Waiting gacha4.bmp (10s)...", step="Gacha4")
+                            deadline_g4 = time.time() + 10
+                            while time.time() < deadline_g4:
+                                check_device_reset(serial, cycle_start)
                                 img = get_screen_capture(device)
-                                # ใช้พิกัด Region(68, 28, 579, 57) ตามตัวอย่าง
-                                gacha_region = Region(68, 28, 579, 57)
-                                ocr_text = read_screen_text(img, region=gacha_region, serial=serial)
-                                display_text = ocr_text if ocr_text else "<EMPTY>"
-                                gui_log(serial, f"OCR Result: {display_text}", step="OCR Done")
-                                cprint(f"[{serial}] Gacha OCR: {display_text}")
-                                
-                                for h in HERO_LIST:
-                                    if is_hero_match(h, ocr_text):
-                                        gacha_hero_found = h.strip()
+                                if img is not None:
+                                    img, _ = check_and_click_fixback(device, img, serial, check_g1=False)
+                                    if img is None:
+                                        continue
+                                    # เช็ค outloop.bmp ก่อนเสมอ เจอแล้วจบการทำงานทันที
+                                    if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
+                                        gui_log(serial, "outloop.bmp detected while waiting/clicking gacha4!", step="G4-Outloop")
+                                        found_g4 = "outloop"
                                         break
-                                break
-                            
-                            # 2. เช็ค fixcheckpointgacha
-                            pts_fix = img_search(img, os.path.join(IMG_DIR, "fixcheckpointgacha.bmp"))
-                            if pts_fix:
-                                gui_log(serial, "fixcheckpointgacha detected! Searching fixlocked...", step="Fix CP")
-                                pts_fl = img_search(img, os.path.join(IMG_DIR, "fixlocked.bmp"))
-                                if pts_fl:
-                                    x_fl, y_fl = pts_fl[0]
-                                    device.shell(f"input swipe {x_fl} {y_fl} {x_fl} {y_fl} 100")
-                                    time.sleep(2)
-                                break
 
-                            # 3. เช็ค nocions.bmp ด้วย
-                            pts_no = img_search(img, os.path.join(IMG_DIR, "nocions.bmp"))
-                            if pts_no:
-                                gui_log(serial, "nocions.bmp detected!", step="No-Coins")
-                                break
+                                    pts = img_search(img, os.path.join(IMG_DIR, "gacha4.bmp"))
+                                    if pts:
+                                        pts_cp4 = img_search(img, os.path.join(IMG_DIR, "checkpoint-gacha4.bmp"))
+                                        if pts_cp4:
+                                            x, y = pts[0]
+                                            device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                            g4_click_count += 1
+                                            gui_log(serial, f"Clicking gacha4.bmp... (count: {g4_click_count})", step="G4-Click")
+                                            time.sleep(2)
+                                            found_g4 = True
+                                            deadline_g4 = time.time() + 10
+                                            continue
+                                        else:
+                                            gui_log(serial, "checkpoint-gacha4.bmp not found! Resetting gacha sequence...", step="G4-Failed")
+                                            pts_fg2 = img_search(img, os.path.join(IMG_DIR, "fixgachanew2.bmp"))
+                                            if pts_fg2:
+                                                x2, y2 = pts_fg2[0]
+                                                device.shell(f"input swipe {x2} {y2} {x2} {y2} 100")
+                                                gui_log(serial, "Clicked fixgachanew2.bmp", step="G4-Failed")
+                                                time.sleep(2)
+                                            raise ResetGachaException("checkpoint-gacha4 not found")
+                                    # เช็ค nocions ระหว่างรอ
+                                    if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
+                                        found_g4 = "nocoin"
+                                        break
+
+                                    if found_g4:
+                                        break
+                                time.sleep(1)
+
+                            if not found_g4:
+                                # ไม่เจอ gacha4 ใน 10s -> แวะเช็ค nocions ต่ออีก 10s
+                                gui_log(serial, "gacha4 not found, checking nocions (10s)...", step="Check-NC")
+                                deadline_nc = time.time() + 10
+                                while time.time() < deadline_nc:
+                                    check_device_reset(serial, cycle_start)
+                                    img = get_screen_capture(device)
+                                    if img is not None:
+                                        img, _ = check_and_click_fixback(device, img, serial, check_g1=False)
+                                        if img is None:
+                                            continue
+                                        if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
+                                            found_g4 = "nocoin"
+                                            break
+                                    time.sleep(1)
+
+                            # จัดารกรณีเจอ nocions.bmp หรือ outloop.bmp (ไม่ว่าจะเจอตอนไหน)
+                            if found_g4 in ["nocoin", "outloop"]:
+                                if found_g4 == "nocoin":
+                                    gui_log(serial, "nocions.bmp detected! Scanning screen...", step="No-Coins")
+                                    img = get_screen_capture(device)
+                                    if img is not None:
+                                        gacha_region = Region(68, 28, 579, 57)
+                                        ocr_text = read_screen_text(img, region=gacha_region, serial=serial)
+                                        gui_log(serial, f"OCR Result (at No-Coins): {ocr_text}", step="OCR Done")
+                                        for h in HERO_LIST:
+                                            if is_hero_match(h, ocr_text):
+                                                gacha_hero_found = h.strip()
+                                                break
+                                else:
+                                    gui_log(serial, "outloop.bmp detected! Ending gacha flow.", step="Outloop Exit")
+                                # จบรอบนี้ทันที
+                                found_g4 = False 
+                            else:
+                                # ถ้าผ่าน nocions มาได้ (ไม่เจอ) หรือเจอ gacha4 ไปแล้ว -> ไป gacha5 ต่อ
+                                gui_log(serial, "Proceeding to Gacha5...", step="G5-Flow")
+                                time.sleep(10) # 10s delay requested by user
+                                while True:
+                                    check_device_reset(serial, cycle_start)
+                                    img = get_screen_capture(device)
+                                    if img is not None:
+                                        img, _ = check_and_click_fixback(device, img, serial, check_g1=False)
+                                        if img is None:
+                                            continue
+                                        # เช็ค outloop.bmp ก่อนเสมอ เจอแล้วจบการทำงานทันที
+                                        if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
+                                            gui_log(serial, "outloop.bmp detected during Gacha5!", step="Outloop Exit")
+                                            found_g4 = False
+                                            break
+
+                                        # หากเจอ checkpointgacha.bmp แสดงว่าเลย gacha5 ไปแล้ว ให้หลุดลูปทันที
+                                        if img_search(img, os.path.join(IMG_DIR, "checkpointgacha.bmp")):
+                                            gui_log(serial, "checkpointgacha.bmp detected during Gacha5! Proceeding.", step="G5-Skip")
+                                            found_g4 = True
+                                            break
+
+                                        pts = img_search(img, os.path.join(IMG_DIR, "gacha5.bmp"))
+                                        if pts:
+                                            x, y = pts[0]
+                                            device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                            gui_log(serial, "Clicking gacha5.bmp...", step="G5-Click")
+                                            time.sleep(4)
+                                            found_g4 = True # ติ๊กให้ทำ checkpointgacha ต่อ
+                                            break
+
+                                        if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
+                                            # กรณีเจอตอนรอ gacha5
+                                            gui_log(serial, "nocions.bmp detected during Gacha5!", step="No-Coins")
+                                            found_g4 = False
+                                            break
+                                    time.sleep(1)
+                        # checkpointgacha -> OCR (ข้ามถ้าไม่เจอ gacha4)
+                        # NOSCAN=1 → ข้ามขั้นตอน checkpointgacha/OCR ทั้งหมด (ทำงานเหมือน gachafree)
+                        if found_g4 and NOSCAN == 1:
+                            gui_log(serial, "NOSCAN=1 → Skipping checkpointgacha/OCR (Gacha)", step="NoScan Skip")
+                        elif found_g4:
+                            gui_log(serial, "Waiting checkpointgacha or fixcheckpointgacha (OCR)...", step="OCR Wait")
+                            deadline_ocr = time.time() + 60
+                            while time.time() < deadline_ocr:
+                                check_device_reset(serial, cycle_start)
+                                img = get_screen_capture(device)
+                                if img is not None:
+                                    img, _ = check_and_click_fixback(device, img, serial, check_g1=False)
+                                    if img is None:
+                                        continue
+                                    # 1. เช็ค checkpointgacha ปกติ
+                                    pts = img_search(img, os.path.join(IMG_DIR, "checkpointgacha.bmp"))
+                                    if pts:
+                                        time.sleep(1.2)  # ให้หน้าจอและตัวหนังสือเฟดอินจนเสร็จเรียบร้อย ป้องกันภาพเบลอ
+                                        img = get_screen_capture(device)
+                                        # ใช้พิกัด Region(68, 28, 579, 57) ตามตัวอย่าง
+                                        gacha_region = Region(68, 28, 579, 57)
+                                        ocr_text = read_screen_text(img, region=gacha_region, serial=serial)
+                                        display_text = ocr_text if ocr_text else "<EMPTY>"
+                                        gui_log(serial, f"OCR Result: {display_text}", step="OCR Done")
+                                        cprint(f"[{serial}] Gacha OCR: {display_text}")
+
+                                        for h in HERO_LIST:
+                                            if is_hero_match(h, ocr_text):
+                                                gacha_hero_found = h.strip()
+                                                break
+                                        break
+
+                                    # 2. เช็ค fixcheckpointgacha
+                                    pts_fix = img_search(img, os.path.join(IMG_DIR, "fixcheckpointgacha.bmp"))
+                                    if pts_fix:
+                                        gui_log(serial, "fixcheckpointgacha detected! Searching fixlocked...", step="Fix CP")
+                                        pts_fl = img_search(img, os.path.join(IMG_DIR, "fixlocked.bmp"))
+                                        if pts_fl:
+                                            x_fl, y_fl = pts_fl[0]
+                                            device.shell(f"input swipe {x_fl} {y_fl} {x_fl} {y_fl} 100")
+                                            time.sleep(2)
+                                        break
+
+                                    # 3. เช็ค nocions.bmp ด้วย
+                                    pts_no = img_search(img, os.path.join(IMG_DIR, "nocions.bmp"))
+                                    if pts_no:
+                                        gui_log(serial, "nocions.bmp detected!", step="No-Coins")
+                                        break
+                                time.sleep(1)
+
+                        break
+                    except ResetGachaException as e:
+                        gui_log(serial, f'Resetting Gacha sequence: {str(e)}', step='ResetGacha')
                         time.sleep(1)
-
+                        continue
             # 8.5 Gacha + Find Hero (Optional) — หลังสุ่มกาชาเสร็จ "ไม่ clear app"
             #      next → กด Back รัวๆจนเจอ cancel → คลิก → แล้วค่อยค้นหา fin1
             if DO_GACHA == 1 and GACHA_FIND == 1 and not coin_low:
