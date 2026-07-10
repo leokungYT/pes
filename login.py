@@ -592,6 +592,8 @@ if GUI_ENABLED:
             _section("🎰 Gacha Mode")
             var_gacha = ctk.IntVar(value=cfg.DO_GACHA)
             _toggle_row("Gacha Mode", var_gacha)
+            var_new_gacha = ctk.IntVar(value=getattr(cfg, 'NEW_GACHA', 0))
+            _toggle_row("New Gacha Mode (new-gacha1 -> net-gacha1)", var_new_gacha)
             var_custom_gacha = ctk.IntVar(value=getattr(cfg, 'CUSTOM_GACHA', 0))
             _toggle_row("Custom Gacha Loop Mode (outloop)", var_custom_gacha)
             var_gacha_find = ctk.IntVar(value=getattr(cfg, 'GACHA_FIND', 0))
@@ -835,10 +837,11 @@ if GUI_ENABLED:
 
             # ── Save button (pinned at bottom, outside scrollable area) ───
             def _save():
-                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA
+                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA
                 new_event = var_event.get()
                 new_box   = var_box.get()
                 new_gacha = var_gacha.get()
+                new_new_gacha = var_new_gacha.get()
                 new_find  = var_find_hero.get()
                 new_gfree = var_gacha_free.get()
                 new_ccoin = var_check_coin.get()
@@ -1009,10 +1012,17 @@ if GUI_ENABLED:
                 else:
                     content += f"\nCUSTOM_GACHA = {new_custom_gacha}\n"
 
+                if re.search(r"^NEW_GACHA\s*=\s*\d", content, flags=re.MULTILINE):
+                    content = re.sub(r"^NEW_GACHA\s*=\s*\d", f"NEW_GACHA = {new_new_gacha}",
+                                     content, flags=re.MULTILINE)
+                else:
+                    content += f"\nNEW_GACHA = {new_new_gacha}\n"
+
                 with open(cfg_path, "w", encoding="utf-8") as f:
                     f.write(content)
                 # อัปเดต runtime ด้วย
                 CUSTOM_GACHA = new_custom_gacha
+                NEW_GACHA = new_new_gacha
                 EVENT_IMG  = new_event
                 DO_BOX     = new_box
                 DO_GACHA   = new_gacha
