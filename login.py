@@ -5338,6 +5338,7 @@ def process_device_login(device):
                 if NEW_GACHA == 1:
                     # 1. รอ/คลิก new-gacha1.bmp
                     gui_log(serial, "Waiting new-gacha1.bmp...", step="new-g1")
+                    new_g1_swipe_count = 0
                     while True:
                         check_device_reset(serial, cycle_start)
                         img = get_screen_capture(device)
@@ -5351,6 +5352,14 @@ def process_device_login(device):
                                 device.shell(f"input swipe {x} {y} {x} {y} 100")
                                 time.sleep(4)
                                 break
+                            else:
+                                new_g1_swipe_count += 1
+                                log_msg = f"new-gacha1 not found (swipe {new_g1_swipe_count}). Swiping 259 344 -> 679 349..."
+                                gui_log(serial, log_msg, step="Swipe NewG1")
+                                print(f"[{serial}] {log_msg}")
+                                res = device.shell("input swipe 259 344 679 349 1000")
+                                print(f"[{serial}] ADB swipe command executed. Result: {res.strip() if res else 'OK'}")
+                                time.sleep(2)
                         time.sleep(1)
 
                     # 2. หา net-gacha1.bmp (วนหา/เลื่อนไม่เกิน 3 รอบ)
@@ -5542,8 +5551,29 @@ def process_device_login(device):
                                 pts_loop = img_search(img, os.path.join(IMG_DIR, "loopgacha1.bmp"))
                                 if pts_loop:
                                     x, y = pts_loop[0]
+                                    
+                                    # แวะหา unlock-hero1.bmp 3 วิ
+                                    gui_log(serial, "loopgacha1 found! Checking for unlock-hero1.bmp (3s)...", step="Check-Unlock")
+                                    print(f"[{serial}] loopgacha1 found! Checking for unlock-hero1.bmp (3s)...")
+                                    deadline_unlock = time.time() + 3
+                                    while time.time() < deadline_unlock:
+                                        check_device_reset(serial, cycle_start)
+                                        img_unlock = get_screen_capture(device)
+                                        if img_unlock is not None:
+                                            pts_unlock = img_search(img_unlock, os.path.join(IMG_DIR, "unlock-hero1.bmp"))
+                                            if pts_unlock:
+                                                x_un, y_un = pts_unlock[0]
+                                                device.shell(f"input swipe {x_un} {y_un} {x_un} {y_un} 100")
+                                                gui_log(serial, "unlock-hero1.bmp found! Clicking it.", step="Unlock-Hero")
+                                                print(f"[{serial}] unlock-hero1.bmp found! Clicking it.")
+                                                time.sleep(2)
+                                                break
+                                        time.sleep(0.5)
+                                    
+                                    # แล้วค่อยกด loopgacha1
                                     device.shell(f"input swipe {x} {y} {x} {y} 100")
                                     gui_log(serial, f"loopgacha1.bmp found! Clicking ({x},{y})...", step="LoopGacha1")
+                                    print(f"[{serial}] Clicking loopgacha1.bmp at ({x},{y})...")
                                     time.sleep(2)
                                     action_taken = "loop"
                                     continue
