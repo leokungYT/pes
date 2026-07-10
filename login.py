@@ -28,9 +28,10 @@ import glob
 from ppadb.client import Client as AdbClient
 from colorama import Fore, Style, init
 
-# เปลี่ยน working directory มาที่โฟลเดอร์ของสคริปต์ (pes) เสมอ
-# เพื่อให้ relative path เช่น 'input-id' หรือ 'img' ชี้ไปถูกที่
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
+class ResetGachaException(Exception):
+    pass
+
+in_new_gacha_loop = False
 
 try:
     import tkinter as tk
@@ -1854,6 +1855,22 @@ def check_and_click_fixback(device, img, serial, check_g1=True):
     เช็คและกด fixback-gacha1.bmp และ fixback-gacha2.bmp ซ้ำๆ จนกว่าจะหายไป
     คืนค่า (img ล่าสุด, force_gacha4)
     """
+    global in_new_gacha_loop
+    if in_new_gacha_loop:
+        pts_fg = img_search(img, os.path.join(IMG_DIR, "fixgachanew1.bmp"))
+        if pts_fg:
+            pts_fs = img_search(img, os.path.join(IMG_DIR, "fixswap.bmp"))
+            if pts_fs:
+                x_click, y_click = pts_fs[0]
+                click_name = "fixswap.bmp"
+            else:
+                x_click, y_click = pts_fg[0]
+                click_name = "fixgachanew1.bmp"
+            device.shell(f"input swipe {x_click} {y_click} {x_click} {y_click} 100")
+            gui_log(serial, f"fixgachanew1.bmp detected! Clicking {click_name} immediately...", step="FixGachaNew Instant")
+            time.sleep(4)
+            raise ResetGachaException()
+
     force_gacha4 = False
     if not check_g1:
         return img, force_gacha4
@@ -2376,11 +2393,40 @@ def get_screen_capture(device):
                         gui_log(device.serial, f"questfive: {os.path.basename(_cur_path)} ค้าง 15s → กดซ้ำ", step="QuestFive")
                         # loop จะวนกลับไปคลิกอีกรอบอัตโนมัติ
 
+                # === fixgachanew1 -> fixgachanew2 floating check ===
+                global in_new_gacha_loop
+                if in_new_gacha_loop and img is not None:
+                    pts_fg1 = img_search(img, os.path.join(IMG_DIR, "fixgachanew1.bmp"))
+                    pts_fg2 = img_search(img, os.path.join(IMG_DIR, "fixgachanew2.bmp"))
+                    if pts_fg1 or pts_fg2:
+                        if pts_fg1:
+                            x_fg1, y_fg1 = pts_fg1[0]
+                            device.shell(f"input swipe {x_fg1} {y_fg1} {x_fg1} {y_fg1} 100")
+                            gui_log(device.serial, "fixgachanew1.bmp detected! Clicking it...", step="FixGachaNew 1")
+                            time.sleep(2)
+
+                        # วนกด fixgachanew2.bmp จนกว่าจะหายไป
+                        gui_log(device.serial, "Clicking fixgachanew2.bmp until gone...", step="FixGachaNew 2")
+                        while True:
+                            img_next = fast_screencap(device)
+                            if img_next is None:
+                                break
+                            pts_fg2_loop = img_search(img_next, os.path.join(IMG_DIR, "fixgachanew2.bmp"))
+                            if pts_fg2_loop:
+                                x_fg2, y_fg2 = pts_fg2_loop[0]
+                                device.shell(f"input swipe {x_fg2} {y_fg2} {x_fg2} {y_fg2} 100")
+                                gui_log(device.serial, "Clicking fixgachanew2.bmp...", step="FixGachaNew 2")
+                                time.sleep(2)
+                            else:
+                                break
+
+                        raise ResetGachaException("fixgachanew sequence finished")
+
                 img = fast_screencap(device)
 
         # (screenshot preview removed — login.py ไม่มี preview widget, ลด GUI lag)
         return img
-    except (DeviceResetException, SellScreenException, RestartFromQuest8Exception):
+    except (DeviceResetException, SellScreenException, RestartFromQuest8Exception, ResetGachaException):
         raise
     except Exception:
         return None
@@ -5336,73 +5382,56 @@ def process_device_login(device):
                 gui_log(serial, "Gacha sequence started...", step="Gacha Mode", status="working")
                 
                 if NEW_GACHA == 1:
-                    # 1. รอ/คลิก new-gacha1.bmp
-                    gui_log(serial, "Waiting new-gacha1.bmp...", step="new-g1")
-                    new_g1_swipe_count = 0
-                    fixswap_first_seen = None
-                    fixswap_triggered = False
-                    fixgachanew_first_seen = None
-                    fixgachanew_triggered = False
-                    while True:
-                        check_device_reset(serial, cycle_start)
-                        img = get_screen_capture(device)
-                        if img is not None:
-                            img, _ = check_and_click_fixback(device, img, serial)
-                            if img is None:
-                                continue
-                            
-                            # 1. เช็ค fixswap.bmp ก่อน (หาแบบลอยๆ ตลอดเวลา)
-                            pts_fixswap = img_search(img, os.path.join(IMG_DIR, "fixswap.bmp"))
-                            if pts_fixswap:
-                                if fixswap_triggered:
-                                    x_fs, y_fs = pts_fixswap[0]
-                                    device.shell(f"input swipe {x_fs} {y_fs} {x_fs} {y_fs} 100")
-                                    gui_log(serial, "fixswap.bmp still visible! Re-clicking it immediately...", step="FixSwap ReClick")
-                                    new_g1_swipe_count = 0  # เริ่มลื่นหน้าจอใหม่อีกรอบ
-                                    time.sleep(4)
-                                    continue
-                                else:
-                                    if fixswap_first_seen is None:
-                                        fixswap_first_seen = time.time()
-                                        gui_log(serial, "fixswap.bmp detected, starting 10s timer...", step="FixSwap Timer")
-                                    else:
-                                        elapsed = time.time() - fixswap_first_seen
-                                        if elapsed >= 10.0:
-                                            x_fs, y_fs = pts_fixswap[0]
-                                            device.shell(f"input swipe {x_fs} {y_fs} {x_fs} {y_fs} 100")
-                                            gui_log(serial, f"fixswap.bmp detected for {elapsed:.1f}s. Clicking it!", step="FixSwap Click")
-                                            new_g1_swipe_count = 0  # เริ่มลื่นหน้าจอใหม่อีกรอบ
-                                            time.sleep(4)
-                                            fixswap_triggered = True
-                                            continue
-                            else:
-                                # หากไม่พบ fixswap.bmp ให้รีเซ็ตตัวจับเวลาและสถานะปุ่มกดซ้ำ
+                    global in_new_gacha_loop
+                    in_new_gacha_loop = True
+                    try:
+                        while True:
+                            try:
+                                # 1. รอ/คลิก new-gacha1.bmp
+                                gui_log(serial, "Waiting new-gacha1.bmp...", step="new-g1")
+                                new_g1_swipe_count = 0
                                 fixswap_first_seen = None
                                 fixswap_triggered = False
+                                while True:
+                                    check_device_reset(serial, cycle_start)
+                                    img = get_screen_capture(device)
+                                    if img is not None:
+                                        img, _ = check_and_click_fixback(device, img, serial)
+                                        if img is None:
+                                            continue
+                            
+                                        # 1. เช็ค fixswap.bmp ก่อน (หาแบบลอยๆ ตลอดเวลา)
+                                        pts_fixswap = img_search(img, os.path.join(IMG_DIR, "fixswap.bmp"))
+                                        if pts_fixswap:
+                                            if fixswap_triggered:
+                                                x_fs, y_fs = pts_fixswap[0]
+                                                device.shell(f"input swipe {x_fs} {y_fs} {x_fs} {y_fs} 100")
+                                                gui_log(serial, "fixswap.bmp still visible! Re-clicking it immediately...", step="FixSwap ReClick")
+                                                new_g1_swipe_count = 0  # เริ่มลื่นหน้าจอใหม่อีกรอบ
+                                                time.sleep(4)
+                                                continue
+                                            else:
+                                                if fixswap_first_seen is None:
+                                                    fixswap_first_seen = time.time()
+                                                    gui_log(serial, "fixswap.bmp detected, starting 10s timer...", step="FixSwap Timer")
+                                                else:
+                                                    elapsed = time.time() - fixswap_first_seen
+                                                    if elapsed >= 10.0:
+                                                        x_fs, y_fs = pts_fixswap[0]
+                                                        device.shell(f"input swipe {x_fs} {y_fs} {x_fs} {y_fs} 100")
+                                                        gui_log(serial, f"fixswap.bmp detected for {elapsed:.1f}s. Clicking it!", step="FixSwap Click")
+                                                        new_g1_swipe_count = 0  # เริ่มลื่นหน้าจอใหม่อีกรอบ
+                                                        time.sleep(4)
+                                                        fixswap_triggered = True
+                                                        continue
+                                        else:
+                                            # หากไม่พบ fixswap.bmp ให้รีเซ็ตตัวจับเวลาและสถานะปุ่มกดซ้ำ
+                                            fixswap_first_seen = None
+                                            fixswap_triggered = False
 
-                            # 1.5 เช็ค fixgachanew1.bmp (หาแบบลอยๆ ตลอดเวลา)
-                            pts_fixgachanew = img_search(img, os.path.join(IMG_DIR, "fixgachanew1.bmp"))
-                            if pts_fixgachanew:
-                                if fixgachanew_triggered:
-                                    pts_fs_fallback = img_search(img, os.path.join(IMG_DIR, "fixswap.bmp"))
-                                    if pts_fs_fallback:
-                                        x_click, y_click = pts_fs_fallback[0]
-                                        click_name = "fixswap.bmp"
-                                    else:
-                                        x_click, y_click = pts_fixgachanew[0]
-                                        click_name = "fixgachanew1.bmp"
-                                    device.shell(f"input swipe {x_click} {y_click} {x_click} {y_click} 100")
-                                    gui_log(serial, f"fixgachanew1.bmp still visible! Re-clicking {click_name} immediately...", step="FixGachaNew ReClick")
-                                    new_g1_swipe_count = 0  # เริ่มลื่นหน้าจอใหม่อีกรอบ
-                                    time.sleep(4)
-                                    continue
-                                else:
-                                    if fixgachanew_first_seen is None:
-                                        fixgachanew_first_seen = time.time()
-                                        gui_log(serial, "fixgachanew1.bmp detected, starting 10s timer...", step="FixGachaNew Timer")
-                                    else:
-                                        elapsed = time.time() - fixgachanew_first_seen
-                                        if elapsed >= 10.0:
+                                        # 1.5 เช็ค fixgachanew1.bmp (หาแบบลอยๆ ตลอดเวลา - เจอให้กด fixswap ทันที)
+                                        pts_fixgachanew = img_search(img, os.path.join(IMG_DIR, "fixgachanew1.bmp"))
+                                        if pts_fixgachanew:
                                             pts_fs_fallback = img_search(img, os.path.join(IMG_DIR, "fixswap.bmp"))
                                             if pts_fs_fallback:
                                                 x_click, y_click = pts_fs_fallback[0]
@@ -5411,64 +5440,66 @@ def process_device_login(device):
                                                 x_click, y_click = pts_fixgachanew[0]
                                                 click_name = "fixgachanew1.bmp"
                                             device.shell(f"input swipe {x_click} {y_click} {x_click} {y_click} 100")
-                                            gui_log(serial, f"fixgachanew1.bmp detected for {elapsed:.1f}s. Clicking {click_name}!", step="FixGachaNew Click")
+                                            gui_log(serial, f"fixgachanew1.bmp detected! Clicking {click_name} immediately...", step="FixGachaNew Instant")
                                             new_g1_swipe_count = 0  # เริ่มลื่นหน้าจอใหม่อีกรอบ
                                             time.sleep(4)
-                                            fixgachanew_triggered = True
                                             continue
-                            else:
-                                # หากไม่พบ fixgachanew1.bmp ให้รีเซ็ตตัวจับเวลาและสถานะปุ่มกดซ้ำ
-                                fixgachanew_first_seen = None
-                                fixgachanew_triggered = False
 
-                            # 2. เช็ค new-gacha1.bmp (หากเจอแล้วจะหลุดลูปและหยุดหา fixswap)
-                            pts = img_search(img, os.path.join(IMG_DIR, "new-gacha1.bmp"))
-                            if pts:
-                                x, y = pts[0]
-                                device.shell(f"input swipe {x} {y} {x} {y} 100")
-                                time.sleep(4)
+                                        # 2. เช็ค new-gacha1.bmp (หากเจอแล้วจะหลุดลูปและหยุดหา fixswap)
+                                        pts = img_search(img, os.path.join(IMG_DIR, "new-gacha1.bmp"))
+                                        if pts:
+                                            x, y = pts[0]
+                                            device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                            time.sleep(4)
+                                            break
+
+                                        new_g1_swipe_count += 1
+                                        log_msg = f"new-gacha1 not found (swipe {new_g1_swipe_count}). Swiping 144 243 -> 699 233 (250ms)..."
+                                        gui_log(serial, log_msg, step="Swipe NewG1")
+                                        print(f"[{serial}] {log_msg}")
+                                        res = device.shell("input swipe 144 243 699 233 250")
+                                        print(f"[{serial}] ADB swipe command executed. Result: {res.strip() if res else 'OK'}")
+                                        time.sleep(0.2)
+                                    time.sleep(0.3)
+
+                                # 2. หา net-gacha1.bmp (วนหา/เลื่อนไม่เกิน 3 รอบ)
+                                gui_log(serial, "Waiting net-gacha1.bmp (max 3 loops)...", step="net-g1")
+                                swipe_count = 0
+                                while True:
+                                    check_device_reset(serial, cycle_start)
+                                    img = get_screen_capture(device)
+                                    if img is not None:
+                                        img, _ = check_and_click_fixback(device, img, serial)
+                                        if img is None:
+                                            continue
+                                        pts = img_search(img, os.path.join(IMG_DIR, "net-gacha1.bmp"))
+                                        if pts:
+                                            x, y = pts[0]
+                                            device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                            time.sleep(4)
+                                            break
+                                        else:
+                                            swipe_count += 1
+                                            if swipe_count > 3:
+                                                log_limit = "net-gacha1 not found after 3 swipes. Jumping to Gacha4."
+                                                gui_log(serial, log_limit, step="NetG-Limit")
+                                                print(f"[{serial}] {log_limit}")
+                                                break
+                                            # เลื่อนตำแหน่ง 144 243 -> 699 233
+                                            log_msg = f"net-gacha1 not found (swipe {swipe_count}/3). Swiping 144 243 -> 699 233 (250ms)..."
+                                            gui_log(serial, log_msg, step="Swipe NetG")
+                                            print(f"[{serial}] {log_msg}")
+                                            res = device.shell("input swipe 144 243 699 233 250")
+                                            print(f"[{serial}] ADB swipe command executed. Result: {res.strip() if res else 'OK'}")
+                                            time.sleep(0.2)
+                                    time.sleep(0.3)
                                 break
-
-                            new_g1_swipe_count += 1
-                            log_msg = f"new-gacha1 not found (swipe {new_g1_swipe_count}). Swiping 144 243 -> 699 233 (250ms)..."
-                            gui_log(serial, log_msg, step="Swipe NewG1")
-                            print(f"[{serial}] {log_msg}")
-                            res = device.shell("input swipe 144 243 699 233 250")
-                            print(f"[{serial}] ADB swipe command executed. Result: {res.strip() if res else 'OK'}")
-                            time.sleep(0.2)
-                        time.sleep(0.3)
-
-                    # 2. หา net-gacha1.bmp (วนหา/เลื่อนไม่เกิน 3 รอบ)
-                    gui_log(serial, "Waiting net-gacha1.bmp (max 3 loops)...", step="net-g1")
-                    swipe_count = 0
-                    while True:
-                        check_device_reset(serial, cycle_start)
-                        img = get_screen_capture(device)
-                        if img is not None:
-                            img, _ = check_and_click_fixback(device, img, serial)
-                            if img is None:
+                            except ResetGachaException:
+                                gui_log(serial, "Resetting Gacha sequence to step 1 due to fixgachanew1...", step="ResetGacha")
+                                time.sleep(1)
                                 continue
-                            pts = img_search(img, os.path.join(IMG_DIR, "net-gacha1.bmp"))
-                            if pts:
-                                x, y = pts[0]
-                                device.shell(f"input swipe {x} {y} {x} {y} 100")
-                                time.sleep(4)
-                                break
-                            else:
-                                swipe_count += 1
-                                if swipe_count > 3:
-                                    log_limit = "net-gacha1 not found after 3 swipes. Jumping to Gacha4."
-                                    gui_log(serial, log_limit, step="NetG-Limit")
-                                    print(f"[{serial}] {log_limit}")
-                                    break
-                                # เลื่อนตำแหน่ง 144 243 -> 699 233
-                                log_msg = f"net-gacha1 not found (swipe {swipe_count}/3). Swiping 144 243 -> 699 233 (250ms)..."
-                                gui_log(serial, log_msg, step="Swipe NetG")
-                                print(f"[{serial}] {log_msg}")
-                                res = device.shell("input swipe 144 243 699 233 250")
-                                print(f"[{serial}] ADB swipe command executed. Result: {res.strip() if res else 'OK'}")
-                                time.sleep(0.2)
-                        time.sleep(0.3)
+                    finally:
+                        in_new_gacha_loop = False
                 else:
                     # gacha1 -> gacha2
                     goto_gacha4 = False
