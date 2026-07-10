@@ -2163,6 +2163,28 @@ def get_screen_capture(device):
                 
                 raise SellScreenException("sell.bmp detected")
 
+            # === failed1/failed2 floating check ===
+            failed1_pts = img_search(img, os.path.join(IMG_DIR, "failed1.bmp"))
+            failed2_pts = img_search(img, os.path.join(IMG_DIR, "failed2.bmp"))
+            if failed1_pts or failed2_pts:
+                found_name = "failed1.bmp" if failed1_pts else "failed2.bmp"
+                gui_log(device.serial, f"🛑 Floating: {found_name} found! Force closing app and moving file to login-failed", step="Failed Detected")
+                device.shell("am force-stop jp.konami.pesam")
+                time.sleep(1)
+                
+                original_name = DEVICE_FILE_ASSIGNMENTS.get(device.serial)
+                if original_name:
+                    file_path = os.path.join(INPUT_DIR, original_name)
+                    dest_path = os.path.join(LOGIN_FAILED_DIR, original_name)
+                    if os.path.exists(file_path):
+                        if os.path.exists(dest_path):
+                            os.remove(dest_path)
+                        _safe_copy(file_path, dest_path)
+                        os.remove(file_path)
+                        gui_log(device.serial, f"✅ Sorted (Failed): {original_name} -> {LOGIN_FAILED_DIR}", step="Failed Sorted")
+                
+                raise SellScreenException(f"{found_name} detected")
+
             # เช็คควบคู่กันทั้ง fixclear / fixclear1 ทุกนามสกุล/ตำแหน่ง ทุกรอบ อันไหนเจอก็ทำงาน
             #   - fixclear1.bmp อยู่ใน img/getquest/
             #   - fixclear1.png อยู่ใน img/ (root)
@@ -2315,15 +2337,19 @@ def get_screen_capture(device):
                         img = fast_screencap(device)
 
             # fixalert1.bmp floating check
-            fa_pts = img_search(img, _P['fixalert1'])
+            fa_pts = img_search(img, _P['fixalert1'], threshold=0.7)
             if fa_pts:
-                gui_log(device.serial, "Floating: fixalert1.bmp found! Executing fixalert2 -> fixalert3", step="Fix Alert")
+                gui_log(device.serial, "Floating: fixalert1.bmp found! Clicking it...", step="Fix Alert")
+                x, y = fa_pts[0]
+                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                time.sleep(2)
+                
                 deadline_fa2 = time.time() + 15
                 clicked_fa2 = False
                 while time.time() < deadline_fa2:
                     img_fa2 = fast_screencap(device)
                     if img_fa2 is not None:
-                        pts_fa2 = img_search(img_fa2, _P['fixalert2'])
+                        pts_fa2 = img_search(img_fa2, _P['fixalert2'], threshold=0.7)
                         if pts_fa2:
                             x, y = pts_fa2[0]
                             device.shell(f"input swipe {x} {y} {x} {y} 100")
@@ -2340,7 +2366,7 @@ def get_screen_capture(device):
                     while time.time() < deadline_fa3:
                         img_fa3 = fast_screencap(device)
                         if img_fa3 is not None:
-                            pts_fa3 = img_search(img_fa3, _P['fixalert3'])
+                            pts_fa3 = img_search(img_fa3, _P['fixalert3'], threshold=0.7)
                             if pts_fa3:
                                 x, y = pts_fa3[0]
                                 device.shell(f"input swipe {x} {y} {x} {y} 100")
