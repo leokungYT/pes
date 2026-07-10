@@ -2419,36 +2419,36 @@ def get_screen_capture(device):
                         gui_log(device.serial, f"questfive: {os.path.basename(_cur_path)} ค้าง 15s → กดซ้ำ", step="QuestFive")
                         # loop จะวนกลับไปคลิกอีกรอบอัตโนมัติ
 
-                # === fixgachanew1 -> fixgachanew2 floating check ===
-                global in_new_gacha_loop
-                if in_new_gacha_loop and img is not None:
-                    pts_fg1 = img_search(img, os.path.join(IMG_DIR, "fixgachanew1.bmp"))
-                    pts_fg2 = img_search(img, os.path.join(IMG_DIR, "fixgachanew2.bmp"))
-                    if pts_fg1 or pts_fg2:
-                        if pts_fg1:
-                            x_fg1, y_fg1 = pts_fg1[0]
-                            device.shell(f"input swipe {x_fg1} {y_fg1} {x_fg1} {y_fg1} 100")
-                            gui_log(device.serial, "fixgachanew1.bmp detected! Clicking it...", step="FixGachaNew 1")
+            # === fixgachanew1 -> fixgachanew2 floating check ===
+            global in_new_gacha_loop
+            if in_new_gacha_loop and img is not None:
+                pts_fg1 = img_search(img, os.path.join(IMG_DIR, "fixgachanew1.bmp"))
+                pts_fg2 = img_search(img, os.path.join(IMG_DIR, "fixgachanew2.bmp"))
+                if pts_fg1 or pts_fg2:
+                    if pts_fg1:
+                        x_fg1, y_fg1 = pts_fg1[0]
+                        device.shell(f"input swipe {x_fg1} {y_fg1} {x_fg1} {y_fg1} 100")
+                        gui_log(device.serial, "fixgachanew1.bmp detected! Clicking it...", step="FixGachaNew 1")
+                        time.sleep(2)
+
+                    # วนกด fixgachanew2.bmp จนกว่าจะหายไป
+                    gui_log(device.serial, "Clicking fixgachanew2.bmp until gone...", step="FixGachaNew 2")
+                    while True:
+                        img_next = fast_screencap(device)
+                        if img_next is None:
+                            break
+                        pts_fg2_loop = img_search(img_next, os.path.join(IMG_DIR, "fixgachanew2.bmp"))
+                        if pts_fg2_loop:
+                            x_fg2, y_fg2 = pts_fg2_loop[0]
+                            device.shell(f"input swipe {x_fg2} {y_fg2} {x_fg2} {y_fg2} 100")
+                            gui_log(device.serial, "Clicking fixgachanew2.bmp...", step="FixGachaNew 2")
                             time.sleep(2)
+                        else:
+                            break
 
-                        # วนกด fixgachanew2.bmp จนกว่าจะหายไป
-                        gui_log(device.serial, "Clicking fixgachanew2.bmp until gone...", step="FixGachaNew 2")
-                        while True:
-                            img_next = fast_screencap(device)
-                            if img_next is None:
-                                break
-                            pts_fg2_loop = img_search(img_next, os.path.join(IMG_DIR, "fixgachanew2.bmp"))
-                            if pts_fg2_loop:
-                                x_fg2, y_fg2 = pts_fg2_loop[0]
-                                device.shell(f"input swipe {x_fg2} {y_fg2} {x_fg2} {y_fg2} 100")
-                                gui_log(device.serial, "Clicking fixgachanew2.bmp...", step="FixGachaNew 2")
-                                time.sleep(2)
-                            else:
-                                break
+                    raise ResetGachaException("fixgachanew sequence finished")
 
-                        raise ResetGachaException("fixgachanew sequence finished")
-
-                img = fast_screencap(device)
+            img = fast_screencap(device)
 
         # (screenshot preview removed — login.py ไม่มี preview widget, ลด GUI lag)
         return img
