@@ -5349,15 +5349,7 @@ def process_device_login(device):
                             if img is None:
                                 continue
                             
-                            # 1. เช็ค new-gacha1.bmp ก่อนเสมอ (หากเจอแล้วจะไม่ทำ fixswap)
-                            pts = img_search(img, os.path.join(IMG_DIR, "new-gacha1.bmp"))
-                            if pts:
-                                x, y = pts[0]
-                                device.shell(f"input swipe {x} {y} {x} {y} 100")
-                                time.sleep(4)
-                                break
-                            
-                            # 2. ถ้าไม่เจอ new-gacha1.bmp ให้เช็ค fixswap.bmp
+                            # 1. เช็ค fixswap.bmp ก่อน (หาแบบลอยๆ ตลอดเวลา)
                             pts_fixswap = img_search(img, os.path.join(IMG_DIR, "fixswap.bmp"))
                             if pts_fixswap:
                                 if fixswap_triggered:
@@ -5383,6 +5375,14 @@ def process_device_login(device):
                                 # หากไม่พบ fixswap.bmp ให้รีเซ็ตตัวจับเวลาและสถานะปุ่มกดซ้ำ
                                 fixswap_first_seen = None
                                 fixswap_triggered = False
+
+                            # 2. เช็ค new-gacha1.bmp (หากเจอแล้วจะหลุดลูปและหยุดหา fixswap)
+                            pts = img_search(img, os.path.join(IMG_DIR, "new-gacha1.bmp"))
+                            if pts:
+                                x, y = pts[0]
+                                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                time.sleep(4)
+                                break
 
                             new_g1_swipe_count += 1
                             log_msg = f"new-gacha1 not found (swipe {new_g1_swipe_count}). Swiping 144 243 -> 699 233 (250ms)..."
