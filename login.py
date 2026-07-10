@@ -5340,6 +5340,7 @@ def process_device_login(device):
                     gui_log(serial, "Waiting new-gacha1.bmp...", step="new-g1")
                     new_g1_swipe_count = 0
                     fixswap_first_seen = None
+                    fixswap_triggered = False
                     while True:
                         check_device_reset(serial, cycle_start)
                         img = get_screen_capture(device)
@@ -5359,21 +5360,29 @@ def process_device_login(device):
                             # 2. ถ้าไม่เจอ new-gacha1.bmp ให้เช็ค fixswap.bmp
                             pts_fixswap = img_search(img, os.path.join(IMG_DIR, "fixswap.bmp"))
                             if pts_fixswap:
-                                if fixswap_first_seen is None:
-                                    fixswap_first_seen = time.time()
-                                    gui_log(serial, "fixswap.bmp detected, starting 10s timer...", step="FixSwap Timer")
+                                if fixswap_triggered:
+                                    x_fs, y_fs = pts_fixswap[0]
+                                    device.shell(f"input swipe {x_fs} {y_fs} {x_fs} {y_fs} 100")
+                                    gui_log(serial, "fixswap.bmp still visible! Re-clicking it immediately...", step="FixSwap ReClick")
+                                    time.sleep(4)
+                                    continue
                                 else:
-                                    elapsed = time.time() - fixswap_first_seen
-                                    if elapsed >= 10.0:
-                                        x_fs, y_fs = pts_fixswap[0]
-                                        device.shell(f"input swipe {x_fs} {y_fs} {x_fs} {y_fs} 100")
-                                        gui_log(serial, f"fixswap.bmp detected for {elapsed:.1f}s. Clicking it!", step="FixSwap Click")
-                                        time.sleep(4)
-                                        fixswap_first_seen = None
-                                        continue
+                                    if fixswap_first_seen is None:
+                                        fixswap_first_seen = time.time()
+                                        gui_log(serial, "fixswap.bmp detected, starting 10s timer...", step="FixSwap Timer")
+                                    else:
+                                        elapsed = time.time() - fixswap_first_seen
+                                        if elapsed >= 10.0:
+                                            x_fs, y_fs = pts_fixswap[0]
+                                            device.shell(f"input swipe {x_fs} {y_fs} {x_fs} {y_fs} 100")
+                                            gui_log(serial, f"fixswap.bmp detected for {elapsed:.1f}s. Clicking it!", step="FixSwap Click")
+                                            time.sleep(4)
+                                            fixswap_triggered = True
+                                            continue
                             else:
-                                # หากไม่พบ fixswap.bmp ให้รีเซ็ตตัวจับเวลา
+                                # หากไม่พบ fixswap.bmp ให้รีเซ็ตตัวจับเวลาและสถานะปุ่มกดซ้ำ
                                 fixswap_first_seen = None
+                                fixswap_triggered = False
 
                             new_g1_swipe_count += 1
                             log_msg = f"new-gacha1 not found (swipe {new_g1_swipe_count}). Swiping 144 243 -> 699 233 (250ms)..."
