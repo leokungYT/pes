@@ -319,6 +319,7 @@ def wait_play8(device, serial, cycle_start):
     """รอ play8 หรือ play8fix → กดซ้ำจนหาย (พอร์ตจาก login.py)"""
     gui_log(serial, "Waiting play8 or play8fix...", step="play8")
     play8_clicked = False
+    absent_count = 0
     while True:
         check_device_reset(serial, cycle_start)
         img = get_screen_capture(device)
@@ -329,6 +330,7 @@ def wait_play8(device, serial, cycle_start):
                 pts = img_search(img, os.path.join(IMG_DIR, "play8fix.bmp"))
                 matched = "play8fix"
             if pts:
+                absent_count = 0
                 # มี fixlg3 ให้กดก่อน
                 pts_lg3 = img_search(img, os.path.join(IMG_DIR, "fixlg3.bmp"))
                 if pts_lg3:
@@ -341,11 +343,17 @@ def wait_play8(device, serial, cycle_start):
                 device.shell(f"input swipe {x} {y} {x} {y} 100")
                 gui_log(serial, f"Found {matched}! Clicked.", step="play8")
                 play8_clicked = True
-                time.sleep(0.5)
+                time.sleep(2.0)
                 continue
-            elif play8_clicked:
-                break
-        time.sleep(0.5)
+            else:
+                if play8_clicked:
+                    absent_count += 1
+                    if absent_count >= 3:
+                        break
+                else:
+                    # ยังไม่เคยกดเลย ก็วนรอต่อไป
+                    pass
+        time.sleep(1.0)
 
 
 def wait_checkpointlogin(device, serial, cycle_start):

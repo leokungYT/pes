@@ -4376,6 +4376,7 @@ def process_device_login(device):
             # 4. Wait for play8 or play8fix — คลิกซ้ำจนหาย (เจออันไหนก็ได้ถือว่าเจอ)
             gui_log(serial, "Waiting play8 or play8fix...", step="play8")
             play8_clicked = False
+            absent_count = 0
             while True:
                 check_device_reset(serial, cycle_start)
                 img = get_screen_capture(device)
@@ -4387,6 +4388,7 @@ def process_device_login(device):
                         pts = img_search(img, os.path.join(IMG_DIR, "play8fix.bmp"))
                         matched_name = "play8fix"
                     if pts:
+                        absent_count = 0
                         # Prioritize fixlg3 if both are present
                         pts_lg3 = img_search(img, os.path.join(IMG_DIR, "fixlg3.bmp"))
                         if pts_lg3:
@@ -4402,8 +4404,14 @@ def process_device_login(device):
                         play8_clicked = True
                         time.sleep(2.0)   # กด 1 ครั้ง → delay 2.0 → เช็คใหม่ ถ้าเจออีกค่อยกดอีกรอบ
                         continue
-                    elif play8_clicked:
-                        break
+                    else:
+                        if play8_clicked:
+                            absent_count += 1
+                            if absent_count >= 3:
+                                break
+                        else:
+                            # ยังไม่เคยกดเลย ก็วนรอต่อไป
+                            pass
                 time.sleep(1.0)
 
             # 5. Wait checkpointlogin
