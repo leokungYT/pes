@@ -11,7 +11,7 @@ EVENT_IMG = 0
 # ── Box Sequence (main-pes.py) ────────────────────
 # 1 = เปิดกล่อง (ทำ play26-play31 และ box1-box4)
 # 0 = ข้ามการเปิดกล่อง (จบที่ play25 แล้วส่งไฟล์เลย)
-DO_BOX = 0
+DO_BOX = 1
 
 # ── Gacha Sequence (login.py) ──────────────────────
 # 1 = สุ่มกาชา (ต่อจากจบ box4)
@@ -21,7 +21,7 @@ DO_GACHA = 1
 # ── New Gacha Sequence (login.py) ──────────────────
 # 1 = เปิดการทำงาน new-gacha1 -> เลื่อนหา net-gacha1 -> ข้ามไป gacha4.bmp
 # 0 = ปิด
-NEW_GACHA = 0
+NEW_GACHA = 1
 
 # ── Custom Gacha Loop Mode ──────────────────────────
 # 1 = เปิดโหมด Custom Gacha (loopgacha1 -> gacha4 -> gacha5 -> loop จนเจอ outloop)

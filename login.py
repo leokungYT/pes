@@ -1864,8 +1864,8 @@ def check_and_click_fixback(device, img, serial, check_g1=True):
         pts = img_search(img, os.path.join(IMG_DIR, "fixback-gacha1.bmp"))
         if pts:
             click_count += 1
-            if click_count > 3:
-                gui_log(serial, "Clicking fixback-gacha1.bmp > 3 times! Forcing Gacha4.", step="FixBack1-Limit")
+            if click_count > 2:
+                gui_log(serial, "Clicking fixback-gacha1.bmp > 2 times! Forcing Gacha4.", step="FixBack1-Limit")
                 force_gacha4 = True
                 break
             x, y = pts[0]
@@ -5354,13 +5354,13 @@ def process_device_login(device):
                                 break
                             else:
                                 new_g1_swipe_count += 1
-                                log_msg = f"new-gacha1 not found (swipe {new_g1_swipe_count}). Swiping 696 306 -> 283 298 slowly (5s)..."
+                                log_msg = f"new-gacha1 not found (swipe {new_g1_swipe_count}). Swiping 144 243 -> 699 233 (250ms)..."
                                 gui_log(serial, log_msg, step="Swipe NewG1")
                                 print(f"[{serial}] {log_msg}")
-                                res = device.shell("input swipe 696 306 283 298 5000")
+                                res = device.shell("input swipe 144 243 699 233 250")
                                 print(f"[{serial}] ADB swipe command executed. Result: {res.strip() if res else 'OK'}")
-                                time.sleep(2)
-                        time.sleep(1)
+                                time.sleep(0.2)
+                        time.sleep(0.3)
 
                     # 2. หา net-gacha1.bmp (วนหา/เลื่อนไม่เกิน 3 รอบ)
                     gui_log(serial, "Waiting net-gacha1.bmp (max 3 loops)...", step="net-g1")
@@ -5385,14 +5385,14 @@ def process_device_login(device):
                                     gui_log(serial, log_limit, step="NetG-Limit")
                                     print(f"[{serial}] {log_limit}")
                                     break
-                                # เลื่อนตำแหน่ง 696 306 -> 283 298
-                                log_msg = f"net-gacha1 not found (swipe {swipe_count}/3). Swiping 696 306 -> 283 298 slowly (5s)..."
+                                # เลื่อนตำแหน่ง 144 243 -> 699 233
+                                log_msg = f"net-gacha1 not found (swipe {swipe_count}/3). Swiping 144 243 -> 699 233 (250ms)..."
                                 gui_log(serial, log_msg, step="Swipe NetG")
                                 print(f"[{serial}] {log_msg}")
-                                res = device.shell("input swipe 696 306 283 298 5000")
+                                res = device.shell("input swipe 144 243 699 233 250")
                                 print(f"[{serial}] ADB swipe command executed. Result: {res.strip() if res else 'OK'}")
-                                time.sleep(2)
-                        time.sleep(1)
+                                time.sleep(0.2)
+                        time.sleep(0.3)
                 else:
                     # gacha1 -> gacha2
                     goto_gacha4 = False
