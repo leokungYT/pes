@@ -1936,6 +1936,7 @@ def launch_game(device, settle=14.0):
         time.sleep(wait)
     device.shell("monkey -p jp.konami.pesam -c android.intent.category.LAUNCHER 1")
     _LAST_LAUNCH_TS[serial] = time.time()
+    DEVICE_LAST_GAME_CHECK[serial] = time.time()
     if settle > 0:
         time.sleep(settle)
 
@@ -4377,10 +4378,16 @@ def process_device_login(device):
             gui_log(serial, "Waiting play8 or play8fix...", step="play8")
             play8_clicked = False
             absent_count = 0
+            loop_count = 0
             while True:
                 check_device_reset(serial, cycle_start)
                 img = get_screen_capture(device)
                 if img is not None:
+                    # ถ้าเจอ checkpointlogin.bmp ถือว่าผ่านมาได้แล้ว ให้หลุดลูปได้เลย
+                    if img_search(img, os.path.join(IMG_DIR, "checkpointlogin.bmp")):
+                        gui_log(serial, "checkpointlogin detected during play8 loop, breaking...", step="play8")
+                        break
+
                     # ลองหา play8.bmp ก่อน ถ้าไม่เจอลองหา play8fix.bmp
                     pts = img_search(img, os.path.join(IMG_DIR, "play8.bmp"))
                     matched_name = "play8"
@@ -4410,8 +4417,11 @@ def process_device_login(device):
                             if absent_count >= 10:  # ต้องไม่พบติดต่อกัน 10 ครั้ง ถึงจะถือว่าหายจริง
                                 break
                         else:
-                            # ยังไม่เคยกดเลย ก็วนรอต่อไป
-                            pass
+                            loop_count += 1
+                            if loop_count >= 30:  # ~10 วินาที (30 * 0.3s)
+                                gui_log(serial, "play8 not matched yet, attempting fallback center click...", step="play8")
+                                device.shell("input swipe 480 270 480 270 100")
+                                loop_count = 0
                 time.sleep(0.3)
 
             # 5. Wait checkpointlogin
