@@ -1849,12 +1849,15 @@ def disable_root(device):
             gui_log(serial, "  ✓ ปิด root แล้ว (uid≠0)", step="Root OK")
     return device
 
-def check_and_click_fixback(device, img, serial):
+def check_and_click_fixback(device, img, serial, check_g1=True):
     """
     เช็คและกด fixback-gacha1.bmp และ fixback-gacha2.bmp ซ้ำๆ จนกว่าจะหายไป
     คืนค่า (img ล่าสุด, force_gacha4)
     """
     force_gacha4 = False
+    if not check_g1:
+        return img, force_gacha4
+
     found_g1 = False
     click_count = 0
     while True:
@@ -5350,8 +5353,9 @@ def process_device_login(device):
                                 break
                         time.sleep(1)
 
-                    # 2. หา net-gacha1.bmp
-                    gui_log(serial, "Waiting net-gacha1.bmp...", step="net-g1")
+                    # 2. หา net-gacha1.bmp (วนหา/เลื่อนไม่เกิน 3 รอบ)
+                    gui_log(serial, "Waiting net-gacha1.bmp (max 3 loops)...", step="net-g1")
+                    swipe_count = 0
                     while True:
                         check_device_reset(serial, cycle_start)
                         img = get_screen_capture(device)
@@ -5366,9 +5370,18 @@ def process_device_login(device):
                                 time.sleep(4)
                                 break
                             else:
+                                swipe_count += 1
+                                if swipe_count > 3:
+                                    log_limit = "net-gacha1 not found after 3 swipes. Jumping to Gacha4."
+                                    gui_log(serial, log_limit, step="NetG-Limit")
+                                    print(f"[{serial}] {log_limit}")
+                                    break
                                 # เลื่อนตำแหน่ง 259 344 679 349
-                                gui_log(serial, "net-gacha1 not found, swiping 259 344 -> 679 349...", step="Swipe NetG")
-                                device.shell("input swipe 259 344 679 349 1000")
+                                log_msg = f"net-gacha1 not found (swipe {swipe_count}/3). Swiping 259 344 -> 679 349..."
+                                gui_log(serial, log_msg, step="Swipe NetG")
+                                print(f"[{serial}] {log_msg}")
+                                res = device.shell("input swipe 259 344 679 349 1000")
+                                print(f"[{serial}] ADB swipe command executed. Result: {res.strip() if res else 'OK'}")
                                 time.sleep(2)
                         time.sleep(1)
                 else:
@@ -5439,7 +5452,7 @@ def process_device_login(device):
                             check_device_reset(serial, cycle_start)
                             img = get_screen_capture(device)
                             if img is not None:
-                                img, _ = check_and_click_fixback(device, img, serial)
+                                img, _ = check_and_click_fixback(device, img, serial, check_g1=False)
                                 if img is None:
                                     continue
                                 # เช็ค outloop.bmp ก่อนเสมอ เจอแล้วจบการทำงานทันที
@@ -5482,7 +5495,7 @@ def process_device_login(device):
                             check_device_reset(serial, cycle_start)
                             img = get_screen_capture(device)
                             if img is not None:
-                                img, _ = check_and_click_fixback(device, img, serial)
+                                img, _ = check_and_click_fixback(device, img, serial, check_g1=False)
                                 if img is None:
                                     continue
                                 # เช็ค outloop.bmp ก่อนเสมอ เจอแล้วจบการทำงานทันที
@@ -5519,7 +5532,7 @@ def process_device_login(device):
                             check_device_reset(serial, cycle_start)
                             img = get_screen_capture(device)
                             if img is not None:
-                                img, _ = check_and_click_fixback(device, img, serial)
+                                img, _ = check_and_click_fixback(device, img, serial, check_g1=False)
                                 if img is None:
                                     continue
                                 if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
@@ -5552,7 +5565,7 @@ def process_device_login(device):
                         check_device_reset(serial, cycle_start)
                         img = get_screen_capture(device)
                         if img is not None:
-                            img, _ = check_and_click_fixback(device, img, serial)
+                            img, _ = check_and_click_fixback(device, img, serial, check_g1=False)
                             if img is None:
                                 continue
                             # เช็ค outloop.bmp ก่อนเสมอ เจอแล้วจบการทำงานทันที
@@ -5590,7 +5603,7 @@ def process_device_login(device):
                             check_device_reset(serial, cycle_start)
                             img = get_screen_capture(device)
                             if img is not None:
-                                img, _ = check_and_click_fixback(device, img, serial)
+                                img, _ = check_and_click_fixback(device, img, serial, check_g1=False)
                                 if img is None:
                                     continue
                                 if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
@@ -5623,7 +5636,7 @@ def process_device_login(device):
                             check_device_reset(serial, cycle_start)
                             img = get_screen_capture(device)
                             if img is not None:
-                                img, _ = check_and_click_fixback(device, img, serial)
+                                img, _ = check_and_click_fixback(device, img, serial, check_g1=False)
                                 if img is None:
                                     continue
                                 # เช็ค outloop.bmp ก่อนเสมอ เจอแล้วจบการทำงานทันที
@@ -5664,7 +5677,7 @@ def process_device_login(device):
                         check_device_reset(serial, cycle_start)
                         img = get_screen_capture(device)
                         if img is not None:
-                            img, _ = check_and_click_fixback(device, img, serial)
+                            img, _ = check_and_click_fixback(device, img, serial, check_g1=False)
                             if img is None:
                                 continue
                             # 1. เช็ค checkpointgacha ปกติ
