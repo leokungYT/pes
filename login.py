@@ -5623,8 +5623,23 @@ def process_device_login(device):
 
                                         pts = img_search(img, os.path.join(IMG_DIR, "gacha4.bmp"))
                                         if pts:
-                                            pts_cp4 = img_search(img, os.path.join(IMG_DIR, "checkpoint-gacha4.bmp"))
-                                            if pts_cp4:
+                                            gui_log(serial, "gacha4.bmp found! Checking checkpoint-gacha4...", step="G4-Verify")
+                                            verified = False
+                                            deadline_cp4 = time.time() + 5
+                                            while time.time() < deadline_cp4:
+                                                check_device_reset(serial, cycle_start)
+                                                img_cp4 = get_screen_capture(device)
+                                                if img_cp4 is not None:
+                                                    pts_cp4 = img_search(img_cp4, os.path.join(IMG_DIR, "checkpoint-gacha4.bmp"))
+                                                    if pts_cp4:
+                                                        verified = True
+                                                        pts_fresh = img_search(img_cp4, os.path.join(IMG_DIR, "gacha4.bmp"))
+                                                        if pts_fresh:
+                                                            pts = pts_fresh
+                                                        break
+                                                time.sleep(0.5)
+                                            
+                                            if verified:
                                                 x, y = pts[0]
                                                 device.shell(f"input swipe {x} {y} {x} {y} 100")
                                                 g4_click_count += 1
@@ -5633,13 +5648,15 @@ def process_device_login(device):
                                                 found_g4 = True
                                                 continue
                                             else:
-                                                gui_log(serial, "checkpoint-gacha4.bmp not found! Resetting gacha sequence...", step="G4-Failed")
-                                                pts_fg2 = img_search(img, os.path.join(IMG_DIR, "fixgachanew2.bmp"))
-                                                if pts_fg2:
-                                                    x2, y2 = pts_fg2[0]
-                                                    device.shell(f"input swipe {x2} {y2} {x2} {y2} 100")
-                                                    gui_log(serial, "Clicked fixgachanew2.bmp", step="G4-Failed")
-                                                    time.sleep(2)
+                                                gui_log(serial, "checkpoint-gacha4.bmp not found in 5s! Resetting gacha sequence...", step="G4-Failed")
+                                                img_fg2 = get_screen_capture(device)
+                                                if img_fg2 is not None:
+                                                    pts_fg2 = img_search(img_fg2, os.path.join(IMG_DIR, "fixgachanew2.bmp"))
+                                                    if pts_fg2:
+                                                        x2, y2 = pts_fg2[0]
+                                                        device.shell(f"input swipe {x2} {y2} {x2} {y2} 100")
+                                                        gui_log(serial, "Clicked fixgachanew2.bmp", step="G4-Failed")
+                                                        time.sleep(2)
                                                 raise ResetGachaException("checkpoint-gacha4 not found")
                                         if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
                                             found_g4 = "nocoin"
@@ -5767,8 +5784,23 @@ def process_device_login(device):
 
                                     pts = img_search(img, os.path.join(IMG_DIR, "gacha4.bmp"))
                                     if pts:
-                                        pts_cp4 = img_search(img, os.path.join(IMG_DIR, "checkpoint-gacha4.bmp"))
-                                        if pts_cp4:
+                                        gui_log(serial, "gacha4.bmp found! Checking checkpoint-gacha4...", step="G4-Verify")
+                                        verified = False
+                                        deadline_cp4 = time.time() + 5
+                                        while time.time() < deadline_cp4:
+                                            check_device_reset(serial, cycle_start)
+                                            img_cp4 = get_screen_capture(device)
+                                            if img_cp4 is not None:
+                                                pts_cp4 = img_search(img_cp4, os.path.join(IMG_DIR, "checkpoint-gacha4.bmp"))
+                                                if pts_cp4:
+                                                    verified = True
+                                                    pts_fresh = img_search(img_cp4, os.path.join(IMG_DIR, "gacha4.bmp"))
+                                                    if pts_fresh:
+                                                        pts = pts_fresh
+                                                    break
+                                            time.sleep(0.5)
+                                        
+                                        if verified:
                                             x, y = pts[0]
                                             device.shell(f"input swipe {x} {y} {x} {y} 100")
                                             g4_click_count += 1
@@ -5778,13 +5810,15 @@ def process_device_login(device):
                                             deadline_g4 = time.time() + 10
                                             continue
                                         else:
-                                            gui_log(serial, "checkpoint-gacha4.bmp not found! Resetting gacha sequence...", step="G4-Failed")
-                                            pts_fg2 = img_search(img, os.path.join(IMG_DIR, "fixgachanew2.bmp"))
-                                            if pts_fg2:
-                                                x2, y2 = pts_fg2[0]
-                                                device.shell(f"input swipe {x2} {y2} {x2} {y2} 100")
-                                                gui_log(serial, "Clicked fixgachanew2.bmp", step="G4-Failed")
-                                                time.sleep(2)
+                                            gui_log(serial, "checkpoint-gacha4.bmp not found in 5s! Resetting gacha sequence...", step="G4-Failed")
+                                            img_fg2 = get_screen_capture(device)
+                                            if img_fg2 is not None:
+                                                pts_fg2 = img_search(img_fg2, os.path.join(IMG_DIR, "fixgachanew2.bmp"))
+                                                if pts_fg2:
+                                                    x2, y2 = pts_fg2[0]
+                                                    device.shell(f"input swipe {x2} {y2} {x2} {y2} 100")
+                                                    gui_log(serial, "Clicked fixgachanew2.bmp", step="G4-Failed")
+                                                    time.sleep(2)
                                             raise ResetGachaException("checkpoint-gacha4 not found")
                                     # เช็ค nocions ระหว่างรอ
                                     if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
