@@ -2424,13 +2424,11 @@ def get_screen_capture(device):
             global in_new_gacha_loop
             if in_new_gacha_loop and img is not None:
                 pts_fg1 = img_search(img, os.path.join(IMG_DIR, "fixgachanew1.bmp"))
-                pts_fg2 = img_search(img, os.path.join(IMG_DIR, "fixgachanew2.bmp"))
-                if pts_fg1 or pts_fg2:
-                    if pts_fg1:
-                        x_fg1, y_fg1 = pts_fg1[0]
-                        device.shell(f"input swipe {x_fg1} {y_fg1} {x_fg1} {y_fg1} 100")
-                        gui_log(device.serial, "fixgachanew1.bmp detected! Clicking it...", step="FixGachaNew 1")
-                        time.sleep(2)
+                if pts_fg1:
+                    x_fg1, y_fg1 = pts_fg1[0]
+                    device.shell(f"input swipe {x_fg1} {y_fg1} {x_fg1} {y_fg1} 100")
+                    gui_log(device.serial, "fixgachanew1.bmp detected! Clicking it...", step="FixGachaNew 1")
+                    time.sleep(2)
 
                     # วนกด fixgachanew2.bmp จนกว่าจะหายไป
                     gui_log(device.serial, "Clicking fixgachanew2.bmp until gone...", step="FixGachaNew 2")
