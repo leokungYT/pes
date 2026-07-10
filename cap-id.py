@@ -337,23 +337,23 @@ def wait_play8(device, serial, cycle_start):
                     x, y = pts_lg3[0]
                     gui_log(serial, f"{matched} & fixlg3 found! Clicking fixlg3 first", step="play8")
                     device.shell(f"input swipe {x} {y} {x} {y} 100")
-                    time.sleep(2)
+                    time.sleep(1.0)
                     continue
                 x, y = pts[0]
                 device.shell(f"input swipe {x} {y} {x} {y} 100")
                 gui_log(serial, f"Found {matched}! Clicked.", step="play8")
                 play8_clicked = True
-                time.sleep(2.0)
+                time.sleep(0.5)
                 continue
             else:
                 if play8_clicked:
                     absent_count += 1
-                    if absent_count >= 3:
+                    if absent_count >= 10:  # ต้องไม่พบติดต่อกัน 10 ครั้ง ถึงจะถือว่าหายจริง
                         break
                 else:
                     # ยังไม่เคยกดเลย ก็วนรอต่อไป
                     pass
-        time.sleep(1.0)
+        time.sleep(0.3)
 
 
 def wait_checkpointlogin(device, serial, cycle_start):

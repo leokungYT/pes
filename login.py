@@ -4395,24 +4395,24 @@ def process_device_login(device):
                             gui_log(serial, f"{matched_name} and fixlg3 found! Clicking fixlg3 first", step="play8")
                             x, y = pts_lg3[0]
                             device.shell(f"input swipe {x} {y} {x} {y} 100")
-                            time.sleep(2)
+                            time.sleep(1.0)
                             continue
                             
                         x, y = pts[0]
                         device.shell(f"input swipe {x} {y} {x} {y} 100")
                         gui_log(serial, f"Found {matched_name}! Clicked.", step="play8")
                         play8_clicked = True
-                        time.sleep(2.0)   # กด 1 ครั้ง → delay 2.0 → เช็คใหม่ ถ้าเจออีกค่อยกดอีกรอบ
+                        time.sleep(0.5)   # delay เพื่อให้คลิกลงทะเบียนก่อนเช็คใหม่
                         continue
                     else:
                         if play8_clicked:
                             absent_count += 1
-                            if absent_count >= 3:
+                            if absent_count >= 10:  # ต้องไม่พบติดต่อกัน 10 ครั้ง ถึงจะถือว่าหายจริง
                                 break
                         else:
                             # ยังไม่เคยกดเลย ก็วนรอต่อไป
                             pass
-                time.sleep(1.0)
+                time.sleep(0.3)
 
             # 5. Wait checkpointlogin
             gui_log(serial, "Waiting checkpointlogin...", step="Checkpoint")
