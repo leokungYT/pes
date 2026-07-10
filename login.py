@@ -4374,18 +4374,22 @@ def process_device_login(device):
             
             time.sleep(8)
 
-            # 4. Wait for play8 or play8fix — คลิกซ้ำจนหาย (เจออันไหนก็ได้ถือว่าเจอ)
-            gui_log(serial, "Waiting play8 or play8fix...", step="play8")
-            play8_clicked = False
-            absent_count = 0
+            # 4. Wait for play8 or play8fix — คลิกซ้ำจนกว่าจะเข้าถึง Checkpoint
+            gui_log(serial, "Waiting play8 or play8fix (until checkpoint)...", step="play8")
             loop_count = 0
             while True:
                 check_device_reset(serial, cycle_start)
                 img = get_screen_capture(device)
                 if img is not None:
-                    # ถ้าเจอ checkpointlogin.bmp ถือว่าผ่านมาได้แล้ว ให้หลุดลูปได้เลย
+                    # เช็คว่าเข้าถึงหน้าหลักหรือหน้าล็อคอินโบนัสหรือยัง
                     if img_search(img, os.path.join(IMG_DIR, "checkpointlogin.bmp")):
-                        gui_log(serial, "checkpointlogin detected during play8 loop, breaking...", step="play8")
+                        gui_log(serial, "checkpointlogin detected! Entering checkpoint phase.", step="play8")
+                        break
+                    if img_search(img, os.path.join(IMG_DIR, "checkpointgacha.bmp")):
+                        gui_log(serial, "checkpointgacha detected! Entering checkpoint phase.", step="play8")
+                        break
+                    if img_search(img, os.path.join(IMG_DIR, "checkpointcoin.bmp")):
+                        gui_log(serial, "checkpointcoin detected! Entering checkpoint phase.", step="play8")
                         break
 
                     # ลองหา play8.bmp ก่อน ถ้าไม่เจอลองหา play8fix.bmp
@@ -4395,7 +4399,7 @@ def process_device_login(device):
                         pts = img_search(img, os.path.join(IMG_DIR, "play8fix.bmp"))
                         matched_name = "play8fix"
                     if pts:
-                        absent_count = 0
+                        loop_count = 0
                         # Prioritize fixlg3 if both are present
                         pts_lg3 = img_search(img, os.path.join(IMG_DIR, "fixlg3.bmp"))
                         if pts_lg3:
@@ -4408,20 +4412,14 @@ def process_device_login(device):
                         x, y = pts[0]
                         device.shell(f"input swipe {x} {y} {x} {y} 100")
                         gui_log(serial, f"Found {matched_name}! Clicked.", step="play8")
-                        play8_clicked = True
-                        time.sleep(0.5)   # delay เพื่อให้คลิกลงทะเบียนก่อนเช็คใหม่
+                        time.sleep(0.5)
                         continue
                     else:
-                        if play8_clicked:
-                            absent_count += 1
-                            if absent_count >= 10:  # ต้องไม่พบติดต่อกัน 10 ครั้ง ถึงจะถือว่าหายจริง
-                                break
-                        else:
-                            loop_count += 1
-                            if loop_count >= 30:  # ~10 วินาที (30 * 0.3s)
-                                gui_log(serial, "play8 not matched yet, attempting fallback center click...", step="play8")
-                                device.shell("input swipe 480 270 480 270 100")
-                                loop_count = 0
+                        loop_count += 1
+                        if loop_count >= 50:  # ~15 วินาที (50 * 0.3s)
+                            gui_log(serial, "play8 not matched yet, attempting fallback center click...", step="play8")
+                            device.shell("input swipe 480 270 480 270 100")
+                            loop_count = 0
                 time.sleep(0.3)
 
             # 5. Wait checkpointlogin

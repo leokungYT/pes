@@ -316,18 +316,22 @@ def launch_with_black_check(device, serial, cycle_start):
 
 
 def wait_play8(device, serial, cycle_start):
-    """รอ play8 หรือ play8fix → กดซ้ำจนหาย (พอร์ตจาก login.py)"""
-    gui_log(serial, "Waiting play8 or play8fix...", step="play8")
-    play8_clicked = False
-    absent_count = 0
+    """รอ play8 หรือ play8fix → กดซ้ำจนกว่าจะเข้าถึง Checkpoint (พอร์ตจาก login.py)"""
+    gui_log(serial, "Waiting play8 or play8fix (until checkpoint)...", step="play8")
     loop_count = 0
     while True:
         check_device_reset(serial, cycle_start)
         img = get_screen_capture(device)
         if img is not None:
-            # ถ้าเจอ checkpointlogin.bmp ถือว่าผ่านมาได้แล้ว ให้หลุดลูปได้เลย
+            # เช็คว่าเข้าถึงหน้าหลักหรือหน้าล็อคอินโบนัสหรือยัง
             if img_search(img, os.path.join(IMG_DIR, "checkpointlogin.bmp")):
-                gui_log(serial, "checkpointlogin detected during play8 loop, breaking...", step="play8")
+                gui_log(serial, "checkpointlogin detected! Entering checkpoint phase.", step="play8")
+                break
+            if img_search(img, os.path.join(IMG_DIR, "checkpointgacha.bmp")):
+                gui_log(serial, "checkpointgacha detected! Entering checkpoint phase.", step="play8")
+                break
+            if img_search(img, os.path.join(IMG_DIR, "checkpointcoin.bmp")):
+                gui_log(serial, "checkpointcoin detected! Entering checkpoint phase.", step="play8")
                 break
 
             pts = img_search(img, os.path.join(IMG_DIR, "play8.bmp"))
@@ -336,7 +340,7 @@ def wait_play8(device, serial, cycle_start):
                 pts = img_search(img, os.path.join(IMG_DIR, "play8fix.bmp"))
                 matched = "play8fix"
             if pts:
-                absent_count = 0
+                loop_count = 0
                 # มี fixlg3 ให้กดก่อน
                 pts_lg3 = img_search(img, os.path.join(IMG_DIR, "fixlg3.bmp"))
                 if pts_lg3:
@@ -348,20 +352,14 @@ def wait_play8(device, serial, cycle_start):
                 x, y = pts[0]
                 device.shell(f"input swipe {x} {y} {x} {y} 100")
                 gui_log(serial, f"Found {matched}! Clicked.", step="play8")
-                play8_clicked = True
                 time.sleep(0.5)
                 continue
             else:
-                if play8_clicked:
-                    absent_count += 1
-                    if absent_count >= 10:  # ต้องไม่พบติดต่อกัน 10 ครั้ง ถึงจะถือว่าหายจริง
-                        break
-                else:
-                    loop_count += 1
-                    if loop_count >= 30:  # ~10 วินาที (30 * 0.3s)
-                        gui_log(serial, "play8 not matched yet, attempting fallback center click...", step="play8")
-                        device.shell("input swipe 480 270 480 270 100")
-                        loop_count = 0
+                loop_count += 1
+                if loop_count >= 50:  # ~15 วินาที (50 * 0.3s)
+                    gui_log(serial, "play8 not matched yet, attempting fallback center click...", step="play8")
+                    device.shell("input swipe 480 270 480 270 100")
+                    loop_count = 0
         time.sleep(0.3)
 
 
