@@ -5358,6 +5358,7 @@ def process_device_login(device):
                                     x_fs, y_fs = pts_fixswap[0]
                                     device.shell(f"input swipe {x_fs} {y_fs} {x_fs} {y_fs} 100")
                                     gui_log(serial, "fixswap.bmp still visible! Re-clicking it immediately...", step="FixSwap ReClick")
+                                    new_g1_swipe_count = 0  # เริ่มลื่นหน้าจอใหม่อีกรอบ
                                     time.sleep(4)
                                     continue
                                 else:
@@ -5370,6 +5371,7 @@ def process_device_login(device):
                                             x_fs, y_fs = pts_fixswap[0]
                                             device.shell(f"input swipe {x_fs} {y_fs} {x_fs} {y_fs} 100")
                                             gui_log(serial, f"fixswap.bmp detected for {elapsed:.1f}s. Clicking it!", step="FixSwap Click")
+                                            new_g1_swipe_count = 0  # เริ่มลื่นหน้าจอใหม่อีกรอบ
                                             time.sleep(4)
                                             fixswap_triggered = True
                                             continue
@@ -5382,9 +5384,16 @@ def process_device_login(device):
                             pts_fixgachanew = img_search(img, os.path.join(IMG_DIR, "fixgachanew1.bmp"))
                             if pts_fixgachanew:
                                 if fixgachanew_triggered:
-                                    x_fg, y_fg = pts_fixgachanew[0]
-                                    device.shell(f"input swipe {x_fg} {y_fg} {x_fg} {y_fg} 100")
-                                    gui_log(serial, "fixgachanew1.bmp still visible! Re-clicking it immediately...", step="FixGachaNew ReClick")
+                                    pts_fs_fallback = img_search(img, os.path.join(IMG_DIR, "fixswap.bmp"))
+                                    if pts_fs_fallback:
+                                        x_click, y_click = pts_fs_fallback[0]
+                                        click_name = "fixswap.bmp"
+                                    else:
+                                        x_click, y_click = pts_fixgachanew[0]
+                                        click_name = "fixgachanew1.bmp"
+                                    device.shell(f"input swipe {x_click} {y_click} {x_click} {y_click} 100")
+                                    gui_log(serial, f"fixgachanew1.bmp still visible! Re-clicking {click_name} immediately...", step="FixGachaNew ReClick")
+                                    new_g1_swipe_count = 0  # เริ่มลื่นหน้าจอใหม่อีกรอบ
                                     time.sleep(4)
                                     continue
                                 else:
@@ -5394,9 +5403,16 @@ def process_device_login(device):
                                     else:
                                         elapsed = time.time() - fixgachanew_first_seen
                                         if elapsed >= 10.0:
-                                            x_fg, y_fg = pts_fixgachanew[0]
-                                            device.shell(f"input swipe {x_fg} {y_fg} {x_fg} {y_fg} 100")
-                                            gui_log(serial, f"fixgachanew1.bmp detected for {elapsed:.1f}s. Clicking it!", step="FixGachaNew Click")
+                                            pts_fs_fallback = img_search(img, os.path.join(IMG_DIR, "fixswap.bmp"))
+                                            if pts_fs_fallback:
+                                                x_click, y_click = pts_fs_fallback[0]
+                                                click_name = "fixswap.bmp"
+                                            else:
+                                                x_click, y_click = pts_fixgachanew[0]
+                                                click_name = "fixgachanew1.bmp"
+                                            device.shell(f"input swipe {x_click} {y_click} {x_click} {y_click} 100")
+                                            gui_log(serial, f"fixgachanew1.bmp detected for {elapsed:.1f}s. Clicking {click_name}!", step="FixGachaNew Click")
+                                            new_g1_swipe_count = 0  # เริ่มลื่นหน้าจอใหม่อีกรอบ
                                             time.sleep(4)
                                             fixgachanew_triggered = True
                                             continue
