@@ -5336,6 +5336,27 @@ def process_device_login(device):
                 gui_log(serial, "Gacha sequence started...", step="Gacha Mode", status="working")
                 
                 if NEW_GACHA == 1:
+                    # First, navigate to the Special Contracts screen (gacha1 -> gacha2)
+                    for i in range(1, 3):
+                        name = f"gacha{i}.bmp"
+                        gui_log(serial, f"Waiting {name}...", step=name)
+                        while True:
+                            check_device_reset(serial, cycle_start)
+                            img = get_screen_capture(device)
+                            if img is not None:
+                                img, force_g4 = check_and_click_fixback(device, img, serial)
+                                if force_g4:
+                                    break
+                                if img is None:
+                                    continue
+                                pts = img_search(img, os.path.join(IMG_DIR, name))
+                                if pts:
+                                    x, y = pts[0]
+                                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                    time.sleep(4)
+                                    break
+                            time.sleep(1)
+
                     # 1. รอ/คลิก new-gacha1.bmp
                     gui_log(serial, "Waiting new-gacha1.bmp...", step="new-g1")
                     new_g1_swipe_count = 0
