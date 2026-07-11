@@ -4362,6 +4362,10 @@ def process_device_login(device):
                     time.sleep(5)
                     continue
 
+                # delay 5 วิ หลัง push เสร็จ ก่อนเปิดเกม — กันเคสไฟล์ยังเขียนไม่เสร็จ/ไม่เข้าจริง
+                gui_log(serial, "Push OK — delaying 5s before launch...", step="Push Settle")
+                time.sleep(5)
+
 
 
             # 3. Launch with Black Screen Check (45s check, threshold > 85% dark -> force-stop & relaunch)
@@ -5721,13 +5725,10 @@ def process_device_login(device):
                                 time.sleep(10)
 
                                 # 3. Wait/Click gacha5.bmp
-                                g5_wait_start = time.time()   # กันค้าง: ถ้าไม่เจอ gacha5/checkpoint/outloop เกิน 8 วิ → เริ่มใหม่ตั้งแต่ play8
+                                #    (โหมด Custom: ไม่มี watchdog restart — ปล่อยให้ loop ทำงานจนเจอ
+                                #     outloop/loopgacha1/nocions เอง ห้าม clear app กลางคัน)
                                 while True:
                                     check_device_reset(serial, cycle_start)
-                                    # ── watchdog: ค้างในลูปรอ gacha5 เกิน 8 วิ → restart ตั้งแต่ play8 ──
-                                    if time.time() - g5_wait_start > 8:
-                                        gui_log(serial, "gacha5 not found within 8s — restarting from play8...", step="G5-Stuck", status="stuck")
-                                        trigger_restart_from_play8(device, serial, original_name, reason="gacha5 stuck 8s")
                                     img = get_screen_capture(device)
                                     if img is not None:
                                         img, _ = check_and_click_fixback(device, img, serial, check_g1=False)
