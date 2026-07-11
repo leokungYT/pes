@@ -181,6 +181,8 @@ DEVICE_LAST_GAME_CHECK  = {}  # throttle: เช็คเกมออนทุ�
 DEVICE_REENTER_FILE  = {}     # serial -> (file_path, original_name) ไฟล์ที่ต้อง "เข้าใหม่" (fixclear)
 DEVICE_REENTER_COUNT = {}     # serial -> (original_name, count) นับจำนวนครั้งที่ re-enter
 FIXCLEAR_MAX_REENTER = 1      # เจอ fixclear → เข้าใหม่ได้กี่ครั้งก่อนยอมแพ้ส่ง file-error (1 = เข้าใหม่ 1 ครั้ง เจออีกค่อยส่ง)
+DEVICE_RESTART_PLAY8 = {}     # serial -> (file_path, original_name) เริ่มใหม่ "ตั้งแต่ play8" (เปิดเกมเดิม ไม่ล้าง AUTH ไม่ push ซ้ำ = เก็บ login เดิมไว้)
+DEVICE_PAST_LOGIN    = {}     # serial -> bool ผ่านหน้า login (checkpoint) แล้วหรือยัง → ใช้ตัดสิน fixclear ว่าจะ restart-play8 หรือ re-enter (push ใหม่)
 
 # ── Performance ───────────────────────────────────────────────────────────────
 SCREENCAP_SCALE = 1.0  # 1.0 = full resolution (ป้องกัน template quality loss)
@@ -2202,6 +2204,16 @@ def get_screen_capture(device):
                 # ── เจอ fixclear/fixclear1 → ปิดแอพแล้วเปิดเข้าใหม่ไฟล์เดิมเฉยๆ ──
                 #    ไม่ส่ง file-error / ไม่ล้าง AUTH / เก็บไฟล์ไว้เสมอ
                 if original_name:
+                    # ผ่านหน้า login (checkpoint) แล้ว = อยู่ช่วง play8→gacha/box → เจอ fixclear
+                    # ให้ "เริ่มใหม่ตั้งแต่ play8" เลย: เปิดเกมเดิม เก็บ login ไว้ ไม่ push ไฟล์ซ้ำ
+                    if DEVICE_PAST_LOGIN.get(serial_fc):
+                        gui_log(serial_fc, "fixclear detected (after login)! Restarting from play8 (keep login, no re-push)...", step="Fix Clear Re-enter")
+                        device.shell("am force-stop jp.konami.pesam")
+                        time.sleep(1)
+                        DEVICE_RESTART_PLAY8[serial_fc] = (os.path.join(INPUT_DIR, original_name), original_name)
+                        raise RestartFromPlay8Exception("fixclear after login — restart from play8")
+
+                    # ยังไม่ผ่าน login → เข้าใหม่ไฟล์เดิม (push ซ้ำได้ตามเดิม)
                     gui_log(serial_fc, "fixclear detected! Closing & relaunching (file kept, no file-error)...", step="Fix Clear Re-enter")
                     device.shell("am force-stop jp.konami.pesam")
                     time.sleep(1)
@@ -4299,34 +4311,47 @@ def process_device_login(device):
             device.shell("am force-stop jp.konami.pesam")
             time.sleep(1)
 
-            # 0.5 ลบ save data เดิมออกก่อนเริ่มวนไฟล์ใหม่ (กันข้อมูล id เก่าค้าง)
-            device.shell("su -c 'rm -f /data/data/jp.konami.pesam/files/SaveData/AUTH/online_user_id_data.dat'")
-            time.sleep(0.3)
-
-            # 1. Pick file — ถ้ามีไฟล์ค้าง "เข้าใหม่" จาก fixclear → ใช้ไฟล์เดิม (ไม่หยิบใหม่/ไม่ปล่อย lock)
-            pending = DEVICE_REENTER_FILE.pop(serial, None)
-            if pending:
-                file_path, original_name = pending
-                gui_log(serial, f"Re-entering same file: {original_name}", step="Re-enter", status="working")
+            # ── restart-from-play8: เจอ fixclear หลัง login (หรือ box1 หายเกิน 5 ครั้ง) →
+            #    เปิดเกมเดิมแล้วไปเริ่มที่ play8 เลย โดย "ไม่ล้าง AUTH / ไม่ push ไฟล์ซ้ำ" (เก็บ login เดิมไว้)
+            #    แล้วปล่อยให้วิ่งเข้า launch → loop play8 → เฟสต่อไปตามปกติ ──
+            restart_p8 = DEVICE_RESTART_PLAY8.pop(serial, None)
+            if restart_p8:
+                file_path, original_name = restart_p8
+                DEVICE_FILE_ASSIGNMENTS[serial] = original_name
+                cycle_start = time.time()
+                DEVICE_PAST_LOGIN[serial] = True   # ผ่าน login แล้ว (ถ้าเจอ fixclear อีกก็ยัง restart-play8 ไม่ login ใหม่)
+                gui_log(serial, f"Restart from play8 (same file, keep login, no re-push): {original_name}",
+                        step="Restart play8", status="working")
             else:
-                DEVICE_REENTER_COUNT.pop(serial, None)   # ไฟล์ใหม่ → รีเซ็ตตัวนับ re-enter
-                file_path, original_name = pick_next_file()
-                if file_path is None:
-                    gui_log(serial, "No files left — waiting...", step="No Files", status="idle")
-                    time.sleep(3)
+                # 0.5 ลบ save data เดิมออกก่อนเริ่มวนไฟล์ใหม่ (กันข้อมูล id เก่าค้าง)
+                device.shell("su -c 'rm -f /data/data/jp.konami.pesam/files/SaveData/AUTH/online_user_id_data.dat'")
+                time.sleep(0.3)
+
+                # 1. Pick file — ถ้ามีไฟล์ค้าง "เข้าใหม่" จาก fixclear → ใช้ไฟล์เดิม (ไม่หยิบใหม่/ไม่ปล่อย lock)
+                pending = DEVICE_REENTER_FILE.pop(serial, None)
+                if pending:
+                    file_path, original_name = pending
+                    gui_log(serial, f"Re-entering same file: {original_name}", step="Re-enter", status="working")
+                else:
+                    DEVICE_REENTER_COUNT.pop(serial, None)   # ไฟล์ใหม่ → รีเซ็ตตัวนับ re-enter
+                    file_path, original_name = pick_next_file()
+                    if file_path is None:
+                        gui_log(serial, "No files left — waiting...", step="No Files", status="idle")
+                        time.sleep(3)
+                        continue
+
+                gui_log(serial, f"File: {original_name}", step="File OK", status="working")
+                DEVICE_FILE_ASSIGNMENTS[serial] = original_name
+                cycle_start = time.time()
+                DEVICE_PAST_LOGIN[serial] = False   # ไฟล์ใหม่/เข้าใหม่ → ยังไม่ผ่าน login
+
+                # 2. Push file
+                gui_log(serial, "Pushing file...", step="Push")
+                if not push_dat_to_device(device, file_path):
+                    gui_log(serial, "Push FAILED!", step="Error", status="stuck")
+                    release_file(original_name)
+                    time.sleep(5)
                     continue
-
-            gui_log(serial, f"File: {original_name}", step="File OK", status="working")
-            DEVICE_FILE_ASSIGNMENTS[serial] = original_name
-            cycle_start = time.time()
-
-            # 2. Push file
-            gui_log(serial, "Pushing file...", step="Push")
-            if not push_dat_to_device(device, file_path):
-                gui_log(serial, "Push FAILED!", step="Error", status="stuck")
-                release_file(original_name)
-                time.sleep(5)
-                continue
 
 
 
@@ -4439,6 +4464,10 @@ def process_device_login(device):
                         play8_miss = 0
 
                 time.sleep(0.3)
+
+            # ผ่านหน้า login (เจอ checkpoint) แล้ว → mark ไว้: ถ้าหลังจากนี้เจอ fixclear
+            # จะ restart "ตั้งแต่ play8" (เก็บ login เดิม) แทนการ push ไฟล์ + login ใหม่
+            DEVICE_PAST_LOGIN[serial] = True
 
             if LOGIN_FAST:
                 continue
@@ -5292,9 +5321,9 @@ def process_device_login(device):
                         box1_retry += 1
                         # หา box1 ไม่เจอเกิน 5 ครั้ง → ปิดแอพ แล้วเริ่มใหม่ตั้งแต่ play8 (ไฟล์เดิม)
                         if box1_retry >= MAX_BOX1_RETRY:
-                            gui_log(serial, f"box1.bmp not found {box1_retry}x — restarting from play8 (same file)...",
+                            gui_log(serial, f"box1.bmp not found {box1_retry}x — restarting from play8 (same file, keep login)...",
                                     step="Restart play8", status="stuck")
-                            DEVICE_REENTER_FILE[serial] = (file_path, original_name)
+                            DEVICE_RESTART_PLAY8[serial] = (file_path, original_name)
                             device.shell("am force-stop jp.konami.pesam")
                             time.sleep(1)
                             raise RestartFromPlay8Exception("box1 not found 5x — restart from play8")
