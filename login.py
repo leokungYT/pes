@@ -230,6 +230,7 @@ class FixClearReenterException(Exception): pass
 class CycleTimeoutException(Exception): pass
 class SellScreenException(Exception):  pass
 class RestartFromQuest8Exception(Exception): pass
+class RestartFromPlay8Exception(Exception): pass
 GQ_ACTIVE = False
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -5265,9 +5266,11 @@ def process_device_login(device):
             if DO_BOX == 1:
                 gui_log(serial, "Box sequence started...", step="Box Mode", status="working")
                 box2_found = False
+                box1_retry = 0          # นับจำนวนครั้งที่หา box1 ไม่เจอ
+                MAX_BOX1_RETRY = 5      # เกิน 5 ครั้ง → เริ่มใหม่ตั้งแต่ play8 (relaunch ไฟล์เดิม)
                 while not box2_found:
                     check_device_reset(serial, cycle_start)
-                    
+
                     # box1
                     gui_log(serial, "Waiting box1.bmp...", step="box1")
                     start_box = time.time()
@@ -5284,9 +5287,18 @@ def process_device_login(device):
                                 box1_found = True
                                 break
                         time.sleep(1.2)
-                    
+
                     if not box1_found:
-                        gui_log(serial, "box1.bmp not found, retrying sequence", step="Retry")
+                        box1_retry += 1
+                        # หา box1 ไม่เจอเกิน 5 ครั้ง → ปิดแอพ แล้วเริ่มใหม่ตั้งแต่ play8 (ไฟล์เดิม)
+                        if box1_retry >= MAX_BOX1_RETRY:
+                            gui_log(serial, f"box1.bmp not found {box1_retry}x — restarting from play8 (same file)...",
+                                    step="Restart play8", status="stuck")
+                            DEVICE_REENTER_FILE[serial] = (file_path, original_name)
+                            device.shell("am force-stop jp.konami.pesam")
+                            time.sleep(1)
+                            raise RestartFromPlay8Exception("box1 not found 5x — restart from play8")
+                        gui_log(serial, f"box1.bmp not found, retrying sequence ({box1_retry}/{MAX_BOX1_RETRY})", step="Retry")
                         continue
 
                     # box2
@@ -6038,6 +6050,12 @@ def process_device_login(device):
         except FixClearReenterException:
             # fixclear → เข้าใหม่ไฟล์เดิม: อย่า release_file (เก็บ lock + ไฟล์ไว้ทำต่อ)
             gui_log(serial, "🔁 fixclear re-enter — relaunching same file...", step="Re-enter", status="working")
+            device.shell("am force-stop jp.konami.pesam")
+            time.sleep(1)
+
+        except RestartFromPlay8Exception:
+            # box1 หาไม่เจอ 5 ครั้ง → เริ่มใหม่ตั้งแต่ play8 ด้วยไฟล์เดิม (อย่า release_file เก็บไฟล์ไว้)
+            gui_log(serial, "🔁 Restart from play8 — relaunching same file...", step="Restart play8", status="working")
             device.shell("am force-stop jp.konami.pesam")
             time.sleep(1)
 
