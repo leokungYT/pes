@@ -4372,84 +4372,15 @@ def process_device_login(device):
             
             time.sleep(8)
 
-            # 4. Wait for play8 or play8fix — กดซ้ำๆ จนกว่าจะหายไป แล้วค่อยไปหา checkpoint
-            gui_log(serial, "Waiting play8 or play8fix...", step="play8")
-            loop_count = 0
-            clicked_play8 = False
+            # 4 & 5. Wait for checkpointlogin (pressing play8/play8fix along the way)
+            gui_log(serial, "Waiting checkpointlogin (clicking play8)...", step="play8/Check")
             while True:
                 check_device_reset(serial, cycle_start)
                 img = get_screen_capture(device)
                 if img is not None:
-                    # ลองหา play8.bmp ก่อน ถ้าไม่เจอลองหา play8fix.bmp
-                    pts = img_search(img, os.path.join(IMG_DIR, "play8.bmp"))
-                    matched_name = "play8"
-                    if not pts:
-                        pts = img_search(img, os.path.join(IMG_DIR, "play8fix.bmp"))
-                        matched_name = "play8fix"
-                    if pts:
-                        loop_count = 0
-                        # Prioritize fixlg3 if both are present
-                        pts_lg3 = img_search(img, os.path.join(IMG_DIR, "fixlg3.bmp"))
-                        if pts_lg3:
-                            gui_log(serial, f"{matched_name} and fixlg3 found! Clicking fixlg3 first", step="play8")
-                            x, y = pts_lg3[0]
-                            device.shell(f"input swipe {x} {y} {x} {y} 100")
-                            clicked_play8 = True
-                            time.sleep(1.0)
-                            continue
-
-                        x, y = pts[0]
-                        device.shell(f"input swipe {x} {y} {x} {y} 100")
-                        gui_log(serial, f"Found {matched_name}! Clicking until gone...", step="play8")
-                        clicked_play8 = True
-                        time.sleep(0.3)
-                        # กดซ้ำจนกว่า play8/play8fix จะหายไป ครบ 8 วินาทีติดต่อกัน
-                        gone_since = None
-                        while True:
-                            check_device_reset(serial, cycle_start)
-                            img2 = get_screen_capture(device)
-                            if img2 is not None:
-                                pts2 = img_search(img2, os.path.join(IMG_DIR, "play8.bmp"))
-                                if not pts2:
-                                    pts2 = img_search(img2, os.path.join(IMG_DIR, "play8fix.bmp"))
-                                if pts2:
-                                    gone_since = None
-                                    x2, y2 = pts2[0]
-                                    device.shell(f"input swipe {x2} {y2} {x2} {y2} 100")
-                                    gui_log(serial, "play8/play8fix still visible — re-clicking...", step="play8 Retry")
-                                else:
-                                    if gone_since is None:
-                                        gone_since = time.time()
-                                    elif time.time() - gone_since >= 8.0:
-                                        gui_log(serial, "play8/play8fix gone for 8s!", step="play8 Gone")
-                                        break
-                            time.sleep(0.3)
-                        # หลัง play8 หายแล้วครบ 8 วิ → รอหา checkpoint
-                        break
-
-                    # ถ้ากดไปแล้วแต่ play8 หายไปเอง → เช็ค checkpoint เลย
-                    if clicked_play8:
-                        if img_search(img, os.path.join(IMG_DIR, "checkpointlogin.bmp")):
-                            gui_log(serial, "checkpointlogin detected! Entering checkpoint phase.", step="play8")
-                            break
-                        if img_search(img, os.path.join(IMG_DIR, "checkpointgacha.bmp")):
-                            gui_log(serial, "checkpointgacha detected! Entering checkpoint phase.", step="play8")
-                            break
-                        if img_search(img, os.path.join(IMG_DIR, "checkpointcoin.bmp")):
-                            gui_log(serial, "checkpointcoin detected! Entering checkpoint phase.", step="play8")
-                            break
-
-                    # ถ้ายังไม่เจอ play8 และยังไม่เคยกด ก็แค่รอไปเรื่อยๆ ไม่มี timeout
-                time.sleep(0.3)
-
-            # 5. Wait checkpointlogin
-            gui_log(serial, "Waiting checkpointlogin...", step="Checkpoint")
-            while True:
-                check_device_reset(serial, cycle_start)
-                img = get_screen_capture(device)
-                if img is not None:
-                    pts = img_search(img, os.path.join(IMG_DIR, "checkpointlogin.bmp"))
-                    if pts:
+                    # --- 1. เช็ค Checkpoint ก่อน ถ้าเจอคือหลุดลูปไปเฟสต่อไป ---
+                    pts_cp = img_search(img, os.path.join(IMG_DIR, "checkpointlogin.bmp"))
+                    if pts_cp:
                         if LOGIN_FAST:
                             gui_log(serial, "LOGIN_FAST: checkpointlogin found — clearing app and moving to next file.", step="Fast Done", status="working")
                             device.shell("am force-stop jp.konami.pesam")
@@ -4459,11 +4390,44 @@ def process_device_login(device):
                                 save_result(file_path, dest)
                             release_file(original_name)
                             break
-                        x, y = pts[0]
+                        
+                        x, y = pts_cp[0]
                         device.shell(f"input swipe {x} {y} {x} {y} 100")
+                        gui_log(serial, "checkpointlogin found & clicked! Proceeding...", step="Checkpoint")
                         time.sleep(4)
                         break
-                time.sleep(1.5)
+                    
+                    if img_search(img, os.path.join(IMG_DIR, "checkpointgacha.bmp")):
+                        gui_log(serial, "checkpointgacha detected! Entering checkpoint phase.", step="Checkpoint")
+                        break
+                    if img_search(img, os.path.join(IMG_DIR, "checkpointcoin.bmp")):
+                        gui_log(serial, "checkpointcoin detected! Entering checkpoint phase.", step="Checkpoint")
+                        break
+
+                    # --- 2. ถ้ายังไม่เจอ Checkpoint ก็หา play8 / play8fix ---
+                    pts_8 = img_search(img, os.path.join(IMG_DIR, "play8.bmp"))
+                    matched_name = "play8"
+                    if not pts_8:
+                        pts_8 = img_search(img, os.path.join(IMG_DIR, "play8fix.bmp"))
+                        matched_name = "play8fix"
+
+                    if pts_8:
+                        # Prioritize fixlg3
+                        pts_lg3 = img_search(img, os.path.join(IMG_DIR, "fixlg3.bmp"))
+                        if pts_lg3:
+                            gui_log(serial, f"{matched_name} and fixlg3 found! Clicking fixlg3 first", step="play8")
+                            x, y = pts_lg3[0]
+                            device.shell(f"input swipe {x} {y} {x} {y} 100")
+                            time.sleep(1.0)
+                            continue
+
+                        x, y = pts_8[0]
+                        device.shell(f"input swipe {x} {y} {x} {y} 100")
+                        gui_log(serial, f"Found {matched_name}! Clicked.", step="play8")
+                        time.sleep(0.5)
+                        continue
+
+                time.sleep(0.3)
 
             if LOGIN_FAST:
                 continue
