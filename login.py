@@ -2021,40 +2021,18 @@ def is_game_running(device):
 FIXCLEAR_FIRST_SEEN = {}
 
 def trigger_restart_from_play8(device, serial, original_name, reason="stuck"):
-    """เริ่มใหม่ "ตั้งแต่ play8" (เปิดเกมเดิม เก็บ login ไม่ push ซ้ำ) พร้อมนับโควตาต่อไฟล์
-    เกินโควตา (MAX_RESTART_PLAY8) → clear app + ล้าง AUTH + ย้ายไฟล์ชื่อเดิมไป file-error
-    แล้ว raise DeviceResetException ให้ไปหยิบไฟล์ (id) ถัดไป
-    ปกติ → set flag + raise RestartFromPlay8Exception (ฟังก์ชันนี้ 'ไม่ return' เสมอ)."""
+    """เริ่มใหม่ "ตั้งแต่ play8" (เปิดเกมเดิม เก็บ login ไม่ push ซ้ำ)
+    วนซ้ำไปเรื่อยๆ จนกว่าอาการ (fixclear/ค้าง) จะหายไป — ไม่ส่ง file-error/ไม่ยอมแพ้
+    (ฟังก์ชันนี้ 'ไม่ return' เสมอ)."""
     on, cnt = DEVICE_RESTART_PLAY8_COUNT.get(serial, (None, 0))
     cnt = cnt + 1 if on == original_name else 1
     DEVICE_RESTART_PLAY8_COUNT[serial] = (original_name, cnt)
     device.shell("am force-stop jp.konami.pesam")
     time.sleep(1)
 
-    if cnt > MAX_RESTART_PLAY8:
-        # ยอมแพ้ → clear app + ล้าง AUTH + ย้ายไฟล์ชื่อเดิมไป file-error แล้วไปหยิบไฟล์ถัดไป
-        gui_log(serial, f"restart-play8 looped {cnt}x ({reason}) — clearing app & moving to file-error, next id...", step="Restart Fail", status="error")
-        device.shell("su -c 'rm -f /data/data/jp.konami.pesam/files/SaveData/AUTH/online_user_id_data.dat'")
-        device.shell("su -c 'rm -rf /data/data/jp.konami.pesam/files/SaveData/AUTH/*'")
-        DEVICE_RESTART_PLAY8_COUNT.pop(serial, None)
-        DEVICE_RESTART_PLAY8.pop(serial, None)
-        if original_name:
-            fc_src  = os.path.join(INPUT_DIR, original_name)
-            fc_dest = os.path.join(FILE_ERROR_DIR, original_name)
-            if os.path.exists(fc_src):
-                try:
-                    if os.path.exists(fc_dest):
-                        os.remove(fc_dest)
-                    _safe_copy(fc_src, fc_dest)
-                    os.remove(fc_src)
-                    gui_log(serial, f"Moved {original_name} to file-error", step="Restart Fail")
-                except Exception as e:
-                    gui_log(serial, f"Failed to move {original_name} to file-error: {e}", step="Restart Fail")
-        raise DeviceResetException(f"restart-play8 looped ({reason}) — moved to file-error")
-
     if original_name:
         DEVICE_RESTART_PLAY8[serial] = (os.path.join(INPUT_DIR, original_name), original_name)
-    gui_log(serial, f"Restarting from play8 ({cnt}/{MAX_RESTART_PLAY8}, {reason}, keep login, no re-push)...", step="Restart play8", status="working")
+    gui_log(serial, f"Restarting from play8 (attempt {cnt}, {reason}, keep login, no re-push)...", step="Restart play8", status="working")
     raise RestartFromPlay8Exception(f"restart from play8 — {reason}")
 
 def get_screen_capture(device):
@@ -2228,40 +2206,32 @@ def get_screen_capture(device):
                 
                 raise SellScreenException(f"{found_name} detected")
 
-            # เช็คควบคู่กันทั้ง fixclear / fixclear1 ทุกนามสกุล/ตำแหน่ง ทุกรอบ อันไหนเจอก็ทำงาน
-            #   - fixclear1.bmp อยู่ใน img/getquest/
-            #   - fixclear1.png อยู่ใน img/ (root)
-            #   - fixclear.bmp / fixclear.png อยู่ใน img/ (root)
-            fc_bmp  = img_search(img, os.path.join(GETQUEST_IMG_DIR, "fixclear1.bmp"), threshold=0.8)
-            fc_png  = img_search(img, os.path.join(IMG_DIR, "fixclear1.png"), threshold=0.8)
-            fc0_bmp = img_search(img, os.path.join(IMG_DIR, "fixclear.bmp"), threshold=0.8)
-            fc0_png = img_search(img, os.path.join(IMG_DIR, "fixclear.png"), threshold=0.8)
-            if fc_bmp or fc_png or fc0_bmp or fc0_png:
+            # เช็คเฉพาะ fixclear1.png (img/ root) เท่านั้น → ไฟล์เสีย ส่ง file-error
+            fc_png = img_search(img, os.path.join(IMG_DIR, "fixclear1.png"), threshold=0.8)
+            if fc_png:
                 serial_fc = device.serial
                 original_name = DEVICE_FILE_ASSIGNMENTS.get(serial_fc)
 
-                # ── เจอ fixclear/fixclear1 → ปิดแอพแล้วเปิดเข้าใหม่ไฟล์เดิมเฉยๆ ──
-                #    ไม่ส่ง file-error / ไม่ล้าง AUTH / เก็บไฟล์ไว้เสมอ
-                if original_name:
-                    # ผ่านหน้า login (checkpoint) แล้ว = อยู่ช่วง play8→gacha/box → เจอ fixclear
-                    # ให้ "เริ่มใหม่ตั้งแต่ play8" เลย: เปิดเกมเดิม เก็บ login ไว้ ไม่ push ไฟล์ซ้ำ
-                    if DEVICE_PAST_LOGIN.get(serial_fc):
-                        gui_log(serial_fc, "fixclear detected (after login)!", step="Fix Clear Re-enter")
-                        # เริ่มใหม่ตั้งแต่ play8 (เก็บ login) + นับโควตา เกินแล้วเด้งไป file-error เอง
-                        trigger_restart_from_play8(device, serial_fc, original_name, reason="fixclear after login")
-
-                    # ยังไม่ผ่าน login → เข้าใหม่ไฟล์เดิม (push ซ้ำได้ตามเดิม)
-                    gui_log(serial_fc, "fixclear detected! Closing & relaunching (file kept, no file-error)...", step="Fix Clear Re-enter")
-                    device.shell("am force-stop jp.konami.pesam")
-                    time.sleep(1)
-                    DEVICE_REENTER_FILE[serial_fc] = (os.path.join(INPUT_DIR, original_name), original_name)
-                    raise FixClearReenterException("fixclear re-enter")
-
-                # ไม่มีไฟล์ผูกกับเครื่อง → แค่ปิดแอพแล้วเริ่มรอบใหม่ (ไม่ส่ง file-error)
-                gui_log(serial_fc, "fixclear detected (no file) — closing app and restarting cycle...", step="Fix Clear")
+                # ── เจอ fixclear1.png = ไฟล์เสีย → clear app + ล้าง AUTH + ย้ายไป file-error → id ถัดไป ──
+                gui_log(serial_fc, "fixclear1.png detected! Clearing app & moving file to file-error, next id...", step="Fix Clear Fail", status="error")
                 device.shell("am force-stop jp.konami.pesam")
-                time.sleep(1)
-                raise DeviceResetException("fixclear detected")
+                device.shell("su -c 'rm -f /data/data/jp.konami.pesam/files/SaveData/AUTH/online_user_id_data.dat'")
+                device.shell("su -c 'rm -rf /data/data/jp.konami.pesam/files/SaveData/AUTH/*'")
+                DEVICE_RESTART_PLAY8_COUNT.pop(serial_fc, None)
+                DEVICE_RESTART_PLAY8.pop(serial_fc, None)
+                if original_name:
+                    fc_src  = os.path.join(INPUT_DIR, original_name)
+                    fc_dest = os.path.join(FILE_ERROR_DIR, original_name)
+                    if os.path.exists(fc_src):
+                        try:
+                            if os.path.exists(fc_dest):
+                                os.remove(fc_dest)
+                            _safe_copy(fc_src, fc_dest)
+                            os.remove(fc_src)
+                            gui_log(serial_fc, f"Moved {original_name} to file-error", step="Fix Clear Fail")
+                        except Exception as e:
+                            gui_log(serial_fc, f"Failed to move {original_name} to file-error: {e}", step="Fix Clear Fail")
+                raise DeviceResetException("fixclear1.png — moved to file-error")
 
             # sell-id → ทำงานเหมือน fixclear1 (เช็คควบคู่ทั้ง .png + .bmp ทุกรอบ)
             si_png = img_search(img, os.path.join(IMG_DIR, "sell-id.png"), threshold=0.99)
