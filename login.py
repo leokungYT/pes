@@ -4372,8 +4372,8 @@ def process_device_login(device):
             
             time.sleep(8)
 
-            # 4. Wait for play8 or play8fix — คลิกซ้ำจนกว่าจะเข้าถึง Checkpoint
-            gui_log(serial, "Waiting play8 or play8fix (until checkpoint)...", step="play8")
+            # 4. Wait for play8 or play8fix — กดซ้ำๆ จนกว่าจะหายไป แล้วค่อยไปหา checkpoint
+            gui_log(serial, "Waiting play8 or play8fix...", step="play8")
             loop_count = 0
             clicked_play8 = False
             while True:
@@ -4397,15 +4397,30 @@ def process_device_login(device):
                             clicked_play8 = True
                             time.sleep(1.0)
                             continue
-                            
+
                         x, y = pts[0]
                         device.shell(f"input swipe {x} {y} {x} {y} 100")
-                        gui_log(serial, f"Found {matched_name}! Clicked.", step="play8")
+                        gui_log(serial, f"Found {matched_name}! Clicking until gone...", step="play8")
                         clicked_play8 = True
-                        time.sleep(0.5)
-                        continue
+                        time.sleep(0.3)
+                        # กดซ้ำจนกว่า play8/play8fix จะหายไป
+                        while True:
+                            check_device_reset(serial, cycle_start)
+                            img2 = get_screen_capture(device)
+                            if img2 is not None:
+                                pts2 = img_search(img2, os.path.join(IMG_DIR, "play8.bmp"))
+                                if not pts2:
+                                    pts2 = img_search(img2, os.path.join(IMG_DIR, "play8fix.bmp"))
+                                if not pts2:
+                                    gui_log(serial, "play8/play8fix gone!", step="play8 Gone")
+                                    break
+                                x2, y2 = pts2[0]
+                                device.shell(f"input swipe {x2} {y2} {x2} {y2} 100")
+                            time.sleep(0.3)
+                        # หลัง play8 หายแล้ว → รอหา checkpoint
+                        break
 
-                    # เช็คว่าเข้าถึงหน้าหลักหรือหน้าล็อคอินโบนัสหรือยัง (เช็คหลังจากคลิก play8/play8fix ไปแล้วอย่างน้อย 1 ครั้ง เพื่อป้องกัน false positive จอแรก)
+                    # ถ้ากดไปแล้วแต่ play8 หายไปเอง → เช็ค checkpoint เลย
                     if clicked_play8:
                         if img_search(img, os.path.join(IMG_DIR, "checkpointlogin.bmp")):
                             gui_log(serial, "checkpointlogin detected! Entering checkpoint phase.", step="play8")
@@ -4417,12 +4432,7 @@ def process_device_login(device):
                             gui_log(serial, "checkpointcoin detected! Entering checkpoint phase.", step="play8")
                             break
 
-                    loop_count += 1
-                    if loop_count >= 50:  # ~15 วินาที (50 * 0.3s)
-                        gui_log(serial, "play8 not matched yet, attempting fallback center click...", step="play8")
-                        device.shell("input swipe 480 270 480 270 100")
-                        clicked_play8 = True
-                        loop_count = 0
+                    # ถ้ายังไม่เจอ play8 และยังไม่เคยกด ก็แค่รอไปเรื่อยๆ ไม่มี timeout
                 time.sleep(0.3)
 
             # 5. Wait checkpointlogin
