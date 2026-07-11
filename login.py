@@ -2209,9 +2209,34 @@ def get_screen_capture(device):
                     # ผ่านหน้า login (checkpoint) แล้ว = อยู่ช่วง play8→gacha/box → เจอ fixclear
                     # ให้ "เริ่มใหม่ตั้งแต่ play8" เลย: เปิดเกมเดิม เก็บ login ไว้ ไม่ push ไฟล์ซ้ำ
                     if DEVICE_PAST_LOGIN.get(serial_fc):
-                        gui_log(serial_fc, "fixclear detected (after login)! Restarting from play8 (keep login, no re-push)...", step="Fix Clear Re-enter")
+                        # นับ fixclear-after-login ต่อไฟล์ → ถ้าวนซ้ำเกินโควตา = ไฟล์นี้ค้าง fixclear ไม่จบ
+                        on, cnt = DEVICE_RESTART_PLAY8_COUNT.get(serial_fc, (None, 0))
+                        cnt = cnt + 1 if on == original_name else 1
+                        DEVICE_RESTART_PLAY8_COUNT[serial_fc] = (original_name, cnt)
                         device.shell("am force-stop jp.konami.pesam")
                         time.sleep(1)
+
+                        if cnt > MAX_RESTART_PLAY8:
+                            # ยอมแพ้ → clear app + ล้าง AUTH + ย้ายไฟล์ชื่อเดิมไป file-error แล้วไปหยิบไฟล์ (id) ถัดไป
+                            gui_log(serial_fc, f"fixclear looped {cnt}x after login — clearing app & moving to file-error, next id...", step="Fix Clear Fail")
+                            device.shell("su -c 'rm -f /data/data/jp.konami.pesam/files/SaveData/AUTH/online_user_id_data.dat'")
+                            device.shell("su -c 'rm -rf /data/data/jp.konami.pesam/files/SaveData/AUTH/*'")
+                            DEVICE_RESTART_PLAY8_COUNT.pop(serial_fc, None)
+                            DEVICE_RESTART_PLAY8.pop(serial_fc, None)
+                            fc_src  = os.path.join(INPUT_DIR, original_name)
+                            fc_dest = os.path.join(FILE_ERROR_DIR, original_name)
+                            if os.path.exists(fc_src):
+                                try:
+                                    if os.path.exists(fc_dest):
+                                        os.remove(fc_dest)
+                                    _safe_copy(fc_src, fc_dest)
+                                    os.remove(fc_src)
+                                    gui_log(serial_fc, f"Moved {original_name} to file-error", step="Fix Clear Fail")
+                                except Exception as e:
+                                    gui_log(serial_fc, f"Failed to move {original_name} to file-error: {e}", step="Fix Clear Fail")
+                            raise DeviceResetException("fixclear looped after login — moved to file-error")
+
+                        gui_log(serial_fc, f"fixclear detected (after login)! Restarting from play8 ({cnt}/{MAX_RESTART_PLAY8}, keep login, no re-push)...", step="Fix Clear Re-enter")
                         DEVICE_RESTART_PLAY8[serial_fc] = (os.path.join(INPUT_DIR, original_name), original_name)
                         raise RestartFromPlay8Exception("fixclear after login — restart from play8")
 
@@ -4319,38 +4344,13 @@ def process_device_login(device):
             restart_p8 = DEVICE_RESTART_PLAY8.pop(serial, None)
             if restart_p8:
                 file_path, original_name = restart_p8
-
-                # นับจำนวนครั้งที่ restart-play8 ต่อไฟล์ → เกินโควตา = ไฟล์นี้วนไม่จบ (fixclear ซ้ำ/box1 หาย)
-                on, cnt = DEVICE_RESTART_PLAY8_COUNT.get(serial, (None, 0))
-                cnt = cnt + 1 if on == original_name else 1
-                DEVICE_RESTART_PLAY8_COUNT[serial] = (original_name, cnt)
-
-                if cnt > MAX_RESTART_PLAY8:
-                    # ยอมแพ้ → ปิดแอพ ล้าง AUTH ย้ายไฟล์ไป file-error แล้วไปหยิบไฟล์ใหม่
-                    gui_log(serial, f"Restart from play8 exceeded {MAX_RESTART_PLAY8}x — moving to file-error & picking new file...",
-                            step="Restart Fail", status="error")
-                    device.shell("am force-stop jp.konami.pesam")
-                    device.shell("su -c 'rm -f /data/data/jp.konami.pesam/files/SaveData/AUTH/online_user_id_data.dat'")
-                    device.shell("su -c 'rm -rf /data/data/jp.konami.pesam/files/SaveData/AUTH/*'")
-                    DEVICE_RESTART_PLAY8_COUNT.pop(serial, None)
-                    release_file(original_name)
-                    try:
-                        src_file = os.path.join(INPUT_DIR, original_name)
-                        if os.path.exists(src_file):
-                            save_result(src_file, os.path.join(FILE_ERROR_DIR, original_name))
-                            gui_log(serial, f"Moved {original_name} to file-error", step="File Error")
-                    except Exception as e:
-                        gui_log(serial, f"Failed to move {original_name} to file-error: {e}", step="File Error")
-                    time.sleep(1)
-                    continue
-
                 DEVICE_FILE_ASSIGNMENTS[serial] = original_name
                 cycle_start = time.time()
                 DEVICE_PAST_LOGIN[serial] = True   # ผ่าน login แล้ว (ถ้าเจอ fixclear อีกก็ยัง restart-play8 ไม่ login ใหม่)
-                gui_log(serial, f"Restart from play8 ({cnt}/{MAX_RESTART_PLAY8}, same file, keep login, no re-push): {original_name}",
+                gui_log(serial, f"Restart from play8 (same file, keep login, no re-push): {original_name}",
                         step="Restart play8", status="working")
             else:
-                DEVICE_RESTART_PLAY8_COUNT.pop(serial, None)   # ไฟล์ใหม่/เข้าใหม่ → รีเซ็ตตัวนับ restart-play8
+                DEVICE_RESTART_PLAY8_COUNT.pop(serial, None)   # ไฟล์ใหม่/เข้าใหม่ → รีเซ็ตตัวนับ fixclear-after-login
                 # 0.5 ลบ save data เดิมออกก่อนเริ่มวนไฟล์ใหม่ (กันข้อมูล id เก่าค้าง)
                 device.shell("su -c 'rm -f /data/data/jp.konami.pesam/files/SaveData/AUTH/online_user_id_data.dat'")
                 time.sleep(0.3)
