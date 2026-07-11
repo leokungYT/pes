@@ -182,6 +182,8 @@ DEVICE_REENTER_FILE  = {}     # serial -> (file_path, original_name) ไฟล�
 DEVICE_REENTER_COUNT = {}     # serial -> (original_name, count) นับจำนวนครั้งที่ re-enter
 FIXCLEAR_MAX_REENTER = 1      # เจอ fixclear → เข้าใหม่ได้กี่ครั้งก่อนยอมแพ้ส่ง file-error (1 = เข้าใหม่ 1 ครั้ง เจออีกค่อยส่ง)
 DEVICE_RESTART_PLAY8 = {}     # serial -> (file_path, original_name) เริ่มใหม่ "ตั้งแต่ play8" (เปิดเกมเดิม ไม่ล้าง AUTH ไม่ push ซ้ำ = เก็บ login เดิมไว้)
+DEVICE_RESTART_PLAY8_COUNT = {}  # serial -> (original_name, count) นับจำนวนครั้งที่ restart-play8 ต่อไฟล์ (กันวนไม่จบ)
+MAX_RESTART_PLAY8 = 2         # restart-play8 ได้ไม่เกินกี่ครั้งต่อไฟล์ ก่อนยอมแพ้ → ส่ง file-error แล้วหยิบไฟล์ใหม่
 DEVICE_PAST_LOGIN    = {}     # serial -> bool ผ่านหน้า login (checkpoint) แล้วหรือยัง → ใช้ตัดสิน fixclear ว่าจะ restart-play8 หรือ re-enter (push ใหม่)
 
 # ── Performance ───────────────────────────────────────────────────────────────
@@ -4317,12 +4319,38 @@ def process_device_login(device):
             restart_p8 = DEVICE_RESTART_PLAY8.pop(serial, None)
             if restart_p8:
                 file_path, original_name = restart_p8
+
+                # นับจำนวนครั้งที่ restart-play8 ต่อไฟล์ → เกินโควตา = ไฟล์นี้วนไม่จบ (fixclear ซ้ำ/box1 หาย)
+                on, cnt = DEVICE_RESTART_PLAY8_COUNT.get(serial, (None, 0))
+                cnt = cnt + 1 if on == original_name else 1
+                DEVICE_RESTART_PLAY8_COUNT[serial] = (original_name, cnt)
+
+                if cnt > MAX_RESTART_PLAY8:
+                    # ยอมแพ้ → ปิดแอพ ล้าง AUTH ย้ายไฟล์ไป file-error แล้วไปหยิบไฟล์ใหม่
+                    gui_log(serial, f"Restart from play8 exceeded {MAX_RESTART_PLAY8}x — moving to file-error & picking new file...",
+                            step="Restart Fail", status="error")
+                    device.shell("am force-stop jp.konami.pesam")
+                    device.shell("su -c 'rm -f /data/data/jp.konami.pesam/files/SaveData/AUTH/online_user_id_data.dat'")
+                    device.shell("su -c 'rm -rf /data/data/jp.konami.pesam/files/SaveData/AUTH/*'")
+                    DEVICE_RESTART_PLAY8_COUNT.pop(serial, None)
+                    release_file(original_name)
+                    try:
+                        src_file = os.path.join(INPUT_DIR, original_name)
+                        if os.path.exists(src_file):
+                            save_result(src_file, os.path.join(FILE_ERROR_DIR, original_name))
+                            gui_log(serial, f"Moved {original_name} to file-error", step="File Error")
+                    except Exception as e:
+                        gui_log(serial, f"Failed to move {original_name} to file-error: {e}", step="File Error")
+                    time.sleep(1)
+                    continue
+
                 DEVICE_FILE_ASSIGNMENTS[serial] = original_name
                 cycle_start = time.time()
                 DEVICE_PAST_LOGIN[serial] = True   # ผ่าน login แล้ว (ถ้าเจอ fixclear อีกก็ยัง restart-play8 ไม่ login ใหม่)
-                gui_log(serial, f"Restart from play8 (same file, keep login, no re-push): {original_name}",
+                gui_log(serial, f"Restart from play8 ({cnt}/{MAX_RESTART_PLAY8}, same file, keep login, no re-push): {original_name}",
                         step="Restart play8", status="working")
             else:
+                DEVICE_RESTART_PLAY8_COUNT.pop(serial, None)   # ไฟล์ใหม่/เข้าใหม่ → รีเซ็ตตัวนับ restart-play8
                 # 0.5 ลบ save data เดิมออกก่อนเริ่มวนไฟล์ใหม่ (กันข้อมูล id เก่าค้าง)
                 device.shell("su -c 'rm -f /data/data/jp.konami.pesam/files/SaveData/AUTH/online_user_id_data.dat'")
                 time.sleep(0.3)
@@ -5296,7 +5324,7 @@ def process_device_login(device):
                 gui_log(serial, "Box sequence started...", step="Box Mode", status="working")
                 box2_found = False
                 box1_retry = 0          # นับจำนวนครั้งที่หา box1 ไม่เจอ
-                MAX_BOX1_RETRY = 5      # เกิน 5 ครั้ง → เริ่มใหม่ตั้งแต่ play8 (relaunch ไฟล์เดิม)
+                MAX_BOX1_RETRY = 3      # เกิน 3 ครั้ง → เริ่มใหม่ตั้งแต่ play8 (relaunch ไฟล์เดิม)
                 while not box2_found:
                     check_device_reset(serial, cycle_start)
 
