@@ -2465,7 +2465,8 @@ def get_screen_capture(device):
                         else:
                             break
 
-                    raise ResetGachaException("fixgachanew sequence finished")
+                    # เคลียร์ป็อปอัพเสร็จ → ทำงานต่อจากเดิมเฉยๆ (ไม่ raise/ไม่จบการทำงาน)
+                    # การทำงานจะจบก็ต่อเมื่อไปเจอเงื่อนไขจริงๆ (outloop/nocoin/checkpoint) เท่านั้น
 
             img = fast_screencap(device)
 
@@ -4407,13 +4408,15 @@ def process_device_login(device):
             time.sleep(8)
 
             # 4 & 5. Wait for checkpointlogin (pressing play8/play8fix along the way)
+            #    *** ไม่ยอมแพ้: ลูปนี้ออกได้ทางเดียวคือเจอ checkpointlogin เท่านั้น ***
+            #    (กด play8 / fallback ไปเรื่อยๆ จนกว่าจะเจอ แล้วค่อยไปขั้นตอนกด Back รัวๆ)
             gui_log(serial, "Waiting checkpointlogin (clicking play8)...", step="play8/Check")
             play8_miss = 0   # นับรอบที่ play8 หาย + ยังไม่เจอ checkpoint (ไว้ทำ fallback กันค้าง)
             while True:
                 check_device_reset(serial, cycle_start)
                 img = get_screen_capture(device)
                 if img is not None:
-                    # --- 1. เช็ค Checkpoint ก่อน ถ้าเจอคือหลุดลูปไปเฟสต่อไป ---
+                    # --- 1. เช็ค checkpointlogin — เจอเท่านั้นถึงจะหลุดลูปไปเฟสต่อไป ---
                     pts_cp = img_search(img, os.path.join(IMG_DIR, "checkpointlogin.bmp"))
                     if pts_cp:
                         if LOGIN_FAST:
@@ -4425,18 +4428,11 @@ def process_device_login(device):
                                 save_result(file_path, dest)
                             release_file(original_name)
                             break
-                        
+
                         x, y = pts_cp[0]
                         device.shell(f"input swipe {x} {y} {x} {y} 100")
                         gui_log(serial, "checkpointlogin found & clicked! Proceeding...", step="Checkpoint")
                         time.sleep(4)
-                        break
-                    
-                    if img_search(img, os.path.join(IMG_DIR, "checkpointgacha.bmp")):
-                        gui_log(serial, "checkpointgacha detected! Entering checkpoint phase.", step="Checkpoint")
-                        break
-                    if img_search(img, os.path.join(IMG_DIR, "checkpointcoin.bmp")):
-                        gui_log(serial, "checkpointcoin detected! Entering checkpoint phase.", step="Checkpoint")
                         break
 
                     # --- 2. ถ้ายังไม่เจอ Checkpoint ก็หา play8 / play8fix ---
@@ -5688,8 +5684,8 @@ def process_device_login(device):
                                                 found_g4 = True
                                                 continue
                                             else:
-                                                gui_log(serial, "checkpoint-gacha4.bmp not found in 8s! Resetting gacha sequence...", step="G4-Failed")
-                                                # รอหา fixgachanew2.bmp สูงสุด 5 วิ เจอแล้วกดซ้ำจนหายก่อนค่อย reset
+                                                gui_log(serial, "checkpoint-gacha4.bmp not found in 8s! Proceeding to Gacha5...", step="G4-Failed")
+                                                # รอหา fixgachanew2.bmp สูงสุด 5 วิ เจอแล้วกดซ้ำจนหายก่อนไปต่อ
                                                 fg2_deadline = time.time() + 5
                                                 while time.time() < fg2_deadline:
                                                     img_fg2 = fast_screencap(device)
@@ -5701,7 +5697,10 @@ def process_device_login(device):
                                                         time.sleep(1.5)
                                                         continue
                                                     break
-                                                raise ResetGachaException("checkpoint-gacha4 not found")
+                                                # ไปต่อ Gacha5 เลย (ไม่ reset กลับ new-gacha1) — ถ้า gacha5 ค้าง 8 วิ
+                                                # watchdog ใน G5 จะสั่ง restart ตั้งแต่ play8 ให้เอง
+                                                found_g4 = True
+                                                break
                                         if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
                                             found_g4 = "nocoin"
                                             break
@@ -5722,8 +5721,13 @@ def process_device_login(device):
                                 time.sleep(10)
 
                                 # 3. Wait/Click gacha5.bmp
+                                g5_wait_start = time.time()   # กันค้าง: ถ้าไม่เจอ gacha5/checkpoint/outloop เกิน 8 วิ → เริ่มใหม่ตั้งแต่ play8
                                 while True:
                                     check_device_reset(serial, cycle_start)
+                                    # ── watchdog: ค้างในลูปรอ gacha5 เกิน 8 วิ → restart ตั้งแต่ play8 ──
+                                    if time.time() - g5_wait_start > 8:
+                                        gui_log(serial, "gacha5 not found within 8s — restarting from play8...", step="G5-Stuck", status="stuck")
+                                        trigger_restart_from_play8(device, serial, original_name, reason="gacha5 stuck 8s")
                                     img = get_screen_capture(device)
                                     if img is not None:
                                         img, _ = check_and_click_fixback(device, img, serial, check_g1=False)
@@ -5868,8 +5872,8 @@ def process_device_login(device):
                                             deadline_g4 = time.time() + 10
                                             continue
                                         else:
-                                            gui_log(serial, "checkpoint-gacha4.bmp not found in 8s! Resetting gacha sequence...", step="G4-Failed")
-                                            # รอหา fixgachanew2.bmp สูงสุด 5 วิ เจอแล้วกดซ้ำจนหายก่อนค่อย reset
+                                            gui_log(serial, "checkpoint-gacha4.bmp not found in 8s! Proceeding to Gacha5...", step="G4-Failed")
+                                            # รอหา fixgachanew2.bmp สูงสุด 5 วิ เจอแล้วกดซ้ำจนหายก่อนไปต่อ
                                             fg2_deadline = time.time() + 5
                                             while time.time() < fg2_deadline:
                                                 img_fg2 = fast_screencap(device)
@@ -5881,7 +5885,10 @@ def process_device_login(device):
                                                     time.sleep(1.5)
                                                     continue
                                                 break
-                                            raise ResetGachaException("checkpoint-gacha4 not found")
+                                            # ไปต่อ Gacha5 เลย (ไม่ reset กลับ new-gacha1) — ถ้า gacha5 ค้าง 8 วิ
+                                            # watchdog ใน G5 จะสั่ง restart ตั้งแต่ play8 ให้เอง
+                                            found_g4 = True
+                                            break
                                     # เช็ค nocions ระหว่างรอ
                                     if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
                                         found_g4 = "nocoin"
