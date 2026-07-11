@@ -5751,11 +5751,25 @@ def process_device_login(device):
                                                         break
                                                 time.sleep(0.5)
 
-                                            # แล้วค่อยกด loopgacha1
+                                            # แล้วค่อยกด loopgacha1 ซ้ำๆ จนกว่าจะหายไป
                                             device.shell(f"input swipe {x} {y} {x} {y} 100")
-                                            gui_log(serial, f"loopgacha1.bmp found! Clicking ({x},{y})...", step="LoopGacha1")
-                                            print(f"[{serial}] Clicking loopgacha1.bmp at ({x},{y})...")
-                                            time.sleep(0.8)
+                                            gui_log(serial, f"loopgacha1.bmp found! Clicking ({x},{y}) until gone...", step="LoopGacha1")
+                                            print(f"[{serial}] Clicking loopgacha1.bmp at ({x},{y}) until gone...")
+                                            time.sleep(0.3)
+                                            # กดซ้ำจนกว่า loopgacha1 จะหายไป
+                                            retry_end = time.time() + 10
+                                            while time.time() < retry_end:
+                                                check_device_reset(serial, cycle_start)
+                                                img_lp = get_screen_capture(device)
+                                                if img_lp is not None:
+                                                    pts_lp = img_search(img_lp, os.path.join(IMG_DIR, "loopgacha1.bmp"))
+                                                    if not pts_lp:
+                                                        gui_log(serial, "loopgacha1.bmp gone!", step="LoopGacha1 Gone")
+                                                        break
+                                                    x_lp, y_lp = pts_lp[0]
+                                                    device.shell(f"input swipe {x_lp} {y_lp} {x_lp} {y_lp} 100")
+                                                    gui_log(serial, "loopgacha1 still visible — re-clicking...", step="LoopGacha1 Retry")
+                                                time.sleep(0.3)
                                             action_taken = "loop"
                                             continue
                                         else:
