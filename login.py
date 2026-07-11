@@ -2020,6 +2020,43 @@ def is_game_running(device):
 
 FIXCLEAR_FIRST_SEEN = {}
 
+def trigger_restart_from_play8(device, serial, original_name, reason="stuck"):
+    """เริ่มใหม่ "ตั้งแต่ play8" (เปิดเกมเดิม เก็บ login ไม่ push ซ้ำ) พร้อมนับโควตาต่อไฟล์
+    เกินโควตา (MAX_RESTART_PLAY8) → clear app + ล้าง AUTH + ย้ายไฟล์ชื่อเดิมไป file-error
+    แล้ว raise DeviceResetException ให้ไปหยิบไฟล์ (id) ถัดไป
+    ปกติ → set flag + raise RestartFromPlay8Exception (ฟังก์ชันนี้ 'ไม่ return' เสมอ)."""
+    on, cnt = DEVICE_RESTART_PLAY8_COUNT.get(serial, (None, 0))
+    cnt = cnt + 1 if on == original_name else 1
+    DEVICE_RESTART_PLAY8_COUNT[serial] = (original_name, cnt)
+    device.shell("am force-stop jp.konami.pesam")
+    time.sleep(1)
+
+    if cnt > MAX_RESTART_PLAY8:
+        # ยอมแพ้ → clear app + ล้าง AUTH + ย้ายไฟล์ชื่อเดิมไป file-error แล้วไปหยิบไฟล์ถัดไป
+        gui_log(serial, f"restart-play8 looped {cnt}x ({reason}) — clearing app & moving to file-error, next id...", step="Restart Fail", status="error")
+        device.shell("su -c 'rm -f /data/data/jp.konami.pesam/files/SaveData/AUTH/online_user_id_data.dat'")
+        device.shell("su -c 'rm -rf /data/data/jp.konami.pesam/files/SaveData/AUTH/*'")
+        DEVICE_RESTART_PLAY8_COUNT.pop(serial, None)
+        DEVICE_RESTART_PLAY8.pop(serial, None)
+        if original_name:
+            fc_src  = os.path.join(INPUT_DIR, original_name)
+            fc_dest = os.path.join(FILE_ERROR_DIR, original_name)
+            if os.path.exists(fc_src):
+                try:
+                    if os.path.exists(fc_dest):
+                        os.remove(fc_dest)
+                    _safe_copy(fc_src, fc_dest)
+                    os.remove(fc_src)
+                    gui_log(serial, f"Moved {original_name} to file-error", step="Restart Fail")
+                except Exception as e:
+                    gui_log(serial, f"Failed to move {original_name} to file-error: {e}", step="Restart Fail")
+        raise DeviceResetException(f"restart-play8 looped ({reason}) — moved to file-error")
+
+    if original_name:
+        DEVICE_RESTART_PLAY8[serial] = (os.path.join(INPUT_DIR, original_name), original_name)
+    gui_log(serial, f"Restarting from play8 ({cnt}/{MAX_RESTART_PLAY8}, {reason}, keep login, no re-push)...", step="Restart play8", status="working")
+    raise RestartFromPlay8Exception(f"restart from play8 — {reason}")
+
 def get_screen_capture(device):
     try:
         # เช็คเกมออนอยู่หรือไม่ (ทุก 30 วิ)
@@ -2209,36 +2246,9 @@ def get_screen_capture(device):
                     # ผ่านหน้า login (checkpoint) แล้ว = อยู่ช่วง play8→gacha/box → เจอ fixclear
                     # ให้ "เริ่มใหม่ตั้งแต่ play8" เลย: เปิดเกมเดิม เก็บ login ไว้ ไม่ push ไฟล์ซ้ำ
                     if DEVICE_PAST_LOGIN.get(serial_fc):
-                        # นับ fixclear-after-login ต่อไฟล์ → ถ้าวนซ้ำเกินโควตา = ไฟล์นี้ค้าง fixclear ไม่จบ
-                        on, cnt = DEVICE_RESTART_PLAY8_COUNT.get(serial_fc, (None, 0))
-                        cnt = cnt + 1 if on == original_name else 1
-                        DEVICE_RESTART_PLAY8_COUNT[serial_fc] = (original_name, cnt)
-                        device.shell("am force-stop jp.konami.pesam")
-                        time.sleep(1)
-
-                        if cnt > MAX_RESTART_PLAY8:
-                            # ยอมแพ้ → clear app + ล้าง AUTH + ย้ายไฟล์ชื่อเดิมไป file-error แล้วไปหยิบไฟล์ (id) ถัดไป
-                            gui_log(serial_fc, f"fixclear looped {cnt}x after login — clearing app & moving to file-error, next id...", step="Fix Clear Fail")
-                            device.shell("su -c 'rm -f /data/data/jp.konami.pesam/files/SaveData/AUTH/online_user_id_data.dat'")
-                            device.shell("su -c 'rm -rf /data/data/jp.konami.pesam/files/SaveData/AUTH/*'")
-                            DEVICE_RESTART_PLAY8_COUNT.pop(serial_fc, None)
-                            DEVICE_RESTART_PLAY8.pop(serial_fc, None)
-                            fc_src  = os.path.join(INPUT_DIR, original_name)
-                            fc_dest = os.path.join(FILE_ERROR_DIR, original_name)
-                            if os.path.exists(fc_src):
-                                try:
-                                    if os.path.exists(fc_dest):
-                                        os.remove(fc_dest)
-                                    _safe_copy(fc_src, fc_dest)
-                                    os.remove(fc_src)
-                                    gui_log(serial_fc, f"Moved {original_name} to file-error", step="Fix Clear Fail")
-                                except Exception as e:
-                                    gui_log(serial_fc, f"Failed to move {original_name} to file-error: {e}", step="Fix Clear Fail")
-                            raise DeviceResetException("fixclear looped after login — moved to file-error")
-
-                        gui_log(serial_fc, f"fixclear detected (after login)! Restarting from play8 ({cnt}/{MAX_RESTART_PLAY8}, keep login, no re-push)...", step="Fix Clear Re-enter")
-                        DEVICE_RESTART_PLAY8[serial_fc] = (os.path.join(INPUT_DIR, original_name), original_name)
-                        raise RestartFromPlay8Exception("fixclear after login — restart from play8")
+                        gui_log(serial_fc, "fixclear detected (after login)!", step="Fix Clear Re-enter")
+                        # เริ่มใหม่ตั้งแต่ play8 (เก็บ login) + นับโควตา เกินแล้วเด้งไป file-error เอง
+                        trigger_restart_from_play8(device, serial_fc, original_name, reason="fixclear after login")
 
                     # ยังไม่ผ่าน login → เข้าใหม่ไฟล์เดิม (push ซ้ำได้ตามเดิม)
                     gui_log(serial_fc, "fixclear detected! Closing & relaunching (file kept, no file-error)...", step="Fix Clear Re-enter")
@@ -5943,8 +5953,13 @@ def process_device_login(device):
                                 # ถ้าผ่าน nocions มาได้ (ไม่เจอ) หรือเจอ gacha4 ไปแล้ว -> ไป gacha5 ต่อ
                                 gui_log(serial, "Proceeding to Gacha5...", step="G5-Flow")
                                 time.sleep(10) # 10s delay requested by user
+                                g5_wait_start = time.time()   # กันค้าง: ถ้าไม่เจอ gacha5/checkpoint/outloop เกิน 8 วิ → เริ่มใหม่ตั้งแต่ play8
                                 while True:
                                     check_device_reset(serial, cycle_start)
+                                    # ── watchdog: ค้างในลูปรอ gacha5 เกิน 8 วิ → restart ตั้งแต่ play8 ──
+                                    if time.time() - g5_wait_start > 8:
+                                        gui_log(serial, "gacha5 not found within 8s — restarting from play8...", step="G5-Stuck", status="stuck")
+                                        trigger_restart_from_play8(device, serial, original_name, reason="gacha5 stuck 8s")
                                     img = get_screen_capture(device)
                                     if img is not None:
                                         img, _ = check_and_click_fixback(device, img, serial, check_g1=False)
