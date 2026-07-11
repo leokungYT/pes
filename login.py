@@ -4403,7 +4403,8 @@ def process_device_login(device):
                         gui_log(serial, f"Found {matched_name}! Clicking until gone...", step="play8")
                         clicked_play8 = True
                         time.sleep(0.3)
-                        # กดซ้ำจนกว่า play8/play8fix จะหายไป
+                        # กดซ้ำจนกว่า play8/play8fix จะหายไป ครบ 8 วินาทีติดต่อกัน
+                        gone_since = None
                         while True:
                             check_device_reset(serial, cycle_start)
                             img2 = get_screen_capture(device)
@@ -4411,13 +4412,19 @@ def process_device_login(device):
                                 pts2 = img_search(img2, os.path.join(IMG_DIR, "play8.bmp"))
                                 if not pts2:
                                     pts2 = img_search(img2, os.path.join(IMG_DIR, "play8fix.bmp"))
-                                if not pts2:
-                                    gui_log(serial, "play8/play8fix gone!", step="play8 Gone")
-                                    break
-                                x2, y2 = pts2[0]
-                                device.shell(f"input swipe {x2} {y2} {x2} {y2} 100")
+                                if pts2:
+                                    gone_since = None
+                                    x2, y2 = pts2[0]
+                                    device.shell(f"input swipe {x2} {y2} {x2} {y2} 100")
+                                    gui_log(serial, "play8/play8fix still visible — re-clicking...", step="play8 Retry")
+                                else:
+                                    if gone_since is None:
+                                        gone_since = time.time()
+                                    elif time.time() - gone_since >= 8.0:
+                                        gui_log(serial, "play8/play8fix gone for 8s!", step="play8 Gone")
+                                        break
                             time.sleep(0.3)
-                        # หลัง play8 หายแล้ว → รอหา checkpoint
+                        # หลัง play8 หายแล้วครบ 8 วิ → รอหา checkpoint
                         break
 
                     # ถ้ากดไปแล้วแต่ play8 หายไปเอง → เช็ค checkpoint เลย
