@@ -26,7 +26,7 @@ NEW_GACHA = 1
 # ── Custom Gacha Loop Mode ──────────────────────────
 # 1 = เปิดโหมด Custom Gacha (loopgacha1 -> gacha4 -> gacha5 -> loop จนเจอ outloop)
 # 0 = ปิดโหมด
-CUSTOM_GACHA = 1
+CUSTOM_GACHA = 0
 
 # ── Gacha + Check Mode ──────────────────────────────
 # 1 = สุ่มกาชาเสร็จแล้วกด backhome ต่อด้วยค้นหาฮีโร่ทันที
@@ -138,7 +138,7 @@ DEBUG_OCR = 0
 # 1 = โชว์ log ลงหน้าต่าง cmd (ไว้ดูตอน debug)
 # 0 = ไม่ print ลง cmd เลย (รันจริง — กัน cmd ค้างจาก console + เบาเครื่อง)
 #     *** log ยังถูกเซฟลงไฟล์ในโฟลเดอร์ logs/ ครบทุกกรณี ***
-DEBUG_CONSOLE = 1
+DEBUG_CONSOLE = 0
 
 # ── Check Coin Sequence ───────────────────────────
 # 1 = ทำงานสแกนเหรียญ (หา checkpointcoin.bmp → OCR สแกนหาเลขเหรียญที่ Region(52, 10, 106, 41) → บันทึกลง check-coin)
@@ -215,7 +215,7 @@ GETQUEST_IMG_DIR = "img/getquest"
 # ── Move login-success → input-id (ตั้งเวลา) ────────
 # 1 = ย้ายไฟล์ทั้งหมดจาก login-success → input-id อัตโนมัติทุกวันตามเวลา MOVE_LS_TIME
 # 0 = ปิด (ย้ายเองด้วยปุ่มในหน้า config ได้ตลอด)
-MOVE_LS_ENABLE = 1
+MOVE_LS_ENABLE = 0
 # เวลาที่จะย้ายอัตโนมัติ (รูปแบบ HH:MM 24 ชั่วโมง เช่น "09:00")
 MOVE_LS_TIME = "09:00"
 
