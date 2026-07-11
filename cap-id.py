@@ -369,12 +369,14 @@ def wait_play8(device, serial, cycle_start):
 
 
 def wait_checkpointlogin(device, serial, cycle_start):
-    """รอ checkpointlogin → กด แล้วไปต่อ (พอร์ตจาก login.py สาขา non-fast)"""
-    gui_log(serial, "Waiting checkpointlogin...", step="Checkpoint")
+    """รอ checkpointlogin → กด แล้วไปต่อ
+    (กด play8/play8fix ซ้ำๆ ระหว่างรอด้วย จนกว่าจะเจอ checkpointlogin — พอร์ตจาก login.py)"""
+    gui_log(serial, "Waiting checkpointlogin (clicking play8)...", step="Checkpoint")
     while True:
         check_device_reset(serial, cycle_start)
         img = get_screen_capture(device)
         if img is not None:
+            # --- 1. เจอ checkpointlogin ก่อน → กดแล้วไปต่อ ---
             pts = img_search(img, os.path.join(IMG_DIR, "checkpointlogin.bmp"))
             if pts:
                 x, y = pts[0]
@@ -382,7 +384,28 @@ def wait_checkpointlogin(device, serial, cycle_start):
                 gui_log(serial, "checkpointlogin found & clicked!", step="Login OK", status="working")
                 time.sleep(4)
                 return
-        time.sleep(1.5)
+
+            # --- 2. ยังไม่เจอ checkpointlogin → ถ้ายังมี play8/play8fix ให้กดซ้ำ ---
+            pts_8 = img_search(img, os.path.join(IMG_DIR, "play8.bmp"))
+            matched = "play8"
+            if not pts_8:
+                pts_8 = img_search(img, os.path.join(IMG_DIR, "play8fix.bmp"))
+                matched = "play8fix"
+            if pts_8:
+                # มี fixlg3 ให้กดก่อน
+                pts_lg3 = img_search(img, os.path.join(IMG_DIR, "fixlg3.bmp"))
+                if pts_lg3:
+                    x, y = pts_lg3[0]
+                    gui_log(serial, f"{matched} & fixlg3 found! Clicking fixlg3 first", step="Checkpoint")
+                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                    time.sleep(1.0)
+                    continue
+                x, y = pts_8[0]
+                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                gui_log(serial, f"Found {matched}! Clicked (waiting checkpointlogin).", step="Checkpoint")
+                time.sleep(0.5)
+                continue
+        time.sleep(0.3)
 
 
 # ═══════════════════════════════════════════════════════════════════════════

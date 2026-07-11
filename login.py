@@ -4374,6 +4374,7 @@ def process_device_login(device):
 
             # 4 & 5. Wait for checkpointlogin (pressing play8/play8fix along the way)
             gui_log(serial, "Waiting checkpointlogin (clicking play8)...", step="play8/Check")
+            play8_miss = 0   # นับรอบที่ play8 หาย + ยังไม่เจอ checkpoint (ไว้ทำ fallback กันค้าง)
             while True:
                 check_device_reset(serial, cycle_start)
                 img = get_screen_capture(device)
@@ -4412,6 +4413,7 @@ def process_device_login(device):
                         matched_name = "play8fix"
 
                     if pts_8:
+                        play8_miss = 0   # เจอ play8 แล้ว รีเซ็ตตัวนับ
                         # Prioritize fixlg3
                         pts_lg3 = img_search(img, os.path.join(IMG_DIR, "fixlg3.bmp"))
                         if pts_lg3:
@@ -4426,6 +4428,14 @@ def process_device_login(device):
                         gui_log(serial, f"Found {matched_name}! Clicked.", step="play8")
                         time.sleep(0.5)
                         continue
+
+                    # --- 3. play8/play8fix หายแล้วแต่ยังไม่เจอ checkpoint → กดกลางจอกันค้าง (ทุก ~15 วิ) ---
+                    #     กันเคส play8 หายไปแต่หน้า checkpoint ยัง match ไม่ติด → บอทจะได้ไม่ค้างนิ่ง (ไม่กด)
+                    play8_miss += 1
+                    if play8_miss >= 50:   # ~15 วิ (50 * 0.3s)
+                        gui_log(serial, "play8 gone & no checkpoint yet — fallback center click", step="play8")
+                        device.shell("input swipe 480 270 480 270 100")
+                        play8_miss = 0
 
                 time.sleep(0.3)
 
