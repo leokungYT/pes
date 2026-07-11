@@ -4515,15 +4515,18 @@ def process_device_login(device):
                             break
                     time.sleep(0.5)
 
-                # กด Back รัวๆ จนเจอ cancel.bmp (timeout 60s กันค้าง)
+                # กด Back รัวๆ จนกว่าจะเจอ cancel.bmp (ไม่มี timeout → กดไปเรื่อยๆ จนกว่าจะเจอ)
                 gui_log(serial, "Spamming Back until cancel.bmp...", step="Cancel")
-                deadline_cancel = time.time() + 60
-                cancel_found = False
-                while time.time() < deadline_cancel:
+                while True:
                     check_device_reset(serial, cycle_start)
                     device.shell("input keyevent 4")   # KEYCODE_BACK
                     time.sleep(1.0)
-                    img = get_screen_capture(device)
+                    try:
+                        img = get_screen_capture(device)
+                    except ResetGachaException:
+                        # fixgachanew เด้งระหว่างกด Back → get_screen_capture เคลียร์ป็อปอัพให้แล้ว
+                        # ไม่ต้องหยุด → กด Back ต่อไปเรื่อยๆ จนกว่าจะเจอ cancel.bmp
+                        continue
                     if img is not None:
                         pts = img_search(img, os.path.join(IMG_DIR, "cancel.bmp"))
                         if pts:
@@ -4531,13 +4534,7 @@ def process_device_login(device):
                             gui_log(serial, f"cancel.bmp found — clicking ({x},{y})", step="Click Cancel")
                             # กดจนกว่าจะหายไปครบ 3 วิ ค่อยไปต่อ
                             click_cancel_until_gone(device, serial, x, y, step="Cancel")
-                            cancel_found = True
                             break
-                if not cancel_found:
-                    gui_log(serial, "Timeout waiting for cancel.bmp. Force stopping app...", step="Cancel Timeout")
-                    device.shell("am force-stop jp.konami.pesam")
-                    time.sleep(1)
-                    raise DeviceResetException("cancel timeout")
 
             # ── Check Coin (สแกนก่อนเสมอ ถ้าเปิด) ──
             #    ถ้าเปิด CHECK_COIN → สแกนเลขเหรียญตั้งแต่อยู่หน้า main menu "ก่อน" ทำงานอื่น
@@ -5692,14 +5689,18 @@ def process_device_login(device):
                                                 continue
                                             else:
                                                 gui_log(serial, "checkpoint-gacha4.bmp not found in 8s! Resetting gacha sequence...", step="G4-Failed")
-                                                img_fg2 = get_screen_capture(device)
-                                                if img_fg2 is not None:
-                                                    pts_fg2 = img_search(img_fg2, os.path.join(IMG_DIR, "fixgachanew2.bmp"))
+                                                # รอหา fixgachanew2.bmp สูงสุด 5 วิ เจอแล้วกดซ้ำจนหายก่อนค่อย reset
+                                                fg2_deadline = time.time() + 5
+                                                while time.time() < fg2_deadline:
+                                                    img_fg2 = fast_screencap(device)
+                                                    pts_fg2 = img_search(img_fg2, os.path.join(IMG_DIR, "fixgachanew2.bmp")) if img_fg2 is not None else None
                                                     if pts_fg2:
                                                         x2, y2 = pts_fg2[0]
                                                         device.shell(f"input swipe {x2} {y2} {x2} {y2} 100")
                                                         gui_log(serial, "Clicked fixgachanew2.bmp", step="G4-Failed")
-                                                        time.sleep(2)
+                                                        time.sleep(1.5)
+                                                        continue
+                                                    break
                                                 raise ResetGachaException("checkpoint-gacha4 not found")
                                         if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
                                             found_g4 = "nocoin"
@@ -5868,14 +5869,18 @@ def process_device_login(device):
                                             continue
                                         else:
                                             gui_log(serial, "checkpoint-gacha4.bmp not found in 8s! Resetting gacha sequence...", step="G4-Failed")
-                                            img_fg2 = get_screen_capture(device)
-                                            if img_fg2 is not None:
-                                                pts_fg2 = img_search(img_fg2, os.path.join(IMG_DIR, "fixgachanew2.bmp"))
+                                            # รอหา fixgachanew2.bmp สูงสุด 5 วิ เจอแล้วกดซ้ำจนหายก่อนค่อย reset
+                                            fg2_deadline = time.time() + 5
+                                            while time.time() < fg2_deadline:
+                                                img_fg2 = fast_screencap(device)
+                                                pts_fg2 = img_search(img_fg2, os.path.join(IMG_DIR, "fixgachanew2.bmp")) if img_fg2 is not None else None
                                                 if pts_fg2:
                                                     x2, y2 = pts_fg2[0]
                                                     device.shell(f"input swipe {x2} {y2} {x2} {y2} 100")
                                                     gui_log(serial, "Clicked fixgachanew2.bmp", step="G4-Failed")
-                                                    time.sleep(2)
+                                                    time.sleep(1.5)
+                                                    continue
+                                                break
                                             raise ResetGachaException("checkpoint-gacha4 not found")
                                     # เช็ค nocions ระหว่างรอ
                                     if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
