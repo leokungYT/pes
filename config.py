@@ -23,6 +23,11 @@ DO_GACHA = 1
 # 0 = ปิด
 NEW_GACHA = 1
 
+# ── New Gacha Swipe (เลื่อนหน้าจอ) ──────────────────
+# 1 = เปิดการเลื่อนหน้าจอ (swipe 144,243 -> 699,233) ตอนหา new-gacha1 / net-gacha1
+# 0 = ปิดการเลื่อน (รอเฉยๆ ไม่ swipe)
+NEW_GACHA_SWIPE = 0
+
 # ── Custom Gacha Loop Mode ──────────────────────────
 # 1 = เปิดโหมด Custom Gacha (loopgacha1 -> gacha4 -> gacha5 -> loop จนเจอ outloop)
 # 0 = ปิดโหมด

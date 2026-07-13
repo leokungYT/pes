@@ -132,6 +132,10 @@ try:
     from config import NEW_GACHA
 except ImportError:
     NEW_GACHA = 0
+try:
+    from config import NEW_GACHA_SWIPE
+except ImportError:
+    NEW_GACHA_SWIPE = 1
 
 
 def cprint(*args, **kwargs):
@@ -600,6 +604,8 @@ if GUI_ENABLED:
             _toggle_row("Gacha Mode", var_gacha)
             var_new_gacha = ctk.IntVar(value=getattr(cfg, 'NEW_GACHA', 0))
             _toggle_row("New Gacha Mode (new-gacha1 -> net-gacha1)", var_new_gacha)
+            var_ng_swipe = ctk.IntVar(value=getattr(cfg, 'NEW_GACHA_SWIPE', 1))
+            _toggle_row("  └─ Swipe (เลื่อนหน้าจอหา new/net-gacha1)", var_ng_swipe)
             var_custom_gacha = ctk.IntVar(value=getattr(cfg, 'CUSTOM_GACHA', 0))
             _toggle_row("Custom Gacha Loop Mode (outloop)", var_custom_gacha)
             var_gacha_find = ctk.IntVar(value=getattr(cfg, 'GACHA_FIND', 0))
@@ -843,11 +849,12 @@ if GUI_ENABLED:
 
             # ── Save button (pinned at bottom, outside scrollable area) ───
             def _save():
-                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA
+                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA, NEW_GACHA_SWIPE
                 new_event = var_event.get()
                 new_box   = var_box.get()
                 new_gacha = var_gacha.get()
                 new_new_gacha = var_new_gacha.get()
+                new_ng_swipe = var_ng_swipe.get()
                 new_find  = var_find_hero.get()
                 new_gfree = var_gacha_free.get()
                 new_ccoin = var_check_coin.get()
@@ -1024,11 +1031,18 @@ if GUI_ENABLED:
                 else:
                     content += f"\nNEW_GACHA = {new_new_gacha}\n"
 
+                if re.search(r"^NEW_GACHA_SWIPE\s*=\s*\d", content, flags=re.MULTILINE):
+                    content = re.sub(r"^NEW_GACHA_SWIPE\s*=\s*\d", f"NEW_GACHA_SWIPE = {new_ng_swipe}",
+                                     content, flags=re.MULTILINE)
+                else:
+                    content += f"\nNEW_GACHA_SWIPE = {new_ng_swipe}\n"
+
                 with open(cfg_path, "w", encoding="utf-8") as f:
                     f.write(content)
                 # อัปเดต runtime ด้วย
                 CUSTOM_GACHA = new_custom_gacha
                 NEW_GACHA = new_new_gacha
+                NEW_GACHA_SWIPE = new_ng_swipe
                 EVENT_IMG  = new_event
                 DO_BOX     = new_box
                 DO_GACHA   = new_gacha
@@ -4269,7 +4283,7 @@ def process_device_login(device):
                 import importlib
                 import config as cfg
                 importlib.reload(cfg)
-                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA
+                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA, NEW_GACHA_SWIPE
                 EVENT_IMG = getattr(cfg, 'EVENT_IMG', 0)
                 DO_BOX = getattr(cfg, 'DO_BOX', 0)
                 DO_GACHA = getattr(cfg, 'DO_GACHA', 0)
@@ -4294,6 +4308,7 @@ def process_device_login(device):
                 MOVE_LS_TIME = getattr(cfg, 'MOVE_LS_TIME', '09:00')
                 CUSTOM_GACHA = getattr(cfg, 'CUSTOM_GACHA', 0)
                 NEW_GACHA = getattr(cfg, 'NEW_GACHA', 0)
+                NEW_GACHA_SWIPE = getattr(cfg, 'NEW_GACHA_SWIPE', 1)
             except Exception as ce:
                 gui_log(serial, f"⚠️ Config reload failed: {ce}", step="Reload Error")
 
@@ -5537,12 +5552,13 @@ def process_device_login(device):
                                                     time.sleep(1.5)
                                                     break
 
-                                                new_g1_swipe_count += 1
-                                                log_msg = f"new-gacha1 not found (swipe {new_g1_swipe_count}). Swiping 144 243 -> 699 233 (250ms)..."
-                                                gui_log(serial, log_msg, step="Swipe NewG1")
-                                                print(f"[{serial}] {log_msg}")
-                                                res = device.shell("input swipe 144 243 699 233 250")
-                                                print(f"[{serial}] ADB swipe command executed. Result: {res.strip() if res else 'OK'}")
+                                                if NEW_GACHA_SWIPE == 1:
+                                                    new_g1_swipe_count += 1
+                                                    log_msg = f"new-gacha1 not found (swipe {new_g1_swipe_count}). Swiping 144 243 -> 699 233 (250ms)..."
+                                                    gui_log(serial, log_msg, step="Swipe NewG1")
+                                                    print(f"[{serial}] {log_msg}")
+                                                    res = device.shell("input swipe 144 243 699 233 250")
+                                                    print(f"[{serial}] ADB swipe command executed. Result: {res.strip() if res else 'OK'}")
                                                 time.sleep(0.1)
                                             time.sleep(0.1)
 
@@ -5569,13 +5585,14 @@ def process_device_login(device):
                                                         gui_log(serial, log_limit, step="NetG-Limit")
                                                         print(f"[{serial}] {log_limit}")
                                                         break
-                                                    # เลื่อนตำแหน่ง 144 243 -> 699 233
-                                                    log_msg = f"net-gacha1 not found (swipe {swipe_count}/3). Swiping 144 243 -> 699 233 (250ms)..."
-                                                    gui_log(serial, log_msg, step="Swipe NetG")
-                                                    print(f"[{serial}] {log_msg}")
-                                                    res = device.shell("input swipe 144 243 699 233 250")
-                                                    print(f"[{serial}] ADB swipe command executed. Result: {res.strip() if res else 'OK'}")
-                                                    time.sleep(0.1)
+                                                    if NEW_GACHA_SWIPE == 1:
+                                                        # เลื่อนตำแหน่ง 144 243 -> 699 233
+                                                        log_msg = f"net-gacha1 not found (swipe {swipe_count}/3). Swiping 144 243 -> 699 233 (250ms)..."
+                                                        gui_log(serial, log_msg, step="Swipe NetG")
+                                                        print(f"[{serial}] {log_msg}")
+                                                        res = device.shell("input swipe 144 243 699 233 250")
+                                                        print(f"[{serial}] ADB swipe command executed. Result: {res.strip() if res else 'OK'}")
+                                                        time.sleep(0.1)
                                             time.sleep(0.1)
                                         break
                                     except ResetGachaException:
