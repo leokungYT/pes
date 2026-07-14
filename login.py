@@ -2499,11 +2499,12 @@ def get_screen_capture(device):
                 
                 raise SellScreenException("sell.bmp detected")
 
-            # === failed1/failed2 floating check ===
+            # === failed1/failed2/failed3 floating check ===
             failed1_pts = img_search(img, os.path.join(IMG_DIR, "failed1.bmp"))
             failed2_pts = img_search(img, os.path.join(IMG_DIR, "failed2.bmp"))
-            if failed1_pts or failed2_pts:
-                found_name = "failed1.bmp" if failed1_pts else "failed2.bmp"
+            failed3_pts = img_search(img, os.path.join(IMG_DIR, "failed3.bmp"))
+            if failed1_pts or failed2_pts or failed3_pts:
+                found_name = "failed1.bmp" if failed1_pts else ("failed2.bmp" if failed2_pts else "failed3.bmp")
                 gui_log(device.serial, f"🛑 Floating: {found_name} found! Force closing app and moving file to login-failed", step="Failed Detected")
                 device.shell("am force-stop jp.konami.pesam")
                 time.sleep(1)
