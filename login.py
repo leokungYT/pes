@@ -603,9 +603,9 @@ if GUI_ENABLED:
             var_gacha = ctk.IntVar(value=cfg.DO_GACHA)
             _toggle_row("Gacha Mode", var_gacha)
             var_new_gacha = ctk.IntVar(value=getattr(cfg, 'NEW_GACHA', 0))
-            _toggle_row("New Gacha Mode (new-gacha1 -> net-gacha1)", var_new_gacha)
+            _toggle_row("New Gacha Mode (new-gacha1 -> new-gacha1)", var_new_gacha)
             var_ng_swipe = ctk.IntVar(value=getattr(cfg, 'NEW_GACHA_SWIPE', 1))
-            _toggle_row("  └─ Swipe (เลื่อนหน้าจอหา new/net-gacha1)", var_ng_swipe)
+            _toggle_row("  └─ Swipe (เลื่อนหน้าจอหา new-gacha1)", var_ng_swipe)
             var_custom_gacha = ctk.IntVar(value=getattr(cfg, 'CUSTOM_GACHA', 0))
             _toggle_row("Custom Gacha Loop Mode (outloop)", var_custom_gacha)
             var_gacha_find = ctk.IntVar(value=getattr(cfg, 'GACHA_FIND', 0))
@@ -5387,10 +5387,10 @@ def process_device_login(device):
                                 break
                         time.sleep(1.2)
                 
-                # box3 (กดเรื่อยๆ จนไม่เจอครบ 10s ค่อยไป box4)
+                # box3 (กดเรื่อยๆ จนไม่เจอครบ 5s ค่อยไป box4)
                 gui_log(serial, "Waiting box3.bmp...", step="box3")
                 last_seen = time.time()
-                while time.time() - last_seen < 10:
+                while time.time() - last_seen < 5:
                     check_device_reset(serial, cycle_start)
                     img = get_screen_capture(device)
                     if img is not None:
@@ -5403,7 +5403,7 @@ def process_device_login(device):
                             last_seen = time.time()  # รีเซ็ตนับใหม่
                             continue
                     time.sleep(1)
-                gui_log(serial, "box3 not seen for 10s, moving to box4", step="box3-done")
+                gui_log(serial, "box3 not seen for 5s, moving to box4", step="box3-done")
 
                 # box4
                 gui_log(serial, "Waiting box4.bmp...", step="box4")
@@ -5562,8 +5562,8 @@ def process_device_login(device):
                                                 time.sleep(0.1)
                                             time.sleep(0.1)
 
-                                        # 2. หา net-gacha1.bmp (วนหา/เลื่อนไม่เกิน 3 รอบ)
-                                        gui_log(serial, "Waiting net-gacha1.bmp (max 3 loops)...", step="net-g1")
+                                        # 2. หา new-gacha1.bmp (วนหา/เลื่อนไม่เกิน 3 รอบ)
+                                        gui_log(serial, "Waiting new-gacha1.bmp (max 3 loops)...", step="new-g1_step2")
                                         swipe_count = 0
                                         while True:
                                             check_device_reset(serial, cycle_start)
@@ -5572,7 +5572,7 @@ def process_device_login(device):
                                                 img, _ = check_and_click_fixback(device, img, serial)
                                                 if img is None:
                                                     continue
-                                                pts = img_search(img, os.path.join(IMG_DIR, "net-gacha1.bmp"))
+                                                pts = img_search(img, os.path.join(IMG_DIR, "new-gacha1.bmp"))
                                                 if pts:
                                                     x, y = pts[0]
                                                     device.shell(f"input swipe {x} {y} {x} {y} 100")
@@ -5581,14 +5581,14 @@ def process_device_login(device):
                                                 else:
                                                     swipe_count += 1
                                                     if swipe_count > 3:
-                                                        log_limit = "net-gacha1 not found after 3 swipes. Jumping to Gacha4."
-                                                        gui_log(serial, log_limit, step="NetG-Limit")
+                                                        log_limit = "new-gacha1 not found after 3 swipes. Jumping to Gacha4."
+                                                        gui_log(serial, log_limit, step="NewG-Limit")
                                                         print(f"[{serial}] {log_limit}")
                                                         break
                                                     if NEW_GACHA_SWIPE == 1:
                                                         # เลื่อนตำแหน่ง 144 243 -> 699 233
-                                                        log_msg = f"net-gacha1 not found (swipe {swipe_count}/3). Swiping 144 243 -> 699 233 (250ms)..."
-                                                        gui_log(serial, log_msg, step="Swipe NetG")
+                                                        log_msg = f"new-gacha1 not found (swipe {swipe_count}/3). Swiping 144 243 -> 699 233 (250ms)..."
+                                                        gui_log(serial, log_msg, step="Swipe NewG")
                                                         print(f"[{serial}] {log_msg}")
                                                         res = device.shell("input swipe 144 243 699 233 250")
                                                         print(f"[{serial}] ADB swipe command executed. Result: {res.strip() if res else 'OK'}")
@@ -5687,7 +5687,7 @@ def process_device_login(device):
                                                 check_device_reset(serial, cycle_start)
                                                 img_cp4 = get_screen_capture(device)
                                                 if img_cp4 is not None:
-                                                    pts_cp4 = img_search(img_cp4, os.path.join(IMG_DIR, "checkpoint-gacha4.bmp"))
+                                                    pts_cp4 = img_search(img_cp4, os.path.join(IMG_DIR, "checkpoint-gacha4.png"))
                                                     if pts_cp4:
                                                         verified = True
                                                         pts_fresh = img_search(img_cp4, os.path.join(IMG_DIR, "gacha4.bmp"))
@@ -5705,7 +5705,7 @@ def process_device_login(device):
                                                 found_g4 = True
                                                 continue
                                             else:
-                                                gui_log(serial, "checkpoint-gacha4.bmp not found in 8s! Proceeding to Gacha5...", step="G4-Failed")
+                                                gui_log(serial, "checkpoint-gacha4.png not found in 8s! Proceeding to Gacha5...", step="G4-Failed")
                                                 # รอหา fixgachanew2.bmp สูงสุด 5 วิ เจอแล้วกดซ้ำจนหายก่อนไปต่อ
                                                 fg2_deadline = time.time() + 5
                                                 while time.time() < fg2_deadline:
@@ -5871,7 +5871,7 @@ def process_device_login(device):
                                             check_device_reset(serial, cycle_start)
                                             img_cp4 = get_screen_capture(device)
                                             if img_cp4 is not None:
-                                                pts_cp4 = img_search(img_cp4, os.path.join(IMG_DIR, "checkpoint-gacha4.bmp"))
+                                                pts_cp4 = img_search(img_cp4, os.path.join(IMG_DIR, "checkpoint-gacha4.png"))
                                                 if pts_cp4:
                                                     verified = True
                                                     pts_fresh = img_search(img_cp4, os.path.join(IMG_DIR, "gacha4.bmp"))
@@ -5890,7 +5890,7 @@ def process_device_login(device):
                                             deadline_g4 = time.time() + 10
                                             continue
                                         else:
-                                            gui_log(serial, "checkpoint-gacha4.bmp not found in 8s! Proceeding to Gacha5...", step="G4-Failed")
+                                            gui_log(serial, "checkpoint-gacha4.png not found in 8s! Proceeding to Gacha5...", step="G4-Failed")
                                             # รอหา fixgachanew2.bmp สูงสุด 5 วิ เจอแล้วกดซ้ำจนหายก่อนไปต่อ
                                             fg2_deadline = time.time() + 5
                                             while time.time() < fg2_deadline:
@@ -5953,13 +5953,8 @@ def process_device_login(device):
                                 # ถ้าผ่าน nocions มาได้ (ไม่เจอ) หรือเจอ gacha4 ไปแล้ว -> ไป gacha5 ต่อ
                                 gui_log(serial, "Proceeding to Gacha5...", step="G5-Flow")
                                 time.sleep(10) # 10s delay requested by user
-                                g5_wait_start = time.time()   # กันค้าง: ถ้าไม่เจอ gacha5/checkpoint/outloop เกิน 8 วิ → เริ่มใหม่ตั้งแต่ play8
                                 while True:
                                     check_device_reset(serial, cycle_start)
-                                    # ── watchdog: ค้างในลูปรอ gacha5 เกิน 8 วิ → restart ตั้งแต่ play8 ──
-                                    if time.time() - g5_wait_start > 8:
-                                        gui_log(serial, "gacha5 not found within 8s — restarting from play8...", step="G5-Stuck", status="stuck")
-                                        trigger_restart_from_play8(device, serial, original_name, reason="gacha5 stuck 8s")
                                     img = get_screen_capture(device)
                                     if img is not None:
                                         img, _ = check_and_click_fixback(device, img, serial, check_g1=False)

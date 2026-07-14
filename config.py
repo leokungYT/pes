@@ -19,14 +19,14 @@ DO_BOX = 1
 DO_GACHA = 1
 
 # ── New Gacha Sequence (login.py) ──────────────────
-# 1 = เปิดการทำงาน new-gacha1 -> เลื่อนหา net-gacha1 -> ข้ามไป gacha4.bmp
+# 1 = เปิดการทำงาน new-gacha1 -> เลื่อนหา new-gacha1 -> ข้ามไป gacha4.bmp
 # 0 = ปิด
 NEW_GACHA = 1
 
 # ── New Gacha Swipe (เลื่อนหน้าจอ) ──────────────────
-# 1 = เปิดการเลื่อนหน้าจอ (swipe 144,243 -> 699,233) ตอนหา new-gacha1 / net-gacha1
+# 1 = เปิดการเลื่อนหน้าจอ (swipe 144,243 -> 699,233) ตอนหา new-gacha1
 # 0 = ปิดการเลื่อน (รอเฉยๆ ไม่ swipe)
-NEW_GACHA_SWIPE = 0
+NEW_GACHA_SWIPE = 1
 
 # ── Custom Gacha Loop Mode ──────────────────────────
 # 1 = เปิดโหมด Custom Gacha (loopgacha1 -> gacha4 -> gacha5 -> loop จนเจอ outloop)
@@ -240,7 +240,7 @@ CAP_ALL = 0
 USE_MUMU_ROOT = True
 
 # path ของ MuMuManager.exe (ดูจาก info: nx_main\MuMuManager.exe)
-MUMU_MANAGER = r"D:\Program Files\Netease\MuMuPlayerGlobal-12.0\nx_main\MuMuManager.exe"
+MUMU_MANAGER = r"C:\Program Files\Netease\MuMuPlayer\nx_main\MuMuManager.exe"
 # index ของ instance — ดูได้จาก:  MuMuManager.exe info -v all  (instance ที่รันจริงคือ index 1)
 MUMU_INDEX = "1"
 
