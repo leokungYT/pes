@@ -126,7 +126,10 @@ list_find_hero = [
     "Gialuca Zambrotta",
     "Lilian Thuram", 
     "Patrick Vieira",
-    "Marcel Desailly"
+    "Marcel Desailly",
+    "Luis Suarez",
+    "Schweinsteiger",
+    "Bronckhorst"
 ]
 
 # แชร์ list เดียวกัน — แก้ที่ list_find_hero อย่างเดียวพอ
