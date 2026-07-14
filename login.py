@@ -250,14 +250,14 @@ if GUI_ENABLED:
 
     class DeviceMonitorWidget(ctk.CTkFrame):
         def __init__(self, parent, device_id, index):
-            super().__init__(parent, fg_color="#383838", corner_radius=6, height=32)
+            super().__init__(parent, fg_color="#343841", corner_radius=6, height=32)
             self.device_id = device_id
             self.pack_propagate(False)
 
-            chk = ctk.CTkCheckBox(self, text="", width=20, height=20,
+            self.chk = ctk.CTkCheckBox(self, text="", width=20, height=20,
                                    checkbox_width=16, checkbox_height=16)
-            chk.pack(side="left", padx=(6, 2))
-            chk.select()
+            self.chk.pack(side="left", padx=(6, 2))
+            self.chk.select()
 
             ctk.CTkLabel(self, text=f"#{index}",
                          font=ctk.CTkFont(size=11, weight="bold"),
@@ -301,8 +301,8 @@ if GUI_ENABLED:
             global gui_instance
             gui_instance = self
             self.title("🔑 loginสะสม PES")
-            self.geometry("790x620")
-            self.minsize(790, 620)
+            self.geometry("780x500")
+            self.minsize(770, 420)
             self.adb_connected = False
             self.device_monitors  = {}
             self.threads          = []
@@ -332,56 +332,62 @@ if GUI_ENABLED:
         # ── UI build ──────────────────────────────────────────────────────
         def setup_ui(self):
             from datetime import datetime
+            self.configure(fg_color="#1e2025")   # พื้นหลังหน้าต่าง (โทน dark อมน้ำเงินนิด ๆ ให้กลมกลืน)
 
-            # Toolbar
-            toolbar = ctk.CTkFrame(self, height=40, fg_color="#333333", corner_radius=0)
+            # ── Top toolbar (สไตล์ CookieRun): Select All · dropdown · Start/Stop · settings ──
+            toolbar = ctk.CTkFrame(self, height=46, fg_color="#282b31", corner_radius=0)
             toolbar.pack(fill="x")
             toolbar.pack_propagate(False)
 
-            self.lbl_status = ctk.CTkLabel(toolbar, text="   ● OFFLINE",
-                                           font=ctk.CTkFont(size=12, weight="bold"),
+            # Select All — เลือก/ยกเลิกทุกเครื่องในลิสต์
+            ctk.CTkButton(toolbar, text="☑ Select All", width=96, height=28, corner_radius=8,
+                          font=ctk.CTkFont(size=12, weight="bold"),
+                          fg_color="#3d7fff", hover_color="#2f66d8",
+                          command=self.select_all_devices).pack(side="left", padx=(10, 6), pady=9)
+
+            # Dropdown เลือกหัวข้อ: 📊 Stats หรือหมวด config (เลือกแล้วช่องขวาเปลี่ยน)
+            self.tool_menu = ctk.CTkOptionMenu(toolbar, width=168, height=28,
+                          font=ctk.CTkFont(size=12, weight="bold"),
+                          fg_color="#33363d", button_color="#4a4a4a",
+                          button_hover_color="#5a5a5a", dropdown_fg_color="#2a2d33",
+                          values=["📊 Stats", "⚙️ General", "🎰 Gacha", "🆓 Gacha Free",
+                                  "🎁 Get-Code", "🔍 Find Hero", "🔧 Setting"],
+                          command=self.on_category_select)
+            self.tool_menu.set("📊 Stats")
+            self.tool_menu.pack(side="left", padx=6, pady=9)
+
+            # Start Bot / Stop (แยกปุ่มเขียว-แดง)
+            self.btn_start = ctk.CTkButton(toolbar, text="▶ Start Bot", width=98, height=28,
+                          font=ctk.CTkFont(size=12, weight="bold"),
+                          fg_color="#2cc985", hover_color="#229f69",
+                          command=self.start_bot)
+            self.btn_start.pack(side="left", padx=(8, 4), pady=9)
+            self.btn_stop = ctk.CTkButton(toolbar, text="⏹ Stop", width=82, height=28,
+                          font=ctk.CTkFont(size=12, weight="bold"),
+                          fg_color="#6b2f2e", hover_color="#c62828",
+                          command=self.stop_bot)
+            self.btn_stop.pack(side="left", padx=4, pady=9)
+
+            # ── ขวา: license badge · settings(🔑) · logs · status ──
+            self.lbl_license = ctk.CTkLabel(toolbar, text="🎫 PES Bot",
+                          font=ctk.CTkFont(size=12, weight="bold"),
+                          fg_color="#2a2f3a", corner_radius=13,
+                          text_color="#ffd36a", width=78, height=26)
+            self.lbl_license.pack(side="right", padx=(6, 12), pady=9)
+            ctk.CTkButton(toolbar, text="🔑", width=34, height=28,
+                          font=ctk.CTkFont(size=14),
+                          fg_color="#33363d", hover_color="#4a4a4a",
+                          command=self.open_config_dialog).pack(side="right", padx=4, pady=9)
+            ctk.CTkButton(toolbar, text="📋 Logs", width=62, height=28,
+                          font=ctk.CTkFont(size=11),
+                          fg_color="#3a3e46", hover_color="#666666",
+                          command=lambda: subprocess.Popen(
+                              f'explorer "{os.path.join(os.path.dirname(os.path.abspath(__file__)), LOG_DIR)}"')
+                          ).pack(side="right", padx=4, pady=9)
+            self.lbl_status = ctk.CTkLabel(toolbar, text="● OFFLINE",
+                                           font=ctk.CTkFont(size=11, weight="bold"),
                                            text_color="#888")
-            self.lbl_status.pack(side="left", padx=5)
-
-            self.btn_start = ctk.CTkButton(toolbar, text="▶ START",
-                                           font=ctk.CTkFont(size=12, weight="bold"),
-                                           width=80, height=24,
-                                           fg_color="#2cc985", hover_color="#229f69",
-                                           command=self.toggle_bot)
-            self.btn_start.pack(side="left", padx=10)
-
-            counter_frame = ctk.CTkFrame(toolbar, fg_color="transparent")
-            counter_frame.pack(side="right", padx=10)
-
-            self.lbl_file_count = ctk.CTkLabel(counter_frame, text="📁 0",
-                                               font=ctk.CTkFont(size=12, weight="bold"),
-                                               text_color="#aaaaaa")
-            self.lbl_file_count.pack(side="left", padx=8)
-
-            self.lbl_succ_count = ctk.CTkLabel(counter_frame, text="✅ 0",
-                                               font=ctk.CTkFont(size=12, weight="bold"),
-                                               text_color="#4caf50")
-            self.lbl_succ_count.pack(side="left", padx=8)
-
-            self.lbl_hero_count = ctk.CTkLabel(counter_frame, text="⭐ 0",
-                                               font=ctk.CTkFont(size=12, weight="bold"),
-                                               text_color="#ffc107")
-            self.lbl_hero_count.pack(side="left", padx=8)
-
-            self.lbl_fail_count = ctk.CTkLabel(counter_frame, text="❌ 0",
-                                               font=ctk.CTkFont(size=12, weight="bold"),
-                                               text_color="#ff5555")
-            self.lbl_fail_count.pack(side="left", padx=8)
-
-            self.lbl_avg_time = ctk.CTkLabel(counter_frame, text="⏱ Avg: -",
-                                             font=ctk.CTkFont(size=12, weight="bold"),
-                                             text_color="#2196f3")
-            self.lbl_avg_time.pack(side="left", padx=8)
-
-            ctk.CTkLabel(toolbar,
-                         text=f"Started: {datetime.now().strftime('%H:%M:%S')}",
-                         font=ctk.CTkFont(size=12, weight="bold"),
-                         text_color="#aaaaaa").pack(side="right", padx=15)
+            self.lbl_status.pack(side="right", padx=10, pady=9)
 
             # Main content
             main_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -389,9 +395,9 @@ if GUI_ENABLED:
             main_frame.grid_columnconfigure(1, weight=2)
             main_frame.grid_rowconfigure(0, weight=1)
 
-            left_frame = ctk.CTkFrame(main_frame, fg_color="#2b2b2b", corner_radius=8)
+            left_frame = ctk.CTkFrame(main_frame, fg_color="#2a2d33", corner_radius=8)
             left_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 3))
-            hdr = ctk.CTkFrame(left_frame, fg_color="#383838", corner_radius=0, height=28)
+            hdr = ctk.CTkFrame(left_frame, fg_color="#30333a", corner_radius=0, height=28)
             hdr.pack(fill="x")
             ctk.CTkLabel(hdr, text="   DEVICES",
                          font=ctk.CTkFont(size=11, weight="bold"),
@@ -399,22 +405,29 @@ if GUI_ENABLED:
             self.dev_scroll = ctk.CTkScrollableFrame(left_frame, fg_color="transparent")
             self.dev_scroll.pack(fill="both", expand=True, padx=3, pady=3)
 
-            right_frame = ctk.CTkFrame(main_frame, fg_color="#2b2b2b", corner_radius=8)
+            right_frame = ctk.CTkFrame(main_frame, fg_color="#2a2d33", corner_radius=8)
             right_frame.grid(row=0, column=1, sticky="nsew", padx=(3, 0))
-            rhdr = ctk.CTkFrame(right_frame, fg_color="#383838", corner_radius=0, height=28)
+            rhdr = ctk.CTkFrame(right_frame, fg_color="#30333a", corner_radius=0, height=28)
             rhdr.pack(fill="x")
-            ctk.CTkLabel(rhdr, text="   🏆 SUMMARY STATS",
+            # header เปลี่ยนข้อความได้ (STATS ↔ CONFIG · หัวข้อ)
+            self.rhdr_label = ctk.CTkLabel(rhdr, text="   🏆 SUMMARY STATS",
                          font=ctk.CTkFont(size=11, weight="bold"),
-                         text_color="#f2c94c", anchor="w").pack(side="left")
-            
+                         text_color="#f2c94c", anchor="w")
+            self.rhdr_label.pack(side="left")
+
+            # ── ช่องขวาสลับ 2 มุมมอง: STATS (เดิม) / CONFIG (checkbox ตามหัวข้อ dropdown) ──
+            self.stats_view  = ctk.CTkFrame(right_frame, fg_color="transparent")
+            self.config_view = ctk.CTkScrollableFrame(right_frame, fg_color="transparent")
+            self.stats_view.pack(fill="both", expand=True)   # ค่าเริ่มต้น = STATS
+
             # Search / Filter Bar for Summary Stats (Multi-tag enabled)
-            search_bar = ctk.CTkFrame(right_frame, fg_color="transparent", height=32)
+            search_bar = ctk.CTkFrame(self.stats_view, fg_color="transparent", height=32)
             search_bar.pack(fill="x", padx=6, pady=4)
             self.txt_filter = ctk.CTkEntry(search_bar, placeholder_text="พิมพ์ชื่อนักเตะแล้วกด Enter...",
                                            font=ctk.CTkFont(size=11), height=24)
             self.txt_filter.pack(side="left", fill="x", expand=True, padx=(0, 4))
             self.txt_filter.bind("<Return>", lambda event: self.add_filter_tag())
-            
+
             self.btn_clear_filter = ctk.CTkButton(search_bar, text="ล้างทั้งหมด", width=65, height=24,
                                                   font=ctk.CTkFont(size=11), fg_color="#e53935",
                                                   hover_color="#c62828",
@@ -422,49 +435,49 @@ if GUI_ENABLED:
             self.btn_clear_filter.pack(side="right")
 
             # Sub-frame to display active search pills/tags
-            self.tags_frame = ctk.CTkFrame(right_frame, fg_color="transparent")
+            self.tags_frame = ctk.CTkFrame(self.stats_view, fg_color="transparent")
             self.tags_frame.pack(fill="x", padx=6, pady=(0, 4))
 
-            self.result_scroll = ctk.CTkScrollableFrame(right_frame, fg_color="transparent")
+            self.result_scroll = ctk.CTkScrollableFrame(self.stats_view, fg_color="transparent")
             self.result_scroll.pack(fill="both", expand=True, padx=3, pady=3)
 
             # Log
-            log_frame = ctk.CTkFrame(self, fg_color="#1e1e1e", corner_radius=6, height=80)
+            log_frame = ctk.CTkFrame(self, fg_color="#191b1f", corner_radius=6, height=80)
             log_frame.pack_propagate(False)
             self.log_text = ctk.CTkTextbox(log_frame,
                                            font=ctk.CTkFont(family="Consolas", size=10),
-                                           text_color="#8b949e", fg_color="#1e1e1e")
+                                           text_color="#8b949e", fg_color="#191b1f")
             self.log_text.pack(fill="both", expand=True, padx=2, pady=2)
             self.log_text.configure(state="disabled")
 
-            # Bottom bar
+            # ── Bottom bar (สไตล์ CookieRun): ADB controls (ซ้าย) + counters/version (ขวา) ──
             base_path  = os.path.dirname(os.path.abspath(__file__))
-            bottom_bar = ctk.CTkFrame(self, height=32, fg_color="#333333", corner_radius=0)
+            bottom_bar = ctk.CTkFrame(self, height=40, fg_color="#282b31", corner_radius=0)
+            bottom_bar.pack_propagate(False)
 
-            ctk.CTkButton(bottom_bar, text="🔌 Connect Missing", width=100, height=22,
+            ctk.CTkButton(bottom_bar, text="◉ Start ADB", width=92, height=26,
+                          font=ctk.CTkFont(size=11, weight="bold"),
+                          fg_color="#2cc985", hover_color="#229f69",
+                          command=self.start_adb).pack(side="left", padx=(8, 3), pady=6)
+            ctk.CTkButton(bottom_bar, text="✕ Kill ADB", width=84, height=26,
+                          font=ctk.CTkFont(size=11, weight="bold"),
+                          fg_color="#e53935", hover_color="#c62828",
+                          command=self.kill_adb).pack(side="left", padx=3, pady=6)
+            ctk.CTkButton(bottom_bar, text="🔌 Connect", width=80, height=26,
                           font=ctk.CTkFont(size=10), fg_color="#4caf50",
-                          command=self.connect_missing_devices
-                          ).pack(side="left", padx=3, pady=4)
-            ctk.CTkButton(bottom_bar, text="📂 input-id", width=70, height=22,
-                          font=ctk.CTkFont(size=10), fg_color="#555555",
+                          hover_color="#3d8b40",
+                          command=self.connect_missing_devices).pack(side="left", padx=3, pady=6)
+            ctk.CTkButton(bottom_bar, text="📂 input-id", width=72, height=26,
+                          font=ctk.CTkFont(size=10), fg_color="#3a3e46",
                           command=lambda: subprocess.Popen(
                               f'explorer "{os.path.join(base_path, INPUT_DIR)}"')
-                          ).pack(side="left", padx=3, pady=4)
-            ctk.CTkButton(bottom_bar, text="✅ login-success", width=90, height=22,
-                          font=ctk.CTkFont(size=10), fg_color="#555555",
+                          ).pack(side="left", padx=3, pady=6)
+            ctk.CTkButton(bottom_bar, text="✅ login-success", width=98, height=26,
+                          font=ctk.CTkFont(size=10), fg_color="#3a3e46",
                           command=lambda: subprocess.Popen(
                               f'explorer "{os.path.join(base_path, LOGIN_SUCCESS_DIR)}"')
-                          ).pack(side="left", padx=3, pady=4)
-            ctk.CTkButton(bottom_bar, text="⚙️ Config", width=70, height=22,
-                          font=ctk.CTkFont(size=10), fg_color="#1565c0",
-                          hover_color="#0d47a1",
-                          command=self.open_config_dialog
-                          ).pack(side="left", padx=3, pady=4)
-            ctk.CTkButton(bottom_bar, text="📋 Logs", width=60, height=22,
-                          font=ctk.CTkFont(size=10), fg_color="#555555",
-                          command=lambda: subprocess.Popen(
-                              f'explorer "{os.path.join(base_path, LOG_DIR)}"')
-                          ).pack(side="left", padx=3, pady=4)
+                          ).pack(side="left", padx=3, pady=6)
+
             # Read version dynamically from version.txt
             version_str = "v1.0"
             try:
@@ -478,8 +491,34 @@ if GUI_ENABLED:
 
             ctk.CTkLabel(bottom_bar, text=version_str,
                          font=ctk.CTkFont(size=10), text_color="#888888"
-                         ).pack(side="right", padx=8)
+                         ).pack(side="right", padx=(4, 10), pady=6)
+
+            # counters (ย้ายมาจาก toolbar เดิม) — ชื่อ attr ต้องคงเดิม (มีโค้ดอื่นอัปเดต)
+            counter_frame = ctk.CTkFrame(bottom_bar, fg_color="transparent")
+            counter_frame.pack(side="right", padx=6, pady=6)
+            self.lbl_file_count = ctk.CTkLabel(counter_frame, text="📁 0",
+                                               font=ctk.CTkFont(size=12, weight="bold"),
+                                               text_color="#aaaaaa", cursor="hand2")
+            self.lbl_file_count.pack(side="left", padx=7)
+            # กดตัวเลขไฟล์ → เปิดโฟลเดอร์ input-id
+            self.lbl_file_count.bind("<Button-1>", lambda e: subprocess.Popen(
+                f'explorer "{os.path.join(base_path, INPUT_DIR)}"'))
+            self.lbl_succ_count = ctk.CTkLabel(counter_frame, text="✅ 0",
+                                               font=ctk.CTkFont(size=12, weight="bold"),
+                                               text_color="#4caf50")
+            self.lbl_succ_count.pack(side="left", padx=7)
+            self.lbl_hero_count = ctk.CTkLabel(counter_frame, text="⭐ 0",
+                                               font=ctk.CTkFont(size=12, weight="bold"),
+                                               text_color="#ffc107")
+            self.lbl_hero_count.pack(side="left", padx=7)
+            self.lbl_fail_count = ctk.CTkLabel(counter_frame, text="❌ 0",
+                                               font=ctk.CTkFont(size=12, weight="bold"),
+                                               text_color="#ff5555")
+            self.lbl_fail_count.pack(side="left", padx=7)
             self.lbl_update_timer = None  # removed — UI update every 1s was causing lag
+
+            # ตั้งสถานะปุ่ม Start/Stop เริ่มต้น (Stop เป็น disabled ตอนยังไม่รัน)
+            self._refresh_run_buttons()
 
             # Pack the main frames in the correct order to prevent layout clipping
             bottom_bar.pack(side="bottom", fill="x")
@@ -551,23 +590,42 @@ if GUI_ENABLED:
             scroll_cfg = ctk.CTkScrollableFrame(win, fg_color="transparent")
             scroll_cfg.pack(fill="both", expand=True, padx=6, pady=(0, 4))
 
-            # ── helpers: หัวข้อหมวด + แถว toggle (จัด config เป็นเมนูแยกประเภท) ──
-            def _section(title):
-                hdr = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
-                hdr.pack(fill="x", padx=8, pady=(12, 2))
-                ctk.CTkLabel(hdr, text=title,
-                             font=ctk.CTkFont(size=13, weight="bold"),
-                             text_color="#4caf50").pack(side="left")
+            # _cur[0] = พาเรนต์ปัจจุบันที่ row ต่าง ๆ จะ pack ลง (body ของ section ที่กำลังสร้าง)
+            _cur = [scroll_cfg]
+
+            # ── helpers: หัวข้อหมวดแบบ "พับ/กางได้" (accordion) — กดหัวข้อเพื่อเปิด/ปิด ให้ config สั้นลง ──
+            def _section(title, start_open=False):
+                state = {"open": start_open}
+                body = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
+                def _toggle():
+                    state["open"] = not state["open"]
+                    arrow = "▼" if state["open"] else "▶"
+                    btn.configure(text=f"{arrow}  {title}")
+                    if state["open"]:
+                        body.pack(fill="x", padx=2, pady=(0, 4), after=btn)
+                    else:
+                        body.pack_forget()
+                arrow0 = "▼" if start_open else "▶"
+                btn = ctk.CTkButton(scroll_cfg, text=f"{arrow0}  {title}",
+                                    font=ctk.CTkFont(size=13, weight="bold"),
+                                    fg_color="#242424", hover_color="#282b31",
+                                    text_color="#4caf50", anchor="w", height=32,
+                                    corner_radius=6, command=_toggle)
+                btn.pack(fill="x", padx=6, pady=(6, 0))
+                if start_open:
+                    body.pack(fill="x", padx=2, pady=(0, 4))
+                _cur[0] = body
+                return body
 
             def _toggle_row(text, var, command=None):
-                r = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
+                r = ctk.CTkFrame(_cur[0], fg_color="transparent")
                 r.pack(fill="x", padx=14, pady=3)
                 ctk.CTkLabel(r, text=text, font=ctk.CTkFont(size=12)).pack(side="left")
                 kw = {"command": command} if command else {}
                 ctk.CTkSwitch(r, text="", variable=var, onvalue=1, offvalue=0, **kw).pack(side="right")
 
             def _entry_row(text, value, width=50):
-                r = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
+                r = ctk.CTkFrame(_cur[0], fg_color="transparent")
                 r.pack(fill="x", padx=14, pady=3)
                 ctk.CTkLabel(r, text=text,
                              font=ctk.CTkFont(size=11, slant="italic")).pack(side="left", padx=(10, 0))
@@ -587,11 +645,11 @@ if GUI_ENABLED:
                 return cv
 
             # ════════ General ════════
-            _section("⚙️ General")
+            _section("⚙️ General", start_open=True)
             var_box = ctk.IntVar(value=cfg.DO_BOX)
-            _toggle_row("Open Box Sequence (1-4)", var_box)
+            _toggle_row("รับของ (1-4)", var_box)
             var_find_hero = ctk.IntVar(value=getattr(cfg, 'FIND_HERO', 0))
-            _toggle_row("Find Hero Mode", var_find_hero)
+            _toggle_row("หาตัวนักเตะ", var_find_hero)
             var_check_coin = ctk.IntVar(value=getattr(cfg, 'CHECK_COIN', 0))
             _toggle_row("Check Coin Mode", var_check_coin)
             entry_min_coin = _entry_row("  └─ Min coin to gacha (น้อยกว่านี้ข้ามสุ่ม)", getattr(cfg, 'GACHA_MIN_COIN', 100), width=70)
@@ -607,7 +665,7 @@ if GUI_ENABLED:
             var_ng_swipe = ctk.IntVar(value=getattr(cfg, 'NEW_GACHA_SWIPE', 1))
             _toggle_row("  └─ Swipe (เลื่อนหน้าจอหา new-gacha1)", var_ng_swipe)
             var_custom_gacha = ctk.IntVar(value=getattr(cfg, 'CUSTOM_GACHA', 0))
-            _toggle_row("Custom Gacha Loop Mode (outloop)", var_custom_gacha)
+            _toggle_row("สุ่มจน coin หมด", var_custom_gacha)
             var_gacha_find = ctk.IntVar(value=getattr(cfg, 'GACHA_FIND', 0))
             def _sync_gacha_find():
                 # Gacha+Find ต้องอาศัย DO_GACHA + Check Coin → เปิดให้อัตโนมัติ
@@ -642,7 +700,7 @@ if GUI_ENABLED:
 
             # ════════ Find Hero ════════
             _section("🔍 Find Hero")
-            _toggle_row("Find Mode", var_find_hero)
+            _toggle_row("หาตัวนักเตะ", var_find_hero)
             var_find_cc = ctk.IntVar(value=1 if (var_find_hero.get() == 1 and var_check_coin.get() == 1) else 0)
             def _sync_find_cc():
                 # Find + Check Coin: เปิด → ติดทั้ง Find Mode + Check Coin , ปิด → ปิด Check Coin
@@ -691,7 +749,7 @@ if GUI_ENABLED:
             var_overwrite_cfg = ctk.IntVar(value=1 if getattr(cfg, 'OVERWRITE_CONFIG_ON_UPDATE', True) else 0)
             _toggle_row("Sync Config (อัปเดตตั้งค่าตามเครื่องแม่)", var_overwrite_cfg)
             # Silent Update Mode (segmented)
-            row_update = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
+            row_update = ctk.CTkFrame(_cur[0], fg_color="transparent")
             row_update.pack(fill="x", padx=14, pady=3)
             ctk.CTkLabel(row_update, text="Silent Update Mode",
                          font=ctk.CTkFont(size=12)).pack(side="left")
@@ -705,7 +763,7 @@ if GUI_ENABLED:
             _toggle_row("Auto-move ทุกวันตามเวลา", var_move_ls)
             entry_move_time = _entry_row("  ↳ เวลา (24h หรือ AM/PM)", getattr(cfg, 'MOVE_LS_TIME', '09:00'), width=80)
             # ── นับถอยหลังสด (อิงเวลาโลก internet ถ้า sync ได้) ──
-            lbl_countdown = ctk.CTkLabel(scroll_cfg, text="",
+            lbl_countdown = ctk.CTkLabel(_cur[0], text="",
                                          font=ctk.CTkFont(size=12, weight="bold"), text_color="#ffa726")
             lbl_countdown.pack(fill="x", padx=18, pady=(0, 0))
             def _update_countdown():
@@ -732,19 +790,19 @@ if GUI_ENABLED:
                 except Exception:
                     pass
             _update_countdown()
-            lbl_move = ctk.CTkLabel(scroll_cfg, text="ย้ายไฟล์ทั้งหมด login-success → input-id",
+            lbl_move = ctk.CTkLabel(_cur[0], text="ย้ายไฟล์ทั้งหมด login-success → input-id",
                                     font=ctk.CTkFont(size=11, slant="italic"), text_color="gray")
             lbl_move.pack(fill="x", padx=18, pady=(0, 2))
             def _move_now():
                 moved = move_login_success_to_input()
                 lbl_move.configure(text=f"📤 ย้าย {moved} ไฟล์แล้ว (login-success → input-id)", text_color="#4caf50")
                 self.log(f"Move now: {moved} files login-success → input-id")
-            ctk.CTkButton(scroll_cfg, text="📤 ย้ายตอนนี้ (login-success → input-id)",
+            ctk.CTkButton(_cur[0], text="📤 ย้ายตอนนี้ (login-success → input-id)",
                           command=_move_now, height=30).pack(fill="x", padx=14, pady=(2, 6))
 
             # ════════ Import Zip → input-id ════════
             _section("📦 Import Zip → input-id")
-            lbl_zip = ctk.CTkLabel(scroll_cfg, text="เอา .zip ไปวางในโฟลเดอร์ zip/ แล้วกดปุ่ม → แตกเข้า input-id",
+            lbl_zip = ctk.CTkLabel(_cur[0], text="เอา .zip ไปวางในโฟลเดอร์ zip/ แล้วกดปุ่ม → แตกเข้า input-id",
                                    font=ctk.CTkFont(size=11, slant="italic"), text_color="gray")
             lbl_zip.pack(fill="x", padx=18, pady=(0, 2))
 
@@ -802,7 +860,7 @@ if GUI_ENABLED:
                 lbl_zip.configure(text=f"🗑️ ลบ {deleted} ไฟล์ใน input-id แล้ว", text_color="#e53935")
                 self.log(f"Cleared input-id: deleted {deleted} files")
 
-            btn_zip_row = ctk.CTkFrame(scroll_cfg, fg_color="transparent")
+            btn_zip_row = ctk.CTkFrame(_cur[0], fg_color="transparent")
             btn_zip_row.pack(fill="x", padx=14, pady=(2, 6))
             ctk.CTkButton(btn_zip_row, text="📂 แตก zip → input-id",
                           command=_import_zip, height=30).pack(side="left", expand=True, fill="x", padx=(0, 4))
@@ -843,7 +901,7 @@ if GUI_ENABLED:
                 lbl_zip.configure(text=f"🧹 ล้าง {removed} โฟลเดอร์ + {cleared} ไฟล์ input-id แล้ว", text_color="#e53935")
                 self.log(f"Clear folders: removed {removed} folders, cleared {cleared} input-id files")
 
-            ctk.CTkButton(scroll_cfg, text="🧹 ล้างโฟลเดอร์ทั้งหมด (clear-folders)",
+            ctk.CTkButton(_cur[0], text="🧹 ล้างโฟลเดอร์ทั้งหมด (clear-folders)",
                           command=_clear_folders, height=30,
                           fg_color="#8e1e1e", hover_color="#6e1515").pack(fill="x", padx=14, pady=(0, 6))
 
@@ -1285,17 +1343,190 @@ if GUI_ENABLED:
 
         # ── Bot control ───────────────────────────────────────────────────
         def toggle_bot(self):
+            # เผื่อโค้ดเก่า/auto-start ยังเรียก toggle_bot — route ไป start/stop
+            if not bot_running:
+                self.start_bot()
+            else:
+                self.stop_bot()
+
+        def start_bot(self):
+            global bot_running
+            if bot_running:
+                return
+            bot_running = True
+            self.is_started = True
+            self._refresh_run_buttons()
+            self.start_bot_threads()
+
+        def stop_bot(self):
             global bot_running
             if not bot_running:
-                bot_running = True
-                self.is_started = True
-                self.btn_start.configure(text="⏹ STOP",
-                                         fg_color="#e53935", hover_color="#c62828")
-                self.start_bot_threads()
-            else:
-                bot_running = False
-                self.btn_start.configure(text="▶ START",
-                                         fg_color="#2cc985", hover_color="#229f69")
+                return
+            bot_running = False
+            self._refresh_run_buttons()
+            self.log("Bot stopped by user.")
+
+        def _refresh_run_buttons(self):
+            # อัปเดตสี/สถานะปุ่ม Start Bot / Stop ตามว่ากำลังรันอยู่ไหม
+            try:
+                if bot_running:
+                    self.btn_start.configure(state="disabled", fg_color="#1f6f4a")
+                    self.btn_stop.configure(state="normal", fg_color="#e53935")
+                else:
+                    self.btn_start.configure(state="normal", fg_color="#2cc985")
+                    self.btn_stop.configure(state="disabled", fg_color="#6b2f2e")
+            except Exception:
+                pass
+
+        def select_all_devices(self):
+            # กดครั้งเดียว = เลือกทุกเครื่อง; ถ้าเลือกครบอยู่แล้ว = ยกเลิกทั้งหมด
+            try:
+                rows = list(self.device_monitors.values())
+                if not rows:
+                    return
+                all_on = all(getattr(r, 'chk', None) is not None and r.chk.get() == 1 for r in rows)
+                for r in rows:
+                    chk = getattr(r, 'chk', None)
+                    if chk is None:
+                        continue
+                    chk.deselect() if all_on else chk.select()
+            except Exception:
+                pass
+
+        def start_adb(self):
+            self.log("Start ADB: starting server + scanning ports...")
+            def _bg():
+                try:
+                    connect_known_ports(quiet=True, kill_server=False)
+                    self.after(0, self.connect_missing_devices)
+                except Exception as e:
+                    self.log(f"Start ADB error: {e}")
+            threading.Thread(target=_bg, daemon=True).start()
+
+        def kill_adb(self):
+            self.log("Kill ADB: stopping adb server...")
+            def _bg():
+                try:
+                    kwargs = {'creationflags': 0x08000000} if os.name == 'nt' else {}
+                    subprocess.run([adb_path, "kill-server"], capture_output=True, timeout=6, **kwargs)
+                    self.log("adb server killed.")
+                except Exception as e:
+                    self.log(f"Kill ADB error: {e}")
+            threading.Thread(target=_bg, daemon=True).start()
+
+        def _config_categories(self):
+            # หมวด → รายการ (kind, label, VAR)  kind: 'chk'=สวิตช์ 0/1 · 'ent'=เลขจำนวนเต็ม · 'ents'=ข้อความ
+            return {
+                "⚙️ General": [
+                    ("chk", "รับของ (1-4)",              "DO_BOX"),
+                    ("chk", "หาตัวนักเตะ",            "FIND_HERO"),
+                    ("chk", "Check Coin Mode",           "CHECK_COIN"),
+                    ("chk", "Login Fast (เจอ login จบทันที)", "LOGIN_FAST"),
+                    ("ent", "Min coin to gacha",         "GACHA_MIN_COIN"),
+                ],
+                "🎰 Gacha": [
+                    ("chk", "Gacha Mode",                "DO_GACHA"),
+                    ("chk", "New Gacha Mode",            "NEW_GACHA"),
+                    ("chk", "└ Swipe (เลื่อนหาจอ)",       "NEW_GACHA_SWIPE"),
+                    ("chk", "สุ่มจน coin หมด",           "CUSTOM_GACHA"),
+                    ("chk", "Gacha + Find + Check Coin", "GACHA_FIND"),
+                ],
+                "🆓 Gacha Free": [
+                    ("chk", "Gacha Free Mode",           "GACHA_FREE"),
+                    ("chk", "Gacha Free + Check + Find", "GACHA_CHECK"),
+                    ("ent", "Loops count",               "GACHA_FREE_LOOPS"),
+                ],
+                "🎁 Get-Code": [
+                    ("chk", "Get Code Mode",             "GETCODE"),
+                    ("ents", "Code Text",                "GETCODE_TEXT"),
+                    ("chk", "Get Quest Mode",            "GETQUEST"),
+                ],
+                "🔍 Find Hero": [
+                    ("chk", "หาตัวนักเตะ",                 "FIND_HERO"),
+                    ("chk", "Check Coin",                "CHECK_COIN"),
+                ],
+                "🔧 Setting": [
+                    ("chk", "No Scan (→ fast-random)",   "NOSCAN"),
+                    ("chk", "Skip Animation",            "SKIPANIMATION"),
+                    ("chk", "Event Image (play22→31)",   "EVENT_IMG"),
+                    ("chk", "Auto Run on Launch",        "AUTORUN"),
+                    ("chk", "Timeout Mode (กันค้าง)",     "TIMEOUT_ENABLE"),
+                    ("ent", "Timeout (นาที)",            "TIMEOUT_MINUTES"),
+                ],
+            }
+
+        def _write_config_var(self, var, value, is_string=False):
+            # เขียนค่าเดียวลง config.py แล้ว reload (บอท hot-reload รอบถัดไป)
+            import re, importlib
+            cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.py")
+            try:
+                with open(cfg_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                newval = f'"{value}"' if is_string else f'{value}'
+                if re.search(rf'^{re.escape(var)}\s*=', content, flags=re.MULTILINE):
+                    if is_string:
+                        content = re.sub(rf'^({re.escape(var)}\s*=\s*).*$', rf'\g<1>{newval}',
+                                         content, count=1, flags=re.MULTILINE)
+                    else:
+                        content = re.sub(rf'^({re.escape(var)}\s*=\s*)\S+', rf'\g<1>{newval}',
+                                         content, count=1, flags=re.MULTILINE)
+                else:
+                    content += f'\n{var} = {newval}\n'
+                with open(cfg_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+                import config as _c
+                importlib.reload(_c)
+                self.log(f"Config: {var} = {newval} (saved)")
+            except Exception as e:
+                self.log(f"Config save error ({var}): {e}")
+
+        def on_category_select(self, choice):
+            # 📊 Stats → โชว์สรุปผล ; หัวข้ออื่น → โชว์ checkbox config ของหัวข้อนั้น
+            try:
+                if choice.startswith("📊"):
+                    self.config_view.pack_forget()
+                    self.stats_view.pack(fill="both", expand=True)
+                    self.rhdr_label.configure(text="   🏆 SUMMARY STATS", text_color="#f2c94c")
+                    return
+                items = self._config_categories().get(choice)
+                if items is None:
+                    return
+                self.stats_view.pack_forget()
+                self.config_view.pack(fill="both", expand=True, padx=3, pady=3)
+                self.rhdr_label.configure(text=f"   ⚙️ CONFIG · {choice}", text_color="#a996ff")
+                for w in self.config_view.winfo_children():
+                    w.destroy()
+                import importlib, config as _c
+                importlib.reload(_c)
+                for kind, label, var in items:
+                    row = ctk.CTkFrame(self.config_view, fg_color="#343841", corner_radius=6)
+                    row.pack(fill="x", padx=4, pady=3)
+                    ctk.CTkLabel(row, text=label, font=ctk.CTkFont(size=12),
+                                 anchor="w").pack(side="left", padx=(10, 4), pady=7)
+                    if kind == "chk":
+                        v = ctk.IntVar(value=int(getattr(_c, var, 0) or 0))
+                        def _cmd(vr=var, vv=v):
+                            self._write_config_var(vr, vv.get())
+                        ctk.CTkSwitch(row, text="", variable=v, onvalue=1, offvalue=0,
+                                      command=_cmd).pack(side="right", padx=10, pady=6)
+                    else:
+                        is_str = (kind == "ents")
+                        cur = getattr(_c, var, "" if is_str else 0)
+                        e = ctk.CTkEntry(row, width=(120 if is_str else 60), height=24, justify="center")
+                        e.insert(0, str(cur))
+                        e.pack(side="right", padx=10, pady=6)
+                        def _save(ev=None, vr=var, ent=e, s=is_str):
+                            val = ent.get().strip()
+                            if not s:
+                                try:
+                                    val = int(val)
+                                except ValueError:
+                                    return
+                            self._write_config_var(vr, val, is_string=s)
+                        e.bind("<Return>", _save)
+                        e.bind("<FocusOut>", _save)
+            except Exception as e:
+                self.log(f"on_category_select error: {e}")
 
         def start_bot_threads(self):
             devices = list(self.device_monitors.keys())
@@ -1434,12 +1665,6 @@ if GUI_ENABLED:
                 for name, (count, is_error) in desired.items():
                     self.add_stat_row(name, count, is_error)
                     
-                if self.login_times:
-                    avg = sum(self.login_times) / len(self.login_times)
-                    new_text = f"⏱ Avg: {avg/60:.1f}m" if avg >= 60 else f"⏱ Avg: {avg:.0f}s"
-                    if prev.get('avg_text') != new_text:
-                        self.lbl_avg_time.configure(text=new_text)
-                        prev['avg_text'] = new_text
             except Exception:
                 pass
 
@@ -2053,6 +2278,12 @@ def get_screen_capture(device):
     try:
         # เช็คเกมออนอยู่หรือไม่ (ทุก 30 วิ)
         if not is_game_running(device):
+            # เกมตาย: ถ้าผ่าน login แล้ว (อยู่ช่วง box/gacha) → flow เดิมไม่ตรงกับเกมที่เพิ่งเปิดใหม่
+            #   → restart ตั้งแต่ play8 (เก็บ login เดิม ไม่ push ซ้ำ) แทน relaunch แล้ววิ่งต่อผิดเฟสจนค้าง
+            _on_gsc = DEVICE_FILE_ASSIGNMENTS.get(device.serial)
+            if DEVICE_PAST_LOGIN.get(device.serial) and _on_gsc:
+                gui_log(device.serial, "⚠️ เกมไม่รัน (หลัง login) → restart ตั้งแต่ play8", step="Relaunch")
+                trigger_restart_from_play8(device, device.serial, _on_gsc, reason="เกมตาย/relaunch หลัง login")
             gui_log(device.serial, "⚠️ Game not running! Relaunching...", step="Relaunch")
             launch_game(device, settle=14)
             DEVICE_LAST_GAME_CHECK[device.serial] = time.time()
@@ -2371,17 +2602,14 @@ def get_screen_capture(device):
                                 time.sleep(2)
                         img = fast_screencap(device)
 
-            # fixalert1.bmp floating check
+            # fixalert1.bmp floating check — เจอ fixalert1 (หาทุกเฟรมอยู่แล้ว) → กด fixalert2 แล้วไปต่อ
+            # (ไม่คลิก fixalert1 เอง — fixalert1 เป็นแค่ตัวชี้ว่ามี alert, ปุ่มที่ต้องกดคือ fixalert2)
             fa_pts = img_search(img, _P['fixalert1'], threshold=0.7)
             if fa_pts:
-                gui_log(device.serial, "Floating: fixalert1.bmp found! Clicking it...", step="Fix Alert")
-                x, y = fa_pts[0]
-                device.shell(f"input swipe {x} {y} {x} {y} 100")
-                time.sleep(2)
-                
-                deadline_fa2 = time.time() + 15
+                gui_log(device.serial, "Floating: fixalert1.bmp found! หา/กด fixalert2...", step="Fix Alert")
                 clicked_fa2 = False
-                while time.time() < deadline_fa2:
+                while True:                              # ไม่มี timeout — fixalert2 โผล่แน่นอน วนหาจนเจอแล้วกด
+                    check_device_reset(device.serial)    # ทางออกเดียว = กดปุ่ม ↺ reset เอง (ไม่ใช่ timeout)
                     img_fa2 = fast_screencap(device)
                     if img_fa2 is not None:
                         pts_fa2 = img_search(img_fa2, _P['fixalert2'], threshold=0.7)
@@ -2389,15 +2617,14 @@ def get_screen_capture(device):
                             x, y = pts_fa2[0]
                             device.shell(f"input swipe {x} {y} {x} {y} 100")
                             gui_log(device.serial, "Clicked fixalert2.bmp", step="Fix Alert")
-                            time.sleep(2)
+                            time.sleep(1.5)
                             clicked_fa2 = True
-                            deadline_fa2 = time.time() + 10
-                        elif clicked_fa2:
                             break
-                    time.sleep(0.5)
+                    time.sleep(0.3)
 
+                # ถ้ามี fixalert3 ตามมา ให้กดด้วย (สั้น ๆ ไม่บังคับ)
                 if clicked_fa2:
-                    deadline_fa3 = time.time() + 15
+                    deadline_fa3 = time.time() + 6
                     while time.time() < deadline_fa3:
                         img_fa3 = fast_screencap(device)
                         if img_fa3 is not None:
@@ -2406,13 +2633,11 @@ def get_screen_capture(device):
                                 x, y = pts_fa3[0]
                                 device.shell(f"input swipe {x} {y} {x} {y} 100")
                                 gui_log(device.serial, "Clicked fixalert3.bmp", step="Fix Alert")
-                                time.sleep(2)
-                                deadline_fa3 = time.time() + 10
-                            else:
+                                time.sleep(1.5)
                                 break
-                        time.sleep(0.5)
+                        time.sleep(0.3)
 
-                # Re-capture after fixing
+                # Re-capture after fixing → ทำงานต่อปกติ
                 img = fast_screencap(device)
 
             # questfive1-14 floating check — click ทุกรูปจนกว่าจะหายไปทั้งหมด (เฉพาะเมื่อ GETQUEST=1)
@@ -2486,7 +2711,7 @@ def get_screen_capture(device):
 
         # (screenshot preview removed — login.py ไม่มี preview widget, ลด GUI lag)
         return img
-    except (DeviceResetException, SellScreenException, RestartFromQuest8Exception, ResetGachaException):
+    except (DeviceResetException, SellScreenException, RestartFromQuest8Exception, ResetGachaException, RestartFromPlay8Exception):
         raise
     except Exception:
         return None
@@ -4431,6 +4656,7 @@ def process_device_login(device):
             #    (กด play8 / fallback ไปเรื่อยๆ จนกว่าจะเจอ แล้วค่อยไปขั้นตอนกด Back รัวๆ)
             gui_log(serial, "Waiting checkpointlogin (clicking play8)...", step="play8/Check")
             play8_miss = 0   # นับรอบที่ play8 หาย + ยังไม่เจอ checkpoint (ไว้ทำ fallback กันค้าง)
+            play8_click_count = 0   # นับจำนวนครั้งที่กด play8 ติดกัน — ครบ 7 → พัก 8 วิ แล้วเช็คใหม่
             while True:
                 check_device_reset(serial, cycle_start)
                 img = get_screen_capture(device)
@@ -4474,8 +4700,15 @@ def process_device_login(device):
 
                         x, y = pts_8[0]
                         device.shell(f"input swipe {x} {y} {x} {y} 100")
-                        gui_log(serial, f"Found {matched_name}! Clicked.", step="play8")
-                        time.sleep(0.5)
+                        play8_click_count += 1
+                        gui_log(serial, f"Found {matched_name}! Clicked. ({play8_click_count}/7)", step="play8")
+                        if play8_click_count >= 7:
+                            # กดครบ 7 ครั้ง → พัก 8 วิ แล้วรีเซ็ตตัวนับ → วนกลับไปเช็ค/กดต่อถ้ายังเจอ
+                            gui_log(serial, "กด play8 ครบ 7 ครั้ง → พัก 8 วิ แล้วเช็คใหม่...", step="play8 Wait")
+                            play8_click_count = 0
+                            time.sleep(8)
+                        else:
+                            time.sleep(0.5)
                         continue
 
                     # --- 3. play8/play8fix หายแล้วแต่ยังไม่เจอ checkpoint → กดกลางจอกันค้าง (ทุก ~15 วิ) ---
