@@ -55,6 +55,9 @@ except ImportError:
 
 try:
     import easyocr
+    # ปิด warning "pin_memory ... no accelerator" ของ torch (รันบน CPU ไม่มีผลอะไร)
+    import warnings as _warnings
+    _warnings.filterwarnings("ignore", message=".*pin_memory.*")
 except ImportError:
     easyocr = None
 
@@ -2914,7 +2917,8 @@ def _read_screen_text_locked(img, serial):
         try:
             cprint(f"[OCR] [{serial}] Attempting EasyOCR...")
             if _reader is None:
-                _reader = easyocr.Reader(['en'], gpu=False)
+                # verbose=False → ปิดข้อความ "Using CPU. Note: This module is much faster with a GPU."
+                _reader = easyocr.Reader(['en'], gpu=False, verbose=False)
             
             # Apply bilateral filter to smooth card textures but keep text edges extremely sharp
             cleaned_img = cv2.bilateralFilter(img, 9, 75, 75)
@@ -2998,42 +3002,28 @@ def is_hero_match(hero_name, ocr_text):
     if not cleaned_hero or not cleaned_ocr:
         return False
     # ป้องกัน OCR ข้อความสั้นเกินไป (noise/ขยะจากหน้าจอ) จับคู่ผิดพลาด
-    if len(cleaned_ocr) < 5:
+    if len(cleaned_ocr) < 3:
         return False
-        
-    if cleaned_hero in cleaned_ocr:
-        return True
-        
+
+    # ── หลักการ: match แบบ "ตรงเต็มคำเป๊ะๆ" เท่านั้น (ไม่มี fuzzy/prefix/70%) ──
+    #    คำใดคำหนึ่งของชื่อฮีโร่ ตรงกับคำใน OCR แบบเต็มคำ = match
+    #    เช่น hero "Erling Haaland" + OCR อ่านได้ "Haaland" → match
+    #    (ข้ามคำเชื่อมสั้นๆ เช่น de/van/der กัน match มั่วกับชื่อคนอื่น)
     hero_words = cleaned_hero.split()
+    ocr_words = set(cleaned_ocr.split())
+    _skip_words = {"de", "van", "der", "dos", "das", "del", "los", "la", "el", "al", "di", "da"}
+    for w in hero_words:
+        if len(w) < 3 or w in _skip_words:
+            continue
+        if w in ocr_words:
+            return True
+
+    # เผื่อ OCR อ่านชื่อติดกันไม่มีวรรค (เช่น "erlinghaaland") — เช็คชื่อเต็มแบบไม่มีวรรค
+    # เฉพาะชื่อหลายคำเท่านั้น (ชื่อคำเดียวใช้กฎเต็มคำข้างบนพอ กัน substring มั่ว เช่น luka ใน lukaku)
     if len(hero_words) > 1:
-        if all(w in cleaned_ocr for w in hero_words):
+        if cleaned_hero.replace(" ", "") in cleaned_ocr.replace(" ", ""):
             return True
-        match_count = sum(1 for w in hero_words if w in cleaned_ocr)
-        if match_count >= max(2, len(hero_words) * 0.7):
-            return True
-            
-    # คำเดี่ยว >= 5 ตัว — อนุญาตเฉพาะฮีโร่ชื่อคำเดียว (เช่น "Mbappe", "Marcelo")
-    # ถ้าชื่อหลายคำ (เช่น "Peter Schmeichel") ห้ามจับคู่ด้วยคำเดียว ป้องกันชื่อซ้ำคนอื่น
-    if len(hero_words) == 1:
-        if len(hero_words[0]) >= 5 and hero_words[0] in cleaned_ocr:
-            return True
-            
-    # Fuzzy sequence similarity matching (90% spelling match ratio)
-    import difflib
-    len_hero = len(cleaned_hero)
-    len_ocr = len(cleaned_ocr)
-    if len_hero >= 5:
-        # Check windows of size len_hero - 1, len_hero, len_hero + 1
-        for w_size in [len_hero - 1, len_hero, len_hero + 1]:
-            if w_size < 4 or w_size > len_ocr:
-                continue
-            for start in range(len_ocr - w_size + 1):
-                sub = cleaned_ocr[start:start + w_size]
-                matcher = difflib.SequenceMatcher(None, cleaned_hero, sub)
-                if matcher.quick_ratio() >= 0.85:
-                    if matcher.ratio() >= 0.88: # ~90% similarity
-                        return True
-            
+
     return False
 
 def parse_hero_config(config_list):
