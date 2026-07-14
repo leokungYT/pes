@@ -314,7 +314,7 @@ if GUI_ENABLED:
             self._log_buffer      = []     # batch log lines
             self._prev_stats      = {}     # cache previous stat counts to skip no-op updates
             self.current_filter   = ""
-            self._last_stats_data = (0, 0, 0, {}, 0)
+            self._last_stats_data = (0, 0, 0, {}, 0, 0)
             self.autorun_triggered = False
             self.setup_ui()
             self.after(500,  self.connect_adb)
@@ -511,6 +511,13 @@ if GUI_ENABLED:
                                                font=ctk.CTkFont(size=12, weight="bold"),
                                                text_color="#ffc107")
             self.lbl_hero_count.pack(side="left", padx=7)
+            self.lbl_fast_count = ctk.CTkLabel(counter_frame, text="⚡ 0",
+                                               font=ctk.CTkFont(size=12, weight="bold"),
+                                               text_color="#00e5ff", cursor="hand2")
+            self.lbl_fast_count.pack(side="left", padx=7)
+            # กดตัวเลข ⚡ → เปิดโฟลเดอร์ fast-random
+            self.lbl_fast_count.bind("<Button-1>", lambda e: subprocess.Popen(
+                f'explorer "{os.path.join(base_path, FAST_RANDOM_DIR)}"'))
             self.lbl_fail_count = ctk.CTkLabel(counter_frame, text="❌ 0",
                                                font=ctk.CTkFont(size=12, weight="bold"),
                                                text_color="#ff5555")
@@ -1599,6 +1606,7 @@ if GUI_ENABLED:
 
                     hero_count  = len(found_files)
                     fail_count  = len(glob.glob(os.path.join(FILE_ERROR_DIR, "*.dat")))
+                    fast_count  = len(glob.glob(os.path.join(FAST_RANDOM_DIR, "*.dat")))
                     
                     hero_counts = {}
                     for fpath in found_files:
@@ -1609,7 +1617,7 @@ if GUI_ENABLED:
                             if h_key:
                                 hero_counts[h_key] = hero_counts.get(h_key, 0) + 1
                     
-                    _gui_queue.put(('stats', (input_count, success_count, hero_count, hero_counts, fail_count)))
+                    _gui_queue.put(('stats', (input_count, success_count, hero_count, hero_counts, fail_count, fast_count)))
                 except Exception:
                     pass
 
@@ -1617,9 +1625,9 @@ if GUI_ENABLED:
             t.start()
             self.after(30000, self.update_realtime_stats)
 
-        def _apply_stats_ui(self, input_count, success_count, hero_count, hero_counts, fail_count=0):
+        def _apply_stats_ui(self, input_count, success_count, hero_count, hero_counts, fail_count=0, fast_count=0):
             try:
-                self._last_stats_data = (input_count, success_count, hero_count, hero_counts, fail_count)
+                self._last_stats_data = (input_count, success_count, hero_count, hero_counts, fail_count, fast_count)
                 
                 # Check for active search filters
                 active_filts = getattr(self, 'active_filters', [])
@@ -1644,6 +1652,9 @@ if GUI_ENABLED:
                 if hasattr(self, 'lbl_fail_count') and prev.get('fail') != fail_count:
                     self.lbl_fail_count.configure(text=f"❌ {fail_count}")
                     prev['fail'] = fail_count
+                if hasattr(self, 'lbl_fast_count') and prev.get('fast') != fast_count:
+                    self.lbl_fast_count.configure(text=f"⚡ {fast_count}")
+                    prev['fast'] = fast_count
 
                 # Build desired stat rows with multi-tag filter applied
                 desired = {}
