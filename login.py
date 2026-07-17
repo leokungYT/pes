@@ -55,6 +55,9 @@ except ImportError:
 
 try:
     import easyocr
+    # ปิด warning "pin_memory ... no accelerator" ของ torch (รันบน CPU ไม่มีผลอะไร)
+    import warnings as _warnings
+    _warnings.filterwarnings("ignore", message=".*pin_memory.*")
 except ImportError:
     easyocr = None
 
@@ -316,7 +319,7 @@ if GUI_ENABLED:
             self._log_buffer      = []     # batch log lines
             self._prev_stats      = {}     # cache previous stat counts to skip no-op updates
             self.current_filter   = ""
-            self._last_stats_data = (0, 0, 0, {}, 0)
+            self._last_stats_data = (0, 0, 0, {}, 0, 0)
             self.autorun_triggered = False
             self.setup_ui()
             self.after(500,  self.connect_adb)
@@ -513,6 +516,13 @@ if GUI_ENABLED:
                                                font=ctk.CTkFont(size=12, weight="bold"),
                                                text_color="#ffc107")
             self.lbl_hero_count.pack(side="left", padx=7)
+            self.lbl_fast_count = ctk.CTkLabel(counter_frame, text="⚡ 0",
+                                               font=ctk.CTkFont(size=12, weight="bold"),
+                                               text_color="#00e5ff", cursor="hand2")
+            self.lbl_fast_count.pack(side="left", padx=7)
+            # กดตัวเลข ⚡ → เปิดโฟลเดอร์ fast-random
+            self.lbl_fast_count.bind("<Button-1>", lambda e: subprocess.Popen(
+                f'explorer "{os.path.join(base_path, FAST_RANDOM_DIR)}"'))
             self.lbl_fail_count = ctk.CTkLabel(counter_frame, text="❌ 0",
                                                font=ctk.CTkFont(size=12, weight="bold"),
                                                text_color="#ff5555")
@@ -1601,6 +1611,7 @@ if GUI_ENABLED:
 
                     hero_count  = len(found_files)
                     fail_count  = len(glob.glob(os.path.join(FILE_ERROR_DIR, "*.dat")))
+                    fast_count  = len(glob.glob(os.path.join(FAST_RANDOM_DIR, "*.dat")))
                     
                     hero_counts = {}
                     for fpath in found_files:
@@ -1611,7 +1622,7 @@ if GUI_ENABLED:
                             if h_key:
                                 hero_counts[h_key] = hero_counts.get(h_key, 0) + 1
                     
-                    _gui_queue.put(('stats', (input_count, success_count, hero_count, hero_counts, fail_count)))
+                    _gui_queue.put(('stats', (input_count, success_count, hero_count, hero_counts, fail_count, fast_count)))
                 except Exception:
                     pass
 
@@ -1619,9 +1630,9 @@ if GUI_ENABLED:
             t.start()
             self.after(30000, self.update_realtime_stats)
 
-        def _apply_stats_ui(self, input_count, success_count, hero_count, hero_counts, fail_count=0):
+        def _apply_stats_ui(self, input_count, success_count, hero_count, hero_counts, fail_count=0, fast_count=0):
             try:
-                self._last_stats_data = (input_count, success_count, hero_count, hero_counts, fail_count)
+                self._last_stats_data = (input_count, success_count, hero_count, hero_counts, fail_count, fast_count)
                 
                 # Check for active search filters
                 active_filts = getattr(self, 'active_filters', [])
@@ -1646,6 +1657,9 @@ if GUI_ENABLED:
                 if hasattr(self, 'lbl_fail_count') and prev.get('fail') != fail_count:
                     self.lbl_fail_count.configure(text=f"❌ {fail_count}")
                     prev['fail'] = fail_count
+                if hasattr(self, 'lbl_fast_count') and prev.get('fast') != fast_count:
+                    self.lbl_fast_count.configure(text=f"⚡ {fast_count}")
+                    prev['fast'] = fast_count
 
                 # Build desired stat rows with multi-tag filter applied
                 desired = {}
@@ -1877,6 +1891,20 @@ def connect_known_ports(quiet=False, kill_server=False):
         if not quiet:
             print(f"{Fore.RED}[ADB] Scan error: {e}{Style.RESET_ALL}")
 
+def _device_boot_id(serial):
+    """อ่าน boot_id ของเครื่อง (unique ต่อ VM/instance ต่อการบูต 1 ครั้ง)
+    ไว้จับคู่ว่า serial 2 ตัว (คนละ port) จริงๆ แล้วเป็นเครื่องเดียวกันหรือไม่"""
+    try:
+        kwargs = {'creationflags': 0x08000000} if os.name == 'nt' else {}
+        r = subprocess.run([adb_path, "-s", serial, "shell", "cat /proc/sys/kernel/random/boot_id"],
+                           capture_output=True, text=True, timeout=3, **kwargs)
+        v = r.stdout.strip()
+        if v and len(v) >= 16 and " " not in v and "no such" not in v.lower():
+            return v
+    except Exception:
+        pass
+    return None
+
 def get_connected_devices():
     try:
         kwargs = {'creationflags': 0x08000000} if os.name == 'nt' else {}
@@ -1915,6 +1943,33 @@ def get_connected_devices():
                     final.append(serial)
             else:
                 final.append(serial)
+
+        # ── Dedup: เครื่องเดียวกันโผล่หลาย port (เช่น 127.0.0.1:5563 กับ 127.0.0.1:16512) ──
+        #    จับคู่ด้วย boot_id (unique ต่อ instance) → เก็บไว้ port เดียว โดยเลือกช่วง 55xx ก่อน
+        if len(final) > 1:
+            def _is_55xx(s):
+                try:
+                    return 5555 <= int(s.split(":")[1]) <= 5755
+                except Exception:
+                    return False
+            try:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=16) as ex:
+                    boot_ids = list(ex.map(_device_boot_id, final))
+                chosen = {}   # boot_id -> ตำแหน่งใน result
+                result = []
+                for serial, bid in zip(final, boot_ids):
+                    if not bid:
+                        result.append(serial)   # อ่าน boot_id ไม่ได้ → เก็บไว้ตามเดิม (ไม่เสี่ยงตัดเครื่องจริงทิ้ง)
+                        continue
+                    if bid not in chosen:
+                        chosen[bid] = len(result)
+                        result.append(serial)
+                    elif _is_55xx(serial) and not _is_55xx(result[chosen[bid]]):
+                        result[chosen[bid]] = serial   # ซ้ำกัน → เลือกตัวที่เป็น port 55xx
+                final = result
+            except Exception:
+                pass
+
         return final
     except: return []
 
@@ -2321,6 +2376,24 @@ def get_screen_capture(device):
                 if img is None:
                     return None
 
+            # === fixnet1 standalone floating check ===
+            # เจอ fixnet1 ลอยเดี่ยวๆ (ไม่ได้มาจาก flow fixnet ข้างบน หรือกดแล้วไม่หาย)
+            # → ปิดแอพแล้วเข้าใหม่ไฟล์เดิมเฉยๆ (ไม่ย้ายไฟล์/ไม่ push ซ้ำ ไม่มีอะไรเพิ่ม)
+            if img_search(img, _P['fixnet1']):
+                time.sleep(1.5)   # กันจังหวะ popup กำลังปิดตัวเองพอดี → เช็คซ้ำให้ชัวร์ก่อน
+                img_fn1re = fast_screencap(device)
+                if img_fn1re is not None and img_search(img_fn1re, _P['fixnet1']):
+                    serial_fn1 = device.serial
+                    original_name = DEVICE_FILE_ASSIGNMENTS.get(serial_fn1)
+                    gui_log(serial_fn1, "fixnet1 detected! Closing app & re-entering (same file)...", step="Fix Net 1")
+                    if original_name:
+                        trigger_restart_from_play8(device, serial_fn1, original_name, reason="fixnet1")
+                    device.shell("am force-stop jp.konami.pesam")
+                    time.sleep(1)
+                    raise DeviceResetException("fixnet1 detected (no file)")
+                if img_fn1re is not None:
+                    img = img_fn1re
+
             # === fixtip floating check ===
             pts1 = img_search(img, os.path.join(GETQUEST_IMG_DIR, "fixtip1.bmp")) if GETQUEST == 1 else None
             if pts1:
@@ -2431,11 +2504,12 @@ def get_screen_capture(device):
                 
                 raise SellScreenException("sell.bmp detected")
 
-            # === failed1/failed2 floating check ===
+            # === failed1/failed2/failed3 floating check ===
             failed1_pts = img_search(img, os.path.join(IMG_DIR, "failed1.bmp"))
             failed2_pts = img_search(img, os.path.join(IMG_DIR, "failed2.bmp"))
-            if failed1_pts or failed2_pts:
-                found_name = "failed1.bmp" if failed1_pts else "failed2.bmp"
+            failed3_pts = img_search(img, os.path.join(IMG_DIR, "failed3.bmp"))
+            if failed1_pts or failed2_pts or failed3_pts:
+                found_name = "failed1.bmp" if failed1_pts else ("failed2.bmp" if failed2_pts else "failed3.bmp")
                 gui_log(device.serial, f"🛑 Floating: {found_name} found! Force closing app and moving file to login-failed", step="Failed Detected")
                 device.shell("am force-stop jp.konami.pesam")
                 time.sleep(1)
@@ -2858,7 +2932,8 @@ def _read_screen_text_locked(img, serial):
         try:
             cprint(f"[OCR] [{serial}] Attempting EasyOCR...")
             if _reader is None:
-                _reader = easyocr.Reader(['en'], gpu=False)
+                # verbose=False → ปิดข้อความ "Using CPU. Note: This module is much faster with a GPU."
+                _reader = easyocr.Reader(['en'], gpu=False, verbose=False)
             
             # Apply bilateral filter to smooth card textures but keep text edges extremely sharp
             cleaned_img = cv2.bilateralFilter(img, 9, 75, 75)
@@ -2942,42 +3017,28 @@ def is_hero_match(hero_name, ocr_text):
     if not cleaned_hero or not cleaned_ocr:
         return False
     # ป้องกัน OCR ข้อความสั้นเกินไป (noise/ขยะจากหน้าจอ) จับคู่ผิดพลาด
-    if len(cleaned_ocr) < 5:
+    if len(cleaned_ocr) < 3:
         return False
-        
-    if cleaned_hero in cleaned_ocr:
-        return True
-        
+
+    # ── หลักการ: match แบบ "ตรงเต็มคำเป๊ะๆ" เท่านั้น (ไม่มี fuzzy/prefix/70%) ──
+    #    คำใดคำหนึ่งของชื่อฮีโร่ ตรงกับคำใน OCR แบบเต็มคำ = match
+    #    เช่น hero "Erling Haaland" + OCR อ่านได้ "Haaland" → match
+    #    (ข้ามคำเชื่อมสั้นๆ เช่น de/van/der กัน match มั่วกับชื่อคนอื่น)
     hero_words = cleaned_hero.split()
+    ocr_words = set(cleaned_ocr.split())
+    _skip_words = {"de", "van", "der", "dos", "das", "del", "los", "la", "el", "al", "di", "da"}
+    for w in hero_words:
+        if len(w) < 3 or w in _skip_words:
+            continue
+        if w in ocr_words:
+            return True
+
+    # เผื่อ OCR อ่านชื่อติดกันไม่มีวรรค (เช่น "erlinghaaland") — เช็คชื่อเต็มแบบไม่มีวรรค
+    # เฉพาะชื่อหลายคำเท่านั้น (ชื่อคำเดียวใช้กฎเต็มคำข้างบนพอ กัน substring มั่ว เช่น luka ใน lukaku)
     if len(hero_words) > 1:
-        if all(w in cleaned_ocr for w in hero_words):
+        if cleaned_hero.replace(" ", "") in cleaned_ocr.replace(" ", ""):
             return True
-        match_count = sum(1 for w in hero_words if w in cleaned_ocr)
-        if match_count >= max(2, len(hero_words) * 0.7):
-            return True
-            
-    # คำเดี่ยว >= 5 ตัว — อนุญาตเฉพาะฮีโร่ชื่อคำเดียว (เช่น "Mbappe", "Marcelo")
-    # ถ้าชื่อหลายคำ (เช่น "Peter Schmeichel") ห้ามจับคู่ด้วยคำเดียว ป้องกันชื่อซ้ำคนอื่น
-    if len(hero_words) == 1:
-        if len(hero_words[0]) >= 5 and hero_words[0] in cleaned_ocr:
-            return True
-            
-    # Fuzzy sequence similarity matching (90% spelling match ratio)
-    import difflib
-    len_hero = len(cleaned_hero)
-    len_ocr = len(cleaned_ocr)
-    if len_hero >= 5:
-        # Check windows of size len_hero - 1, len_hero, len_hero + 1
-        for w_size in [len_hero - 1, len_hero, len_hero + 1]:
-            if w_size < 4 or w_size > len_ocr:
-                continue
-            for start in range(len_ocr - w_size + 1):
-                sub = cleaned_ocr[start:start + w_size]
-                matcher = difflib.SequenceMatcher(None, cleaned_hero, sub)
-                if matcher.quick_ratio() >= 0.85:
-                    if matcher.ratio() >= 0.88: # ~90% similarity
-                        return True
-            
+
     return False
 
 def parse_hero_config(config_list):
@@ -4694,6 +4755,8 @@ def process_device_login(device):
             gui_log(serial, "Waiting checkpointlogin (clicking play8)...", step="play8/Check")
             play8_miss = 0   # นับรอบที่ play8 หาย + ยังไม่เจอ checkpoint (ไว้ทำ fallback กันค้าง)
             play8_click_count = 0   # นับจำนวนครั้งที่กด play8 ติดกัน — ครบ 7 → พัก 8 วิ แล้วเช็คใหม่
+            play8_stop_logged = False   # เอาไว้ log stopplay8 แค่ครั้งแรก (กัน log ถี่)
+            play8_stop_until = 0.0      # ห้ามกด play8 จนถึงเวลานี้ — ต่ออายุทุกครั้งที่เห็น stopplay8 (กันภาพกระพริบ/จับพลาดบางเฟรมแล้วเผลอกดต่อ)
             while True:
                 check_device_reset(serial, cycle_start)
                 img = get_screen_capture(device)
@@ -4716,6 +4779,26 @@ def process_device_login(device):
                         gui_log(serial, "checkpointlogin found & clicked! Proceeding...", step="Checkpoint")
                         time.sleep(4)
                         break
+
+                    # --- 1.5 เจอ stopplay8 → หยุดกด play8 ชั่วคราว รอจนกว่าจะหายไปเอง ---
+                    #     (ยังเช็ค checkpointlogin ทุกรอบตามข้อ 1 อยู่ — แค่ไม่กด play8/กลางจอซ้ำ)
+                    if img_search(img, os.path.join(IMG_DIR, "stopplay8.bmp")):
+                        play8_stop_until = time.time() + 5   # เห็นอยู่ → ห้ามกดต่ออีกอย่างน้อย 5 วิ นับจากตอนนี้
+                        if not play8_stop_logged:
+                            gui_log(serial, "stopplay8 detected — stop clicking play8, waiting...", step="play8 Stop")
+                            play8_stop_logged = True
+                        play8_miss = 0          # กัน fallback กดกลางจอทำงานระหว่างนี้
+                        play8_click_count = 0
+                        time.sleep(0.5)
+                        continue
+
+                    # เฟรมนี้ไม่เห็น stopplay8 แต่เพิ่งเห็นไปไม่เกิน 5 วิ → ยังห้ามกดอยู่
+                    # (กันเคสภาพกระพริบ/template จับพลาดบางเฟรม แล้วบอทเผลอกลับไปกด play8 ทันที)
+                    if time.time() < play8_stop_until:
+                        play8_miss = 0
+                        time.sleep(0.5)
+                        continue
+                    play8_stop_logged = False
 
                     # --- 2. ถ้ายังไม่เจอ Checkpoint ก็หา play8 / play8fix ---
                     pts_8 = img_search(img, os.path.join(IMG_DIR, "play8.bmp"))
