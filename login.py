@@ -201,6 +201,8 @@ _P = {
     'fixload2':  os.path.join(IMG_DIR, "fixload2.bmp"),
     'fixlg3':    os.path.join(IMG_DIR, "fixlg3.bmp"),
     'fixclear':  os.path.join(IMG_DIR, "fixclear.bmp"),
+    'fix0':      os.path.join(IMG_DIR, "fix0%.png"),      # เกมค้าง 0% → ปิดแอพเข้าใหม่
+    'fixupdate': os.path.join(IMG_DIR, "fixupdate.png"),  # ขึ้นให้อัปเดต → ปิดแอพเข้าใหม่
     'fixevent':  os.path.join(IMG_DIR, "fixevent.bmp"),
     'fixalert1': os.path.join(IMG_DIR, "fixalert1.bmp"),
     'fixalert2': os.path.join(IMG_DIR, "fixalert2.bmp"),
@@ -2478,6 +2480,19 @@ def get_screen_capture(device):
                             gui_log(serial_fc, f"Failed to move {original_name} to file-error: {e}", step="Fix Clear Fail")
                 raise DeviceResetException("fixclear1.png — moved to file-error")
 
+            # fix0%.png / fixupdate.png → เกมค้าง 0% หรือขึ้นให้อัปเดต
+            #   → ปิดแอพแล้วเข้าใหม่ด้วย "ไฟล์เดิม" (ไม่ย้ายไฟล์ ไม่ push ซ้ำ)
+            fx_name = None
+            if img_search(img, _P['fix0'], threshold=0.8):
+                fx_name = "fix0%.png"
+            elif img_search(img, _P['fixupdate'], threshold=0.8):
+                fx_name = "fixupdate.png"
+            if fx_name:
+                serial_fx = device.serial
+                on_fx = DEVICE_FILE_ASSIGNMENTS.get(serial_fx)
+                gui_log(serial_fx, f"{fx_name} detected! ปิดแอพแล้วเข้าใหม่...", step="Fix Restart", status="working")
+                trigger_restart_from_play8(device, serial_fx, on_fx, reason=f"{fx_name} — ปิดแอพเข้าใหม่")
+
             # sell-id → ทำงานเหมือน fixclear1 (เช็คควบคู่ทั้ง .png + .bmp ทุกรอบ)
             si_png = img_search(img, os.path.join(IMG_DIR, "sell-id.png"), threshold=0.99)
             si_bmp = img_search(img, os.path.join(IMG_DIR, "sell-id.bmp"), threshold=0.99)
@@ -3328,6 +3343,28 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
                         device.shell(f"input swipe {x} {y} {x} {y} 100")
                         gui_log(serial, f"Clicked {name_curr}", step=f"{name_curr} Click")
                         last_click_time = now
+
+                        # ── หลังกด fin2 → แวะหา fixfindnew.png 10 วิ ──
+                        #    เจอ → กด แล้วไปต่อ | ไม่เจอครบ 10 วิ → ข้าม ไปต่อตามปกติ (รอ/กด fin3)
+                        if name_curr == "fin2.bmp":
+                            gui_log(serial, "แวะหา fixfindnew.png (10s)...", step="fixfindnew Wait")
+                            ffn_deadline = time.time() + 10.0
+                            ffn_clicked  = False
+                            while time.time() < ffn_deadline:
+                                check_device_reset(serial, cycle_start)
+                                img_ffn = get_screen_capture(device)
+                                if img_ffn is not None:
+                                    pts_ffn = img_search(img_ffn, os.path.join(IMG_DIR, "fixfindnew.png"), threshold=0.8)
+                                    if pts_ffn:
+                                        x_f, y_f = pts_ffn[0]
+                                        device.shell(f"input swipe {x_f} {y_f} {x_f} {y_f} 100")
+                                        gui_log(serial, f"Clicked fixfindnew.png at ({x_f},{y_f})", step="fixfindnew Click")
+                                        ffn_clicked = True
+                                        time.sleep(1.0)
+                                        break
+                                time.sleep(0.3)
+                            if not ffn_clicked:
+                                gui_log(serial, "fixfindnew.png ไม่เจอใน 10s — ข้าม ไปต่อ fin3", step="fixfindnew Skip")
             time.sleep(0.5)
 
     while True:
