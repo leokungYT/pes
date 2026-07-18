@@ -62,7 +62,7 @@ LOGIN_SUCCESS_DIR = "login-success"
 # ── Find Hero Sequence ─────────────────────────────
 # 1 = ทำงาน fin1-fin8 และค้นหาฮีโร่ตามภาพ
 # 0 = ข้าม
-FIND_HERO = 1
+FIND_HERO = 0
 
 # แมพไฟล์ภาพฮีโร่เข้ากับชื่อฮีโร่
 HERO_IMG_MAP = {
@@ -176,7 +176,7 @@ SKIPANIMATION = 1
 # ── Login Fast Mode ───────────────────────────────
 # 1 = เจอ checkpointlogin ปุ๊บ clear app จบรอบทันที (เร็วสุด)
 # 0 = ทำงานปกติ (กด checkpointlogin แล้วไปต่อ)
-LOGIN_FAST = 0
+LOGIN_FAST = 1
 
 # ── Timeout ───────────────────────────────────────
 # 1 = Enable, 0 = Disable
@@ -223,7 +223,7 @@ GETQUEST_IMG_DIR = "img/getquest"
 # ── Move login-success → input-id (ตั้งเวลา) ────────
 # 1 = ย้ายไฟล์ทั้งหมดจาก login-success → input-id อัตโนมัติทุกวันตามเวลา MOVE_LS_TIME
 # 0 = ปิด (ย้ายเองด้วยปุ่มในหน้า config ได้ตลอด)
-MOVE_LS_ENABLE = 0
+MOVE_LS_ENABLE = 1
 # เวลาที่จะย้ายอัตโนมัติ (รูปแบบ HH:MM 24 ชั่วโมง เช่น "09:00")
 MOVE_LS_TIME = "09:00"
 
