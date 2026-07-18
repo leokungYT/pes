@@ -1558,6 +1558,7 @@ if GUI_ENABLED:
                 return
 
             client = AdbClient(host="127.0.0.1", port=5037)
+            start_cpu_balancer()   # เกลี่ย CPU ของ MuMu ข้าม socket (กันโหลดกอง group เดียวจนค้าง)
             self.log(f"Starting threads for {len(devices)} devices...")
 
             def launch_device(index):
@@ -2227,21 +2228,90 @@ _LAST_SCREENCAP_TS = {}
 _MIN_LAUNCH_INTERVAL = 20.0             # วินาที — เว้นระยะ cold-start ขั้นต่ำ/เครื่อง
 _LAST_LAUNCH_TS = {}
 
+# Global cold-start gate: เว้นระยะ cold-start ระหว่าง "คนละเครื่อง" ด้วย — กันหลาย instance
+# บูต/โหลด asset พร้อมกันจน CPU/GPU/RAM ของโฮสต์แขวนทั้งเครื่อง (Windows ANR ทั้งวง)
+_MIN_GLOBAL_LAUNCH_GAP = 6.0            # วินาที — ระยะขั้นต่ำระหว่าง cold-start ของทุกเครื่อง
+_LAUNCH_GATE_LOCK = threading.Lock()
+_GLOBAL_LAST_LAUNCH_TS = [0.0]
+
+# ── MuMu ANR / freeze auto-recovery ─────────────────────────────────────────
+# กู้เครื่องที่ "ค้างระดับ Windows" (หน้าต่าง MuMu ขึ้น Application Not Responding) อัตโนมัติ:
+# ถ้าเฟรมภาพนิ่งสนิทนานเกิน MUMU_FREEZE_SECONDS หรือ screencap ล้มเหลว (None) ต่อเนื่องเกิน
+# MUMU_DEAD_SECONDS → สั่งรีสตาร์ต instance นั้นผ่าน MuMuManager (ไม่ยุ่งกับเครื่องอื่น)
+MUMU_ANR_RECOVER      = True     # เปิด/ปิดระบบกู้เครื่องค้างอัตโนมัติ
+MUMU_FREEZE_SECONDS   = 150      # เฟรมนิ่งไม่เปลี่ยนเลยเกินกี่วิ = MuMu ค้าง (ANR)
+MUMU_DEAD_SECONDS     = 90       # screencap คืน None ต่อเนื่องเกินกี่วิ = MuMu ตาย/หลุด
+MUMU_RESTART_COOLDOWN = 240      # ห้ามรีสตาร์ต instance เดิมถี่กว่านี้ (วิ) กันรีสตาร์ตวน
+_DEVICE_FRAME_SIG         = {}   # serial -> signature เฟรมล่าสุด
+_DEVICE_FRAME_CHANGE_TS   = {}   # serial -> เวลาที่เฟรมเปลี่ยนล่าสุด
+_DEVICE_SCREENCAP_FAIL_TS = {}   # serial -> เวลาเริ่ม screencap ล้มเหลวต่อเนื่อง (None = ปกติ)
+_DEVICE_LAST_MUMU_RESTART = {}   # serial -> เวลาสั่งรีสตาร์ต MuMu ล่าสุด
+
+def _mumu_frame_sig(gray):
+    """signature ราคาถูกของเฟรม (ย่อ 16x16 แล้ว hash) — ไว้เทียบว่าภาพเปลี่ยนไหม"""
+    try:
+        return hash(cv2.resize(gray, (16, 16), interpolation=cv2.INTER_AREA).tobytes())
+    except Exception:
+        return None
+
+def _mumu_track_frame(serial, gray):
+    """อัปเดตสถานะเฟรม/ความล้มเหลวของ screencap ต่อเครื่อง (ใช้ตัดสินว่าเครื่องค้างไหม)"""
+    now = time.time()
+    if gray is None:
+        if _DEVICE_SCREENCAP_FAIL_TS.get(serial) is None:
+            _DEVICE_SCREENCAP_FAIL_TS[serial] = now   # เริ่มจับเวลา screencap ล้มเหลว
+        return
+    _DEVICE_SCREENCAP_FAIL_TS[serial] = None           # แคปได้ = เคลียร์สถานะล้มเหลว
+    sig = _mumu_frame_sig(gray)
+    if sig is None:
+        return
+    if _DEVICE_FRAME_SIG.get(serial) != sig:
+        _DEVICE_FRAME_SIG[serial] = sig
+        _DEVICE_FRAME_CHANGE_TS[serial] = now          # เฟรมเปลี่ยน → รีเซ็ตนาฬิกาค้าง
+    elif serial not in _DEVICE_FRAME_CHANGE_TS:
+        _DEVICE_FRAME_CHANGE_TS[serial] = now
+
+def _mumu_freeze_reset(serial):
+    """รีเซ็ต baseline ตัวจับค้าง — เรียกทุกครั้งหลัง cold-start/รีสตาร์ต instance
+    กัน false-positive ช่วงจอโหลด/จอดำที่เฟรมนิ่งเป็นปกติ"""
+    _DEVICE_FRAME_CHANGE_TS[serial] = time.time()
+    _DEVICE_SCREENCAP_FAIL_TS[serial] = None
+    _DEVICE_FRAME_SIG.pop(serial, None)
+
 def launch_game(device, settle=14.0):
-    """Cold-start เกมแบบมี cooldown ต่อเครื่อง — กัน relaunch ซ้อนถี่จน MuMu ค้าง (ANR)."""
+    """Cold-start เกมแบบมี cooldown ต่อเครื่อง + global gate ทั้งระบบ —
+    กัน relaunch ซ้อนถี่/หลายเครื่องบูตพร้อมกันจน MuMu ค้าง (ANR)."""
     serial = device.serial
     elapsed = time.time() - _LAST_LAUNCH_TS.get(serial, 0.0)
     if elapsed < _MIN_LAUNCH_INTERVAL:
         wait = _MIN_LAUNCH_INTERVAL - elapsed
         gui_log(serial, f"Launch cooldown — waiting {wait:.0f}s before relaunch...", step="Launch CD")
         time.sleep(wait)
-    device.shell("monkey -p jp.konami.pesam -c android.intent.category.LAUNCHER 1")
-    _LAST_LAUNCH_TS[serial] = time.time()
-    DEVICE_LAST_GAME_CHECK[serial] = time.time()
+    # global gate: เว้นระยะ cold-start ระหว่างทุกเครื่องอย่างน้อย _MIN_GLOBAL_LAUNCH_GAP วิ
+    # (ถือ lock ระหว่างเว้นระยะ → คิว cold-start ของเครื่องอื่นไว้ กันบูตพร้อมกันจนโฮสต์แขวน)
+    with _LAUNCH_GATE_LOCK:
+        gap = _MIN_GLOBAL_LAUNCH_GAP - (time.time() - _GLOBAL_LAST_LAUNCH_TS[0])
+        if gap > 0:
+            time.sleep(gap)
+        device.shell("monkey -p jp.konami.pesam -c android.intent.category.LAUNCHER 1")
+        _GLOBAL_LAST_LAUNCH_TS[0] = time.time()
+    now = time.time()
+    _LAST_LAUNCH_TS[serial] = now
+    DEVICE_LAST_GAME_CHECK[serial] = now
+    _mumu_freeze_reset(serial)   # เพิ่ง cold-start → รีเซ็ต baseline ตัวจับค้าง
     if settle > 0:
         time.sleep(settle)
 
 def fast_screencap(device):
+    # ห่อ _fast_screencap_raw เพื่อบันทึกสถานะเฟรม/ความล้มเหลว (ไว้ให้ตัวจับ MuMu ค้างใช้)
+    gray = _fast_screencap_raw(device)
+    try:
+        _mumu_track_frame(device.serial, gray)
+    except Exception:
+        pass
+    return gray
+
+def _fast_screencap_raw(device):
     # ── per-device throttle ──
     serial = device.serial
     last = _LAST_SCREENCAP_TS.get(serial, 0.0)
@@ -2331,6 +2401,274 @@ def trigger_restart_from_play8(device, serial, original_name, reason="stuck"):
     gui_log(serial, f"Restarting from play8 (attempt {cnt}, {reason}, keep login, no re-push)...", step="Restart play8", status="working")
     raise RestartFromPlay8Exception(f"restart from play8 — {reason}")
 
+def resolve_mumu_index(serial):
+    """หา MuMu instance index จาก serial — เติม SERIAL_TO_INDEX ให้ถ้ายังว่าง"""
+    idx = SERIAL_TO_INDEX.get(serial)
+    if idx is not None:
+        return idx
+    try:
+        for i, s in get_mumu_instances():
+            SERIAL_TO_INDEX[s] = i
+    except Exception:
+        pass
+    return SERIAL_TO_INDEX.get(serial)
+
+def mumu_restart_instance(index):
+    """สั่ง MuMuManager ปิดแล้วเปิด instance ใหม่ (กู้หน้าต่างที่ค้าง ANR ระดับ Windows)"""
+    _mumu(["control", "-v", str(index), "shutdown"], timeout=60)
+    time.sleep(6)
+    _mumu(["control", "-v", str(index), "launch"], timeout=90)
+
+def maybe_recover_frozen_mumu(device):
+    """ตรวจว่าหน้าต่าง MuMu ค้าง (ANR) หรือ screencap ตายต่อเนื่องไหม —
+    ถ้าใช่: รีสตาร์ต instance นั้นผ่าน MuMuManager แล้ว raise DeviceResetException
+    (คืนไฟล์กลับ input-id + เริ่มรอบใหม่บนเครื่องที่เพิ่งบูตใหม่). ต้องใช้ MuMu (USE_MUMU_ROOT)."""
+    if not MUMU_ANR_RECOVER or not USE_MUMU_ROOT:
+        return
+    serial = device.serial
+    now = time.time()
+
+    frozen_for = now - _DEVICE_FRAME_CHANGE_TS.get(serial, now)
+    fail_ts = _DEVICE_SCREENCAP_FAIL_TS.get(serial)
+    dead_for = (now - fail_ts) if fail_ts else 0.0
+    if frozen_for < MUMU_FREEZE_SECONDS and dead_for < MUMU_DEAD_SECONDS:
+        return   # ยังไม่เข้าเกณฑ์ค้าง
+
+    last_restart = _DEVICE_LAST_MUMU_RESTART.get(serial, 0.0)
+    if now - last_restart < MUMU_RESTART_COOLDOWN:
+        return   # เพิ่งรีสตาร์ตไป — ให้เวลาฟื้นก่อน (กันรีสตาร์ตวน)
+
+    reason = (f"frozen {frozen_for:.0f}s" if frozen_for >= MUMU_FREEZE_SECONDS
+              else f"screencap dead {dead_for:.0f}s")
+    idx = resolve_mumu_index(serial)
+    if idx is None:
+        gui_log(serial, f"⚠️ MuMu ค้าง ({reason}) แต่หา instance index ไม่เจอ — ข้ามรีสตาร์ต",
+                step="MuMu ANR", status="error")
+        _mumu_freeze_reset(serial)   # เลื่อน baseline กันเตือนรัวๆ
+        return
+
+    _DEVICE_LAST_MUMU_RESTART[serial] = now
+    gui_log(serial, f"🧊 MuMu ค้าง/ไม่ตอบสนอง ({reason}) → รีสตาร์ต instance {idx}...",
+            step="MuMu Restart", status="error")
+    try:
+        mumu_restart_instance(idx)
+    except Exception as e:
+        gui_log(serial, f"⚠️ รีสตาร์ต MuMu ล้มเหลว: {e}", step="MuMu Restart", status="error")
+
+    # รอเครื่องกลับมา online หลังบูตใหม่ (สูงสุด ~120 วิ)
+    online = False
+    deadline = time.time() + 120
+    while time.time() < deadline:
+        try_reconnect_device(serial)
+        if is_device_online(device):
+            online = True
+            break
+        time.sleep(4)
+
+    _mumu_freeze_reset(serial)
+    DEVICE_LAST_GAME_CHECK[serial] = time.time()   # กัน is_game_running relaunch ซ้อนทันที
+    if online:
+        gui_log(serial, f"✅ MuMu instance {idx} กลับมา online — เริ่มรอบใหม่",
+                step="MuMu Back", status="working")
+    else:
+        gui_log(serial, f"⚠️ MuMu instance {idx} ยังไม่ online — เริ่มรอบใหม่แล้วลองต่อ",
+                step="MuMu Back", status="stuck")
+    raise DeviceResetException(f"mumu ANR recovered ({reason})")
+
+# ═════════════════════════════════════════════════════════════════════════════
+# CPU affinity balancer (เครื่อง 2 socket / NUMA / >64 logical processors)
+# ─────────────────────────────────────────────────────────────────────────────
+# บนเครื่อง 2 socket (เช่น Dual Xeon = 72 logical → Windows แบ่งเป็น 2 processor group)
+# Windows จะจับทุก process ไว้ group 0 กลุ่มเดียว → core ของ socket 0 พีค 100% ส่วน
+# socket 1 นั่งว่าง → หน้าต่าง MuMu ไม่ได้ CPU ทันจนค้าง (Not Responding) ทั้งที่ CPU
+# "รวม" เหลือเพียบ. ตัวนี้เกลี่ย process ของ MuMu แบบ round-robin ข้ามทุก group ให้ใช้
+# ทั้ง 2 socket จริงๆ (ทำงานเฉพาะเครื่องที่มี >1 processor group เท่านั้น)
+CPU_AFFINITY_BALANCE = True       # เปิด/ปิด (config.py override ได้)
+_CPU_BALANCE_INTERVAL = 45.0      # วิ — เกลี่ยซ้ำทุกกี่วิ (จับ instance/threads ที่เพิ่งเกิด)
+_cpu_balancer_started = [False]
+
+if os.name == 'nt':
+    import ctypes as _ct
+    from ctypes import wintypes as _wt
+
+    class _GROUP_AFFINITY(_ct.Structure):
+        _fields_ = [("Mask", _ct.c_ulonglong), ("Group", _wt.WORD),
+                    ("Reserved", _wt.WORD * 3)]
+
+    class _THREADENTRY32(_ct.Structure):
+        _fields_ = [("dwSize", _wt.DWORD), ("cntUsage", _wt.DWORD),
+                    ("th32ThreadID", _wt.DWORD), ("th32OwnerProcessID", _wt.DWORD),
+                    ("tpBasePri", _wt.LONG), ("tpDeltaPri", _wt.LONG),
+                    ("dwFlags", _wt.DWORD)]
+
+    class _PROCESSENTRY32W(_ct.Structure):
+        _fields_ = [("dwSize", _wt.DWORD), ("cntUsage", _wt.DWORD),
+                    ("th32ProcessID", _wt.DWORD),
+                    ("th32DefaultHeapID", _ct.POINTER(_ct.c_ulong)),
+                    ("th32ModuleID", _wt.DWORD), ("cntThreads", _wt.DWORD),
+                    ("th32ParentProcessID", _wt.DWORD), ("pcPriClassBase", _wt.LONG),
+                    ("dwFlags", _wt.DWORD), ("szExeFile", _wt.WCHAR * 260)]
+
+    _k32 = _ct.WinDLL("kernel32", use_last_error=True)
+    _k32.CreateToolhelp32Snapshot.restype = _wt.HANDLE
+    _k32.CreateToolhelp32Snapshot.argtypes = [_wt.DWORD, _wt.DWORD]
+    _k32.Process32FirstW.argtypes = [_wt.HANDLE, _ct.POINTER(_PROCESSENTRY32W)]
+    _k32.Process32NextW.argtypes = [_wt.HANDLE, _ct.POINTER(_PROCESSENTRY32W)]
+    _k32.Thread32First.argtypes = [_wt.HANDLE, _ct.POINTER(_THREADENTRY32)]
+    _k32.Thread32Next.argtypes = [_wt.HANDLE, _ct.POINTER(_THREADENTRY32)]
+    _k32.OpenThread.restype = _wt.HANDLE
+    _k32.OpenThread.argtypes = [_wt.DWORD, _wt.BOOL, _wt.DWORD]
+    _k32.OpenProcess.restype = _wt.HANDLE
+    _k32.OpenProcess.argtypes = [_wt.DWORD, _wt.BOOL, _wt.DWORD]
+    _k32.SetThreadGroupAffinity.argtypes = [_wt.HANDLE, _ct.POINTER(_GROUP_AFFINITY),
+                                            _ct.POINTER(_GROUP_AFFINITY)]
+    _k32.SetThreadGroupAffinity.restype = _wt.BOOL
+    _k32.CloseHandle.argtypes = [_wt.HANDLE]
+    _k32.GetActiveProcessorGroupCount.restype = _wt.WORD
+    _k32.GetActiveProcessorCount.restype = _wt.DWORD
+    _k32.GetActiveProcessorCount.argtypes = [_wt.WORD]
+    # SetProcessDefaultCpuSetMasks (Win10 1809+) — ให้ thread ใหม่ของ process ไปเกิดถูก group ด้วย
+    _has_defcpuset = hasattr(_k32, "SetProcessDefaultCpuSetMasks")
+    if _has_defcpuset:
+        _k32.SetProcessDefaultCpuSetMasks.argtypes = [_wt.HANDLE,
+                                                      _ct.POINTER(_GROUP_AFFINITY), _wt.USHORT]
+        _k32.SetProcessDefaultCpuSetMasks.restype = _wt.BOOL
+
+    _TH32CS_SNAPPROCESS = 0x00000002
+    _TH32CS_SNAPTHREAD  = 0x00000004
+    _INVALID_HANDLE = _wt.HANDLE(-1).value
+    _THREAD_SET_INFORMATION = 0x0020
+    _THREAD_QUERY_INFORMATION = 0x0040
+    _PROCESS_SET_LIMITED_INFORMATION = 0x2000
+
+    def _iter_mumu_pids():
+        snap = _k32.CreateToolhelp32Snapshot(_TH32CS_SNAPPROCESS, 0)
+        out = []
+        if not snap or snap == _INVALID_HANDLE:
+            return out
+        try:
+            pe = _PROCESSENTRY32W(); pe.dwSize = _ct.sizeof(_PROCESSENTRY32W)
+            ok = _k32.Process32FirstW(snap, _ct.byref(pe))
+            while ok:
+                if pe.szExeFile.lower().startswith("mumu"):
+                    out.append(pe.th32ProcessID)
+                ok = _k32.Process32NextW(snap, _ct.byref(pe))
+        finally:
+            _k32.CloseHandle(snap)
+        return out
+
+    def _thread_map(pids):
+        wanted = set(pids)
+        m = {p: [] for p in wanted}
+        snap = _k32.CreateToolhelp32Snapshot(_TH32CS_SNAPTHREAD, 0)
+        if not snap or snap == _INVALID_HANDLE:
+            return m
+        try:
+            te = _THREADENTRY32(); te.dwSize = _ct.sizeof(_THREADENTRY32)
+            ok = _k32.Thread32First(snap, _ct.byref(te))
+            while ok:
+                owner = te.th32OwnerProcessID
+                if owner in wanted:
+                    m[owner].append(te.th32ThreadID)
+                ok = _k32.Thread32Next(snap, _ct.byref(te))
+        finally:
+            _k32.CloseHandle(snap)
+        return m
+
+    def _group_masks():
+        n = _k32.GetActiveProcessorGroupCount() or 1
+        masks = []
+        for g in range(n):
+            cnt = _k32.GetActiveProcessorCount(g) or 1
+            mask = 0xFFFFFFFFFFFFFFFF if cnt >= 64 else ((1 << cnt) - 1)
+            masks.append((g, mask))
+        return masks
+
+    def _set_process_default_group(pid, group, mask):
+        if not _has_defcpuset:
+            return
+        h = _k32.OpenProcess(_PROCESS_SET_LIMITED_INFORMATION, False, pid)
+        if not h:
+            return
+        try:
+            ga = _GROUP_AFFINITY(); ga.Mask = mask; ga.Group = group
+            _k32.SetProcessDefaultCpuSetMasks(h, _ct.byref(ga), 1)
+        except Exception:
+            pass
+        finally:
+            _k32.CloseHandle(h)
+
+    def _pin_threads(tids, group, mask):
+        pinned = 0
+        for tid in tids:
+            h = _k32.OpenThread(_THREAD_SET_INFORMATION | _THREAD_QUERY_INFORMATION, False, tid)
+            if not h:
+                continue
+            try:
+                ga = _GROUP_AFFINITY(); ga.Mask = mask; ga.Group = group
+                if _k32.SetThreadGroupAffinity(h, _ct.byref(ga), None):
+                    pinned += 1
+            except Exception:
+                pass
+            finally:
+                _k32.CloseHandle(h)
+        return pinned
+
+    def balance_mumu_affinity():
+        """เกลี่ย process ของ MuMu ข้ามทุก processor group (socket) แบบ round-robin.
+        คืน (จำนวน process ที่จัด, จำนวน group). group เดียว = ไม่ทำอะไร."""
+        masks = _group_masks()
+        if len(masks) <= 1:
+            return 0, len(masks)
+        pids = sorted(_iter_mumu_pids())
+        if not pids:
+            return 0, len(masks)
+        tmap = _thread_map(pids)
+        done = 0
+        for i, pid in enumerate(pids):
+            group, mask = masks[i % len(masks)]
+            _set_process_default_group(pid, group, mask)
+            if _pin_threads(tmap.get(pid, ()), group, mask) > 0:
+                done += 1
+        return done, len(masks)
+else:
+    def balance_mumu_affinity():
+        return 0, 1
+
+def _cpu_balancer_loop():
+    try:
+        from config import CPU_AFFINITY_BALANCE as _cfg_on
+        enabled = bool(_cfg_on)
+    except Exception:
+        enabled = CPU_AFFINITY_BALANCE
+    if not enabled:
+        return
+    logged = False
+    while True:
+        try:
+            done, groups = balance_mumu_affinity()
+            if not logged:
+                if groups <= 1:
+                    msg = "⚙️ CPU balancer: เครื่องมี processor group เดียว (single socket) — ข้าม"
+                else:
+                    msg = f"⚙️ CPU balancer: กระจาย MuMu {done} process ข้าม {groups} group/socket (ทุก {int(_CPU_BALANCE_INTERVAL)} วิ)"
+                cprint(msg)
+                if gui_instance:
+                    _gui_queue.put(('log', msg))
+                logged = True
+                if groups <= 1:
+                    return   # single group → เลิกลูป ไม่ต้องวนเปล่าๆ
+        except Exception:
+            pass
+        time.sleep(_CPU_BALANCE_INTERVAL)
+
+def start_cpu_balancer():
+    """สตาร์ต daemon เกลี่ย CPU affinity ของ MuMu ข้าม socket (เรียกครั้งเดียวตอนบอทเริ่ม)"""
+    if _cpu_balancer_started[0]:
+        return
+    _cpu_balancer_started[0] = True
+    threading.Thread(target=_cpu_balancer_loop, daemon=True).start()
+
 def get_screen_capture(device):
     try:
         # เช็คเกมออนอยู่หรือไม่ (ทุก 30 วิ)
@@ -2344,6 +2682,9 @@ def get_screen_capture(device):
             gui_log(device.serial, "⚠️ Game not running! Relaunching...", step="Relaunch")
             launch_game(device, settle=14)
             DEVICE_LAST_GAME_CHECK[device.serial] = time.time()
+
+        # ตรวจ/กู้ MuMu ที่ค้างระดับ Windows (ANR) อัตโนมัติ — raise DeviceResetException ถ้ากู้
+        maybe_recover_frozen_mumu(device)
 
         img = fast_screencap(device)
         if img is None:
@@ -6568,6 +6909,7 @@ def main():
             return
         global bot_running
         bot_running = True
+        start_cpu_balancer()   # เกลี่ย CPU ของ MuMu ข้าม socket (กันโหลดกอง group เดียวจนค้าง)
         client = AdbClient(host="127.0.0.1", port=5037)
         for i, serial in enumerate(devices):
             device = client.device(serial)

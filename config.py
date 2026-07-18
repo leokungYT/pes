@@ -255,3 +255,10 @@ USE_SU = True
 # เวลารอหลัง adb root/unroot (เฉพาะโหมด adb root, USE_MUMU_ROOT=False) (วินาที)
 ROOT_TOGGLE_WAIT = 3
 
+# ── CPU Affinity Balancer (เครื่อง 2 socket / NUMA / >64 logical processors) ──
+# True  = เกลี่ย process ของ MuMu ให้กระจายข้ามทุก processor group (ทั้ง 2 socket)
+#         แก้อาการ MuMu ค้าง (Not Responding) บน Dual Xeon ที่โหลดกองอยู่ socket เดียว
+#         (ทำงานเฉพาะเครื่องที่มี >1 processor group — เครื่อง socket เดียวจะข้ามให้เอง)
+# False = ปิด (ปล่อยให้ Windows จัดการ affinity เอง)
+CPU_AFFINITY_BALANCE = True
+
