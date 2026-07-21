@@ -176,7 +176,7 @@ SKIPANIMATION = 1
 # ── Login Fast Mode ───────────────────────────────
 # 1 = เจอ checkpointlogin ปุ๊บ clear app จบรอบทันที (เร็วสุด)
 # 0 = ทำงานปกติ (กด checkpointlogin แล้วไปต่อ)
-LOGIN_FAST = 1
+LOGIN_FAST = 0
 
 # ── Timeout ───────────────────────────────────────
 # 1 = Enable, 0 = Disable
@@ -203,7 +203,7 @@ OVERWRITE_CONFIG_ON_UPDATE = True
 # ── Get Code Sequence ─────────────────────────────
 # 1 = ทำขั้นตอน getcode (getcode1→getcode6 + พิมพ์โค้ด) ก่อน Box
 # 0 = ข้าม
-GETCODE = 0
+GETCODE = 1
 
 # ข้อความที่จะพิมพ์ในช่อง code (สามารถเปลี่ยนได้ตามต้องการ)
 GETCODE_TEXT = "eFCONNECT"

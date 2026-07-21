@@ -5098,6 +5098,7 @@ def process_device_login(device):
             play8_click_count = 0   # นับจำนวนครั้งที่กด play8 ติดกัน — ครบ 7 → พัก 8 วิ แล้วเช็คใหม่
             play8_stop_logged = False   # เอาไว้ log stopplay8 แค่ครั้งแรก (กัน log ถี่)
             play8_stop_until = 0.0      # ห้ามกด play8 จนถึงเวลานี้ — ต่ออายุทุกครั้งที่เห็น stopplay8 (กันภาพกระพริบ/จับพลาดบางเฟรมแล้วเผลอกดต่อ)
+            play8_fallback_rounds = 0   # นับรอบ fallback กดกลางจอ — เกิน 3 รอบ → แวะเช็ค fixout (8 วิ)
             while True:
                 check_device_reset(serial, cycle_start)
                 img = get_screen_capture(device)
@@ -5150,6 +5151,7 @@ def process_device_login(device):
 
                     if pts_8:
                         play8_miss = 0   # เจอ play8 แล้ว รีเซ็ตตัวนับ
+                        play8_fallback_rounds = 0   # เจอ play8 = ยังไม่หลุดหน้า → รีเซ็ตนับ fallback
                         # Prioritize fixlg3
                         pts_lg3 = img_search(img, os.path.join(IMG_DIR, "fixlg3.bmp"))
                         if pts_lg3:
@@ -5179,6 +5181,25 @@ def process_device_login(device):
                         gui_log(serial, "play8 gone & no checkpoint yet — fallback center click", step="play8")
                         device.shell("input swipe 480 270 480 270 100")
                         play8_miss = 0
+                        play8_fallback_rounds += 1
+
+                        # fallback เกิน 3 รอบ = น่าจะมี popup ค้างบังอยู่ → แวะหา fixout (รอสูงสุด 8 วิ) เจอแล้วกด
+                        if play8_fallback_rounds > 3:
+                            gui_log(serial, f"fallback {play8_fallback_rounds} รอบแล้ว — checking fixout (8s)...", step="play8 FixOut")
+                            fo_deadline = time.time() + 8
+                            while time.time() < fo_deadline:
+                                check_device_reset(serial, cycle_start)
+                                img_fo = fast_screencap(device)
+                                if img_fo is not None:
+                                    pts_fo = img_search(img_fo, os.path.join(IMG_DIR, "fixout.bmp"), threshold=0.95)
+                                    if pts_fo:
+                                        x_fo, y_fo = pts_fo[0]
+                                        device.shell(f"input swipe {x_fo} {y_fo} {x_fo} {y_fo} 100")
+                                        gui_log(serial, f"Clicked fixout at ({x_fo}, {y_fo})", step="play8 FixOut")
+                                        time.sleep(1.5)
+                                        break
+                                time.sleep(0.5)
+                            play8_fallback_rounds = 0   # เช็คแล้ว (เจอหรือไม่ก็ตาม) → เริ่มนับรอบใหม่
 
                 time.sleep(0.3)
 
