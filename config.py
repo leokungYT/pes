@@ -203,7 +203,7 @@ OVERWRITE_CONFIG_ON_UPDATE = True
 # ── Get Code Sequence ─────────────────────────────
 # 1 = ทำขั้นตอน getcode (getcode1→getcode6 + พิมพ์โค้ด) ก่อน Box
 # 0 = ข้าม
-GETCODE = 1
+GETCODE = 0
 
 # ข้อความที่จะพิมพ์ในช่อง code (สามารถเปลี่ยนได้ตามต้องการ)
 GETCODE_TEXT = "eFCONNECT"
