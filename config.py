@@ -223,7 +223,7 @@ GETQUEST_IMG_DIR = "img/getquest"
 # ── Move login-success → input-id (ตั้งเวลา) ────────
 # 1 = ย้ายไฟล์ทั้งหมดจาก login-success → input-id อัตโนมัติทุกวันตามเวลา MOVE_LS_TIME
 # 0 = ปิด (ย้ายเองด้วยปุ่มในหน้า config ได้ตลอด)
-MOVE_LS_ENABLE = 1
+MOVE_LS_ENABLE = 0
 # เวลาที่จะย้ายอัตโนมัติ (รูปแบบ HH:MM 24 ชั่วโมง เช่น "09:00")
 MOVE_LS_TIME = "09:00"
 
