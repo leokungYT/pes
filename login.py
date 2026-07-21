@@ -5186,10 +5186,10 @@ def process_device_login(device):
                         x, y = pts_8[0]
                         device.shell(f"input swipe {x} {y} {x} {y} 100")
                         play8_click_count += 1
-                        gui_log(serial, f"Found {matched_name}! Clicked. ({play8_click_count}/7)", step="play8")
-                        if play8_click_count >= 7:
-                            # กดครบ 7 ครั้ง → พัก 8 วิ แล้วรีเซ็ตตัวนับ → วนกลับไปเช็ค/กดต่อถ้ายังเจอ
-                            gui_log(serial, "กด play8 ครบ 7 ครั้ง → พัก 8 วิ แล้วเช็คใหม่...", step="play8 Wait")
+                        gui_log(serial, f"Found {matched_name}! Clicked. ({play8_click_count}/5)", step="play8")
+                        if play8_click_count >= 5:
+                            # กดครบ 5 ครั้ง → พัก 8 วิ แล้วรีเซ็ตตัวนับ → วนกลับไปเช็ค/กดต่อถ้ายังเจอ
+                            gui_log(serial, "กด play8 ครบ 5 ครั้ง → พัก 8 วิ แล้วเช็คใหม่...", step="play8 Wait")
                             play8_click_count = 0
                             time.sleep(8)
                         else:
