@@ -6066,6 +6066,23 @@ def process_device_login(device):
                                 x, y = pts[0]
                                 device.shell(f"input swipe {x} {y} {x} {y} 100")
                                 time.sleep(4)
+
+                                # หลังกด box1 → แวะหา ad-rewardfix1 (5 วิ) เจอแล้วกดก่อนค่อยไปสเต็ปต่อไป
+                                gui_log(serial, "Checking ad-rewardfix1 (5s)...", step="box1 AdFix")
+                                ad_deadline = time.time() + 5
+                                while time.time() < ad_deadline:
+                                    check_device_reset(serial, cycle_start)
+                                    img_ad = get_screen_capture(device)
+                                    if img_ad is not None:
+                                        pts_ad = img_search(img_ad, os.path.join(IMG_DIR, "ad-rewardfix1.bmp"))
+                                        if pts_ad:
+                                            x_ad, y_ad = pts_ad[0]
+                                            device.shell(f"input swipe {x_ad} {y_ad} {x_ad} {y_ad} 100")
+                                            gui_log(serial, f"ad-rewardfix1 found! Clicked ({x_ad}, {y_ad})", step="box1 AdFix")
+                                            time.sleep(2)
+                                            break
+                                    time.sleep(0.5)
+
                                 box1_found = True
                                 break
                         time.sleep(1.2)
