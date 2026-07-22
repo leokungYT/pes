@@ -257,6 +257,13 @@ if GUI_ENABLED:
             var_skipanim = ctk.IntVar(value=getattr(cfg, 'SKIPANIMATION', 0))
             ctk.CTkSwitch(row_skipanim, text="", variable=var_skipanim, onvalue=1, offvalue=0).pack(side="right")
 
+            # 5.7 CHECK_COIN Switch
+            row_ccoin = ctk.CTkFrame(form_frame, fg_color="transparent")
+            row_ccoin.pack(fill="x", pady=4)
+            ctk.CTkLabel(row_ccoin, text="Check Coin (สแกนเหรียญ → ชื่อไฟล์ +[เลข])", font=ctk.CTkFont(size=12)).pack(side="left")
+            var_ccoin = ctk.IntVar(value=getattr(cfg, 'CHECK_COIN', 0))
+            ctk.CTkSwitch(row_ccoin, text="", variable=var_ccoin, onvalue=1, offvalue=0).pack(side="right")
+
             # 6. HERO_LIST_FREE Textarea
             ctk.CTkLabel(form_frame, text="Hero Target List (รายชื่อนักเตะ - บรรทัดละคน):", font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10, 2))
             txt_heroes = ctk.CTkTextbox(form_frame, height=180, font=ctk.CTkFont(family="Consolas", size=11))
@@ -267,7 +274,7 @@ if GUI_ENABLED:
             txt_heroes.insert("1.0", current_heroes)
 
             def _save():
-                global DO_BOX, GACHA_FREE, GACHA_FREE_LOOPS, HERO_LIST_FREE, DEBUG_OCR, EVENT_IMG, NOSCAN, SKIPANIMATION, GETQUEST
+                global DO_BOX, GACHA_FREE, GACHA_FREE_LOOPS, HERO_LIST_FREE, DEBUG_OCR, EVENT_IMG, NOSCAN, SKIPANIMATION, GETQUEST, CHECK_COIN
 
                 val_event = var_event.get()
                 val_box = var_box.get()
@@ -282,6 +289,7 @@ if GUI_ENABLED:
                 val_getquest = var_getquest.get()
                 val_noscan = var_noscan.get()
                 val_skipanim = var_skipanim.get()
+                val_ccoin = var_ccoin.get()
 
                 # Parse heroes
                 raw_heroes = txt_heroes.get("1.0", "end").strip()
@@ -347,6 +355,12 @@ NOSCAN = {val_noscan}
 #     จนกว่าจะเจอ skiphero.bmp แล้วคลิก → ไปหา next ต่อ
 # 0 = ทำงานปกติ (ไม่กดข้ามแอนิเมชั่น)
 SKIPANIMATION = {val_skipanim}
+
+# ── Check Coin Sequence ───────────────────────────
+# 1 = ก่อน backup ไฟล์ สแกนเหรียญ (หา checkpointcoin.bmp → OCR ที่ Region(52, 10, 106, 41))
+#     แล้วแนบเลขต่อท้ายชื่อไฟล์ เช่น ASEQ918059202+[310].dat
+# 0 = ข้าม
+CHECK_COIN = {val_ccoin}
 """
                 try:
                     with open(cfg_path, "w", encoding="utf-8") as f:
@@ -362,10 +376,11 @@ SKIPANIMATION = {val_skipanim}
                     NOSCAN = val_noscan
                     SKIPANIMATION = val_skipanim
                     GETQUEST = val_getquest
+                    CHECK_COIN = val_ccoin
 
                     importlib.reload(cfg)
                     label_status.configure(text="✅ Saved settings successfully!", text_color="#2cc985")
-                    self.log(f"Config updated: EVENT={val_event}, BOX={val_box}, FREE={val_free}, LOOPS={val_loops}, NOSCAN={val_noscan}, SKIP={val_skipanim}, GETQUEST={val_getquest}, HEROES={len(parsed_heroes)}")
+                    self.log(f"Config updated: EVENT={val_event}, BOX={val_box}, FREE={val_free}, LOOPS={val_loops}, NOSCAN={val_noscan}, SKIP={val_skipanim}, GETQUEST={val_getquest}, CCOIN={val_ccoin}, HEROES={len(parsed_heroes)}")
                 except Exception as ex:
                     label_status.configure(text=f"❌ Save error: {ex}", text_color="#ff5555")
 
@@ -509,6 +524,10 @@ def gui_log(serial, msg, step=None, status=None):
 
 # --- Configuration ---
 from config_gen import DO_BOX, IMG_DIR, GACHA_FREE, GACHA_FREE_LOOPS, HERO_LIST_FREE, DEBUG_OCR, EVENT_IMG, NOSCAN, SKIPANIMATION, GETQUEST, GETQUEST_IMG_DIR
+try:
+    from config_gen import CHECK_COIN
+except ImportError:
+    CHECK_COIN = 0
 IMAGE_CACHE       = {}
 SCREENCAP_SCALE   = 0.5
 _image_cache_lock = threading.Lock()
@@ -522,6 +541,9 @@ os.makedirs(FAST_RANDOM_DIR, exist_ok=True)
 # OCR imports (optional)
 try:
     import easyocr
+    # ปิด warning "pin_memory ... no accelerator" ของ torch (รันบน CPU ไม่มีผลอะไร)
+    import warnings as _warnings
+    _warnings.filterwarnings("ignore", message=".*pin_memory.*")
 except ImportError:
     easyocr = None
 try:
@@ -894,7 +916,7 @@ def read_screen_text(img, region=None, serial="unknown"):
             global _reader
             try:
                 if _reader is None:
-                    _reader = easyocr.Reader(['en'], gpu=False)
+                    _reader = easyocr.Reader(['en'], gpu=False, verbose=False)
                 
                 # Apply bilateral filter to smooth card textures but keep text edges extremely sharp
                 cleaned_img = cv2.bilateralFilter(img, 9, 75, 75)
@@ -929,6 +951,120 @@ def read_screen_text(img, region=None, serial="unknown"):
             except Exception as e:
                 print(f"[OCR] Pytesseract Error: {e}")
     return ""
+
+# ── Coin OCR (digits-only + multi-frame consensus) ───────────────────────────
+# พิกัดเลขเหรียญบนจอ 960x540 (x, y, w, h) — จะย้ายจุดสแกนแก้ตรงนี้ที่เดียว
+# (เทสหาพิกัดด้วย: py test-coin-scan.py <serial> <x> <y> <w> <h>)
+COIN_SCAN_REGION = Region(52, 10, 106, 41)
+
+def _capture_fullres(serial):
+    """แคปหน้าจอ "ความละเอียดเต็ม" (960x540) — pipeline เดียวกับ test-coin-scan.py เป๊ะ
+    *** สำคัญ: fast_screencap ของ main-pes ย่อภาพ SCREENCAP_SCALE=0.5 ***
+    พิกัด COIN_SCAN_REGION เป็นพิกัดจอเต็ม เลยต้องแคปเต็มเท่านั้นถึงจะครอปตรงตำแหน่ง"""
+    try:
+        kwargs = {'creationflags': 0x08000000} if os.name == 'nt' else {}
+        r = subprocess.run([adb_path, "-s", serial, "exec-out", "screencap", "-p"],
+                           capture_output=True, timeout=15, **kwargs)
+        return cv2.imdecode(np.frombuffer(r.stdout, np.uint8), cv2.IMREAD_COLOR)
+    except Exception:
+        return None
+
+def _ocr_digits(img_crop, serial="unknown"):
+    """OCR เลขเหรียญ: grayscale + ขยาย 3 เท่าแบบสะอาด (resize อย่างเดียว ไม่มี filter/threshold)
+    + allowlist 0-9 — เลขในกรอบเล็กเกินไป ถ้าไม่ขยาย EasyOCR มองไม่ออก (อ่านได้ 0/ว่าง)
+    ส่วน filter/invert หลาย variant ที่เคยใส่คือตัวทำให้เพี้ยน (310→395) เลยตัดทิ้งหมด"""
+    if img_crop is None or img_crop.size == 0:
+        return ""
+    g = cv2.cvtColor(img_crop, cv2.COLOR_BGR2GRAY) if len(img_crop.shape) == 3 else img_crop
+    g = cv2.resize(g, None, fx=3.0, fy=3.0, interpolation=cv2.INTER_CUBIC)
+
+    with ocr_lock:
+        if easyocr is not None:
+            global _reader
+            try:
+                if _reader is None:
+                    _reader = easyocr.Reader(['en'], gpu=False, verbose=False)
+                res = _reader.readtext(g, detail=0, allowlist='0123456789')
+                digits = "".join(ch for ch in "".join(res) if ch.isdigit())
+                if digits:
+                    return digits
+            except Exception:
+                pass
+        if pytesseract is not None:
+            try:
+                t = pytesseract.image_to_string(
+                    g, lang="eng",
+                    config="--psm 7 -c tessedit_char_whitelist=0123456789").strip()
+                digits = "".join(ch for ch in t if ch.isdigit())
+                if digits:
+                    return digits
+            except Exception:
+                pass
+    return ""
+
+def scan_coin_number_mainpes(device, cycle_start, serial):
+    """รอ checkpointcoin.bmp → OCR เลขเหรียญที่ COIN_SCAN_REGION → คืนเลขเหรียญ (string)
+    หรือ None ถ้าหา checkpointcoin ไม่เจอ (สแกนอย่างเดียว ไม่ย้ายไฟล์/ไม่ปิดแอป)
+    ความแม่น: อ่านสูงสุด 5 เฟรม (เฟรมละหลาย variant) — เลขตรงกัน 2 เฟรม = จบทันที
+    ไม่งั้นใช้เสียงข้างมากจากทุกเฟรมที่อ่านได้"""
+    gui_log(serial, "Waiting checkpointcoin (Check Coin)...", step="Coin Wait", status="working")
+    deadline = time.time() + 60
+    found_cp = False
+    while time.time() < deadline:
+        check_device_reset(serial, cycle_start)
+        img = get_screen_capture(device)
+        if img is not None:
+            pts = ImgSearchADB(img, os.path.join(IMG_DIR, "checkpointcoin.bmp"))
+            if pts:
+                found_cp = True
+                break
+        time.sleep(1)
+
+    if not found_cp:
+        gui_log(serial, "checkpointcoin.bmp not found — skip coin scan.", step="Coin Timeout")
+        return None
+
+    gui_log(serial, "checkpointcoin detected! Scanning coins (multi-frame)...", step="Scanning Coin")
+    reads = []
+    coin_number = None
+    for attempt in range(5):
+        check_device_reset(serial, cycle_start)
+        # แคปเต็มความละเอียด (ไม่ใช่ get_screen_capture ที่ย่อ 0.5) — ให้ตรงกับ test-coin-scan.py เป๊ะ
+        img = _capture_fullres(serial)
+        if img is not None:
+            r = COIN_SCAN_REGION
+            crop = img[r.y:r.y + r.h, r.x:r.x + r.w]
+
+            if DEBUG_OCR:
+                try:
+                    os.makedirs("debug-ocr", exist_ok=True)
+                    ts = time.strftime("%Y%m%d_%H%M%S")
+                    safe_serial = serial.replace(":", "-").replace(".", "_")
+                    cv2.imwrite(os.path.join("debug-ocr", f"coin_{safe_serial}_{ts}_{attempt}.png"), crop)
+                except Exception:
+                    pass
+
+            digits = _ocr_digits(crop, serial)
+            if digits:
+                reads.append(digits)
+                gui_log(serial, f"Coin read #{len(reads)}: {digits}", step="Scanning Coin")
+                # อ่านได้เลขเดียวกัน 2 เฟรม = มั่นใจแล้ว จบเลย
+                if reads.count(digits) >= 2:
+                    coin_number = digits
+                    break
+        time.sleep(0.6)
+
+    # ไม่มีเลขที่ตรงกัน 2 เฟรม → ใช้เสียงข้างมากจากเฟรมที่อ่านได้
+    if coin_number is None and reads:
+        from collections import Counter
+        coin_number = Counter(reads).most_common(1)[0][0]
+
+    if not coin_number:
+        gui_log(serial, "Could not read coins via OCR! Using '0'", step="OCR Fail")
+        coin_number = "0"
+
+    gui_log(serial, f"🪙 Coins scanned: {coin_number}", step="Coin Match")
+    return coin_number
 
 def is_hero_match(hero_name, ocr_text):
     if not hero_name or not ocr_text:
@@ -2309,6 +2445,13 @@ def process_device(serial_or_device):
 
             # 5. FINAL BACKUP LOGIC
             gui_log(serial, "Starting final backup sequence...", step="Final Backup")
+
+            # ── Check Coin (CHECK_COIN=1): สแกนเหรียญ "ก่อน" ปิดแอป → แนบ +[เลข] ท้ายชื่อไฟล์ ──
+            coin_scanned = None
+            if CHECK_COIN == 1:
+                coin_scanned = scan_coin_number_mainpes(device, cycle_start, serial)
+            coin_suffix = f"+[{coin_scanned}]" if coin_scanned is not None else ""
+
             backup_dir = "backup"
             if not os.path.exists(backup_dir): os.makedirs(backup_dir)
             safe_serial = serial.replace(".", "_").replace(":", "_")
@@ -2345,17 +2488,17 @@ def process_device(serial_or_device):
                     
                     # ถ้า NOSCAN=1 → ส่งไป fast-random/ เสมอ
                     if NOSCAN == 1:
-                        final_name = f"{user_code}.dat"
+                        final_name = f"{user_code}{coin_suffix}.dat"
                         dest_dir = FAST_RANDOM_DIR
                         gui_log(serial, f"NOSCAN → {dest_dir}/{final_name}", step="Fast Random")
                     # ถ้ามี gacha free result → ส่งไป backup-id
                     elif GACHA_FREE == 1 and gacha_free_result:
                         hero_prefix = "+".join(gacha_free_result)
-                        final_name = f"{hero_prefix}+{user_code}.dat"
+                        final_name = f"{hero_prefix}+{user_code}{coin_suffix}.dat"
                         dest_dir = BACKUP_ID_DIR
                         gui_log(serial, f"⭐ HERO FOUND: {hero_prefix} → {dest_dir}", step="Match!")
                     else:
-                        final_name = f"{user_code}.dat"
+                        final_name = f"{user_code}{coin_suffix}.dat"
                         dest_dir = backup_dir
 
                     final_local_path = os.path.join(dest_dir, final_name)
