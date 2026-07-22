@@ -838,6 +838,22 @@ def load_template(find_img_path):
         IMAGE_CACHE[find_img_path] = t
     return t
 
+def _group_rectangles_compat(rects):
+    """รวมกรอบซ้อน/ใกล้กัน — ใช้ cv2.groupRectangles ถ้ามี
+    (OpenCV บางเวอร์ชันใหม่ถอดออก → fallback รวมกรอบเองด้วยระยะห่างครึ่ง template)"""
+    if hasattr(cv2, "groupRectangles"):
+        grouped, _ = cv2.groupRectangles(rects, groupThreshold=1, eps=1)
+        return grouped
+    out = []
+    for (x, y, w, h) in rects:
+        for i, (gx, gy, gw, gh) in enumerate(out):
+            if abs(x - gx) <= w // 2 and abs(y - gy) <= h // 2:
+                out[i] = ((gx + x) // 2, (gy + y) // 2, gw, gh)
+                break
+        else:
+            out.append((x, y, w, h))
+    return out
+
 def _match_template(img_gray, find_img_path, threshold):
     """ค้นหา template เดียว คืน list of (x,y) หรือ []"""
     find_img = load_template(find_img_path)
@@ -854,7 +870,7 @@ def _match_template(img_gray, find_img_path, threshold):
         rect = [int(loc[0]), int(loc[1]), needle_w, needle_h]
         rectangles.append(rect)
         rectangles.append(rect)
-    rectangles, _ = cv2.groupRectangles(rectangles, groupThreshold=1, eps=1)
+    rectangles = _group_rectangles_compat(rectangles)
     inv = 1.0 / SCREENCAP_SCALE if SCREENCAP_SCALE != 1.0 else 1.0
     return [(int((x + w / 2) * inv), int((y + h / 2) * inv)) for (x, y, w, h) in rectangles]
 
