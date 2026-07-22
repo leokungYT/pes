@@ -3033,25 +3033,27 @@ def get_screen_capture(device):
                         img = fast_screencap(device)
 
             # fixout floating check — ปุ่ม X ของ popup (เช่น Terms of Use) โผล่บังจอ
-            # เช็คว่าค้างจริง ~3 วิ ก่อนกด (กันกดพลาดตอนหน้าจอกำลังเปลี่ยน)
+            # ยืนยันซ้ำแค่ 1 ครั้ง (~1.2 วิ) กันกดพลาดตอนหน้าจอกำลังเปลี่ยน
+            # ถ้าแคปเฟรมยืนยันไม่ได้ → ถือว่ายังอยู่ กดที่พิกัดเดิมเลย (อย่าเงียบทิ้ง)
             fo_pts = img_search(img, os.path.join(IMG_DIR, "fixout.bmp"), threshold=0.85)
             if fo_pts:
-                gui_log(device.serial, "Floating: fixout found! Checking if it persists for 3s...", step="Fix Out")
-                fo_persisted = True
-                for _ in range(3):
-                    time.sleep(1)
-                    img_check = fast_screencap(device)
-                    if img_check is None or not img_search(img_check, os.path.join(IMG_DIR, "fixout.bmp"), threshold=0.85):
-                        fo_persisted = False
-                        break
-                if fo_persisted:
-                    img_click = fast_screencap(device)
-                    pts_click = img_search(img_click, os.path.join(IMG_DIR, "fixout.bmp"), threshold=0.85) if img_click is not None else None
-                    if pts_click:
-                        x_fo, y_fo = pts_click[0]
-                        device.shell(f"input swipe {x_fo} {y_fo} {x_fo} {y_fo} 100")
-                        gui_log(device.serial, f"Clicked fixout at ({x_fo}, {y_fo})", step="Fix Out")
-                        time.sleep(1.5)
+                x_fo, y_fo = fo_pts[0]
+                gui_log(device.serial, "Floating: fixout found! Confirming (1.2s)...", step="Fix Out")
+                time.sleep(1.2)
+                img_check = fast_screencap(device)
+                pts_check = img_search(img_check, os.path.join(IMG_DIR, "fixout.bmp"), threshold=0.85) if img_check is not None else None
+                if pts_check:
+                    x_fo, y_fo = pts_check[0]   # ยังอยู่ → ใช้พิกัดล่าสุด
+                    fo_still = True
+                elif img_check is None:
+                    fo_still = True             # แคปยืนยันไม่ได้ → ถือว่ายังอยู่ กดพิกัดเดิม
+                else:
+                    fo_still = False
+                    gui_log(device.serial, "fixout gone on confirm — skip click", step="Fix Out")
+                if fo_still:
+                    device.shell(f"input swipe {x_fo} {y_fo} {x_fo} {y_fo} 100")
+                    gui_log(device.serial, f"Clicked fixout at ({x_fo}, {y_fo})", step="Fix Out")
+                    time.sleep(1.5)
                     img = fast_screencap(device)
                     if img is None:
                         return None
