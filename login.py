@@ -2386,6 +2386,25 @@ def is_game_running(device):
 
 FIXCLEAR_FIRST_SEEN = {}
 
+def fixout_back_spam_until_cancel(device, serial):
+    """เจอ fixout (popup บังจอ) → กด Back รัวๆ จนกว่าจะเจอ cancel.bmp → คลิก → ค่อยหยุด
+    ไม่มี timeout (ทางออกเดียว = เจอ cancel หรือกดปุ่ม reset เอง)
+    ใช้ fast_screencap ล้วนๆ — ห้ามเรียก get_screen_capture ในนี้ (กันวนซ้อนตัวเอง)"""
+    gui_log(serial, "fixout detected → Spamming Back until cancel.bmp...", step="FixOut Back")
+    while True:
+        check_device_reset(serial)
+        device.shell("input keyevent 4")   # KEYCODE_BACK
+        time.sleep(1.0)
+        img_bs = fast_screencap(device)
+        if img_bs is not None:
+            pts_c = img_search(img_bs, os.path.join(IMG_DIR, "cancel.bmp"))
+            if pts_c:
+                x_c, y_c = pts_c[0]
+                device.shell(f"input swipe {x_c} {y_c} {x_c} {y_c} 100")
+                gui_log(serial, f"cancel.bmp found — clicked ({x_c},{y_c}), stop Back spam", step="FixOut Cancel")
+                time.sleep(1.5)
+                return
+
 def trigger_restart_from_play8(device, serial, original_name, reason="stuck"):
     """เริ่มใหม่ "ตั้งแต่ play8" (เปิดเกมเดิม เก็บ login ไม่ push ซ้ำ)
     วนซ้ำไปเรื่อยๆ จนกว่าอาการ (fixclear/ค้าง) จะหายไป — ไม่ส่ง file-error/ไม่ยอมแพ้
@@ -3032,31 +3051,22 @@ def get_screen_capture(device):
                                 time.sleep(2)
                         img = fast_screencap(device)
 
-            # fixout floating check — ปุ่ม X ของ popup (เช่น Terms of Use) โผล่บังจอ
-            # ยืนยันซ้ำแค่ 1 ครั้ง (~1.2 วิ) กันกดพลาดตอนหน้าจอกำลังเปลี่ยน
-            # ถ้าแคปเฟรมยืนยันไม่ได้ → ถือว่ายังอยู่ กดที่พิกัดเดิมเลย (อย่าเงียบทิ้ง)
+            # fixout floating check — popup บังจอ (เช่น Terms of Use)
+            # ยืนยันซ้ำ 1 ครั้ง (~1.2 วิ) กันจับพลาดตอนหน้าจอกำลังเปลี่ยน
+            # เจอจริง → กด Back รัวๆ จนเจอ cancel.bmp แล้วคลิก ค่อยกลับมาทำงานต่อ
             fo_pts = img_search(img, os.path.join(IMG_DIR, "fixout.bmp"), threshold=0.85)
             if fo_pts:
-                x_fo, y_fo = fo_pts[0]
                 gui_log(device.serial, "Floating: fixout found! Confirming (1.2s)...", step="Fix Out")
                 time.sleep(1.2)
                 img_check = fast_screencap(device)
                 pts_check = img_search(img_check, os.path.join(IMG_DIR, "fixout.bmp"), threshold=0.85) if img_check is not None else None
-                if pts_check:
-                    x_fo, y_fo = pts_check[0]   # ยังอยู่ → ใช้พิกัดล่าสุด
-                    fo_still = True
-                elif img_check is None:
-                    fo_still = True             # แคปยืนยันไม่ได้ → ถือว่ายังอยู่ กดพิกัดเดิม
-                else:
-                    fo_still = False
-                    gui_log(device.serial, "fixout gone on confirm — skip click", step="Fix Out")
-                if fo_still:
-                    device.shell(f"input swipe {x_fo} {y_fo} {x_fo} {y_fo} 100")
-                    gui_log(device.serial, f"Clicked fixout at ({x_fo}, {y_fo})", step="Fix Out")
-                    time.sleep(1.5)
+                if pts_check or img_check is None:   # ยังอยู่ (หรือแคปยืนยันไม่ได้ = ถือว่ายังอยู่)
+                    fixout_back_spam_until_cancel(device, device.serial)
                     img = fast_screencap(device)
                     if img is None:
                         return None
+                else:
+                    gui_log(device.serial, "fixout gone on confirm — skip", step="Fix Out")
 
             # fixalert1.bmp floating check — เจอ fixalert1 (หาทุกเฟรมอยู่แล้ว) → กด fixalert2 แล้วไปต่อ
             # (ไม่คลิก fixalert1 เอง — fixalert1 เป็นแค่ตัวชี้ว่ามี alert, ปุ่มที่ต้องกดคือ fixalert2)
@@ -5184,14 +5194,11 @@ def process_device_login(device):
                         continue
                     play8_stop_logged = False
 
-                    # --- 1.7 หา fixout ลอยๆ "ทุกเฟรม" (popup ปุ่ม X บังจอ เช่น Terms of Use) ---
-                    #     เจอแล้วกดทันที → popup หาย → checkpointlogin/play8 โผล่ให้ทำงานต่อ
+                    # --- 1.7 หา fixout ลอยๆ "ทุกเฟรม" (popup บังจอ เช่น Terms of Use) ---
+                    #     เจอ → กด Back รัวๆ จนเจอ cancel.bmp แล้วคลิก ค่อยกลับมาลูป play8 ต่อ
                     pts_fo = img_search(img, os.path.join(IMG_DIR, "fixout.bmp"), threshold=0.85)
                     if pts_fo:
-                        x_fo, y_fo = pts_fo[0]
-                        device.shell(f"input swipe {x_fo} {y_fo} {x_fo} {y_fo} 100")
-                        gui_log(serial, f"fixout found! Clicked ({x_fo}, {y_fo})", step="play8 FixOut")
-                        time.sleep(1.5)
+                        fixout_back_spam_until_cancel(device, serial)
                         continue
 
                     # --- 2. ถ้ายังไม่เจอ Checkpoint ก็หา play8 / play8fix ---
