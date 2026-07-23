@@ -5184,6 +5184,16 @@ def process_device_login(device):
                         continue
                     play8_stop_logged = False
 
+                    # --- 1.7 หา fixout ลอยๆ "ทุกเฟรม" (popup ปุ่ม X บังจอ เช่น Terms of Use) ---
+                    #     เจอแล้วกดทันที → popup หาย → checkpointlogin/play8 โผล่ให้ทำงานต่อ
+                    pts_fo = img_search(img, os.path.join(IMG_DIR, "fixout.bmp"), threshold=0.85)
+                    if pts_fo:
+                        x_fo, y_fo = pts_fo[0]
+                        device.shell(f"input swipe {x_fo} {y_fo} {x_fo} {y_fo} 100")
+                        gui_log(serial, f"fixout found! Clicked ({x_fo}, {y_fo})", step="play8 FixOut")
+                        time.sleep(1.5)
+                        continue
+
                     # --- 2. ถ้ายังไม่เจอ Checkpoint ก็หา play8 / play8fix ---
                     pts_8 = img_search(img, os.path.join(IMG_DIR, "play8.bmp"))
                     matched_name = "play8"
@@ -5222,20 +5232,9 @@ def process_device_login(device):
                             time.sleep(0.5)
                         continue
 
-                    # --- 3. play8/play8fix หายแล้วแต่ยังไม่เจอ checkpoint → รอเฉยๆ (ไม่กดกลางจอแล้ว) ---
+                    # --- 3. play8/play8fix หายแล้วแต่ยังไม่เจอ checkpoint → รอเฉยๆ วนเช็คต่อ ---
+                    #     (checkpointlogin/fixout ถูกเช็คทุกเฟรมข้างบนอยู่แล้ว)
                     play8_miss += 1
-
-                    # ค้าง (ไม่เจอ play8/checkpoint) เกิน ~8 วิ → หา fixout ลอยๆ ทุกเฟรม เจอแล้วกดทันที
-                    # (popup อย่าง Terms of Use มีปุ่ม X = fixout — ต้องกดปุ่มนี้ถึงจะหลุด)
-                    if play8_miss >= 27:   # ~8 วิ (27 * 0.3s)
-                        pts_fo = img_search(img, os.path.join(IMG_DIR, "fixout.bmp"), threshold=0.85)
-                        if pts_fo:
-                            x_fo, y_fo = pts_fo[0]
-                            device.shell(f"input swipe {x_fo} {y_fo} {x_fo} {y_fo} 100")
-                            gui_log(serial, f"Stuck 8s+ — fixout found! Clicked ({x_fo}, {y_fo})", step="play8 FixOut")
-                            play8_miss = 0
-                            time.sleep(1.5)
-                            continue
 
                 time.sleep(0.3)
 
