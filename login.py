@@ -5305,11 +5305,17 @@ def process_device_login(device):
 
             else:
                 # ─── mode no-event: รอ play22 แล้วกด Back รัวๆ จนเจอ cancel ─
+                skip_cancel_step = False   # True = fixout→cancel กดไปแล้วรอบเดียวพอ → ข้ามขั้นนี้ไป box/step ถัดไปเลย
                 gui_log(serial, "Waiting play22 (no-event mode)...", step="play22")
                 deadline = time.time() + 10
                 while time.time() < deadline:
                     check_device_reset(serial, cycle_start)
                     img = get_screen_capture(device)
+                    # fixout→Back spam→cancel เพิ่งทำงาน (จาก floating check) = กด cancel แล้ว → ข้ามขั้นนี้เลย
+                    if DEVICE_FIXOUT_CANCEL_DONE.pop(serial, None):
+                        gui_log(serial, "fixout→cancel done — ข้ามขั้น Back/cancel ไป step ถัดไปเลย", step="Cancel Skip")
+                        skip_cancel_step = True
+                        break
                     if img is not None:
                         pts = img_search(img, os.path.join(IMG_DIR, "play22.bmp"))
                         if pts:
@@ -5318,25 +5324,30 @@ def process_device_login(device):
                     time.sleep(0.5)
 
                 # กด Back รัวๆ จนกว่าจะเจอ cancel.bmp (ไม่มี timeout → กดไปเรื่อยๆ จนกว่าจะเจอ)
-                gui_log(serial, "Spamming Back until cancel.bmp...", step="Cancel")
-                while True:
-                    check_device_reset(serial, cycle_start)
-                    device.shell("input keyevent 4")   # KEYCODE_BACK
-                    time.sleep(1.0)
-                    try:
-                        img = get_screen_capture(device)
-                    except ResetGachaException:
-                        # fixgachanew เด้งระหว่างกด Back → get_screen_capture เคลียร์ป็อปอัพให้แล้ว
-                        # ไม่ต้องหยุด → กด Back ต่อไปเรื่อยๆ จนกว่าจะเจอ cancel.bmp
-                        continue
-                    if img is not None:
-                        pts = img_search(img, os.path.join(IMG_DIR, "cancel.bmp"))
-                        if pts:
-                            x, y = pts[0]
-                            gui_log(serial, f"cancel.bmp found — clicking ({x},{y})", step="Click Cancel")
-                            # กดจนกว่าจะหายไปครบ 3 วิ ค่อยไปต่อ
-                            click_cancel_until_gone(device, serial, x, y, step="Cancel")
+                if not skip_cancel_step:
+                    gui_log(serial, "Spamming Back until cancel.bmp...", step="Cancel")
+                    while True:
+                        check_device_reset(serial, cycle_start)
+                        device.shell("input keyevent 4")   # KEYCODE_BACK
+                        time.sleep(1.0)
+                        try:
+                            img = get_screen_capture(device)
+                        except ResetGachaException:
+                            # fixgachanew เด้งระหว่างกด Back → get_screen_capture เคลียร์ป็อปอัพให้แล้ว
+                            # ไม่ต้องหยุด → กด Back ต่อไปเรื่อยๆ จนกว่าจะเจอ cancel.bmp
+                            continue
+                        # fixout→Back spam→cancel เพิ่งทำงานระหว่างนี้ = กด cancel ไปแล้วรอบเดียวพอ → หยุดเลย
+                        if DEVICE_FIXOUT_CANCEL_DONE.pop(serial, None):
+                            gui_log(serial, "fixout→cancel done — กดแล้วรอบเดียวพอ หยุด Back spam ไปต่อเลย", step="Cancel Skip")
                             break
+                        if img is not None:
+                            pts = img_search(img, os.path.join(IMG_DIR, "cancel.bmp"))
+                            if pts:
+                                x, y = pts[0]
+                                gui_log(serial, f"cancel.bmp found — clicking ({x},{y})", step="Click Cancel")
+                                # กดจนกว่าจะหายไปครบ 3 วิ ค่อยไปต่อ
+                                click_cancel_until_gone(device, serial, x, y, step="Cancel")
+                                break
 
             # ── Check Coin (สแกนก่อนเสมอ ถ้าเปิด) ──
             #    ถ้าเปิด CHECK_COIN → สแกนเลขเหรียญตั้งแต่อยู่หน้า main menu "ก่อน" ทำงานอื่น
