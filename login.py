@@ -5140,6 +5140,7 @@ def process_device_login(device):
             play8_click_count = 0   # นับจำนวนครั้งที่กด play8 ติดกัน — ครบ 7 → พัก 8 วิ แล้วเช็คใหม่
             play8_stop_logged = False   # เอาไว้ log stopplay8 แค่ครั้งแรก (กัน log ถี่)
             play8_stop_until = 0.0      # ห้ามกด play8 จนถึงเวลานี้ — ต่ออายุทุกครั้งที่เห็น stopplay8 (กันภาพกระพริบ/จับพลาดบางเฟรมแล้วเผลอกดต่อ)
+            play8_pause_until = 0.0     # ช่วงพักหลังกดครบ 5 ครั้ง (พักแบบไม่หลับ — ลูปยังเช็ค checkpointlogin ตลอด)
             while True:
                 check_device_reset(serial, cycle_start)
                 img = get_screen_capture(device)
@@ -5192,6 +5193,13 @@ def process_device_login(device):
 
                     if pts_8:
                         play8_miss = 0   # เจอ play8 แล้ว รีเซ็ตตัวนับ
+
+                        # อยู่ช่วง "พักหลังกดครบ 5" → ไม่กด play8 แต่ลูปยังหมุนเช็ค checkpointlogin
+                        # ทุก ~0.3 วิ (เจอเมื่อไหร่ไปสเต็ปต่อไปทันที ไม่ต้องรอครบ 8 วิ)
+                        if time.time() < play8_pause_until:
+                            time.sleep(0.3)
+                            continue
+
                         # Prioritize fixlg3
                         pts_lg3 = img_search(img, os.path.join(IMG_DIR, "fixlg3.bmp"))
                         if pts_lg3:
@@ -5206,20 +5214,19 @@ def process_device_login(device):
                         play8_click_count += 1
                         gui_log(serial, f"Found {matched_name}! Clicked. ({play8_click_count}/5)", step="play8")
                         if play8_click_count >= 5:
-                            # กดครบ 5 ครั้ง → พัก 8 วิ แล้วรีเซ็ตตัวนับ → วนกลับไปเช็ค/กดต่อถ้ายังเจอ
+                            # กดครบ 5 ครั้ง → พัก 8 วิ "แบบไม่หลับ" (ลูปยังเช็ค checkpointlogin ตลอด)
                             gui_log(serial, "กด play8 ครบ 5 ครั้ง → พัก 8 วิ แล้วเช็คใหม่...", step="play8 Wait")
                             play8_click_count = 0
-                            time.sleep(8)
+                            play8_pause_until = time.time() + 8
                         else:
                             time.sleep(0.5)
                         continue
 
-                    # --- 3. play8/play8fix หายแล้วแต่ยังไม่เจอ checkpoint → กันค้าง ---
-                    #     กันเคส play8 หายไปแต่หน้า checkpoint ยัง match ไม่ติด → บอทจะได้ไม่ค้างนิ่ง (ไม่กด)
+                    # --- 3. play8/play8fix หายแล้วแต่ยังไม่เจอ checkpoint → รอเฉยๆ (ไม่กดกลางจอแล้ว) ---
                     play8_miss += 1
 
                     # ค้าง (ไม่เจอ play8/checkpoint) เกิน ~8 วิ → หา fixout ลอยๆ ทุกเฟรม เจอแล้วกดทันที
-                    # (popup อย่าง Terms of Use มีปุ่ม X = fixout — กดกลางจอไม่ช่วย ต้องกดปุ่มนี้)
+                    # (popup อย่าง Terms of Use มีปุ่ม X = fixout — ต้องกดปุ่มนี้ถึงจะหลุด)
                     if play8_miss >= 27:   # ~8 วิ (27 * 0.3s)
                         pts_fo = img_search(img, os.path.join(IMG_DIR, "fixout.bmp"), threshold=0.85)
                         if pts_fo:
@@ -5229,11 +5236,6 @@ def process_device_login(device):
                             play8_miss = 0
                             time.sleep(1.5)
                             continue
-
-                    if play8_miss >= 50:   # ~15 วิ (50 * 0.3s) → กดกลางจอกันค้างเหมือนเดิม
-                        gui_log(serial, "play8 gone & no checkpoint yet — fallback center click", step="play8")
-                        device.shell("input swipe 480 270 480 270 100")
-                        play8_miss = 0
 
                 time.sleep(0.3)
 
