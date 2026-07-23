@@ -192,6 +192,7 @@ DEVICE_RESTART_PLAY8 = {}     # serial -> (file_path, original_name) เริ�
 DEVICE_RESTART_PLAY8_COUNT = {}  # serial -> (original_name, count) นับจำนวนครั้งที่ restart-play8 ต่อไฟล์ (กันวนไม่จบ)
 MAX_RESTART_PLAY8 = 2         # restart-play8 ได้ไม่เกินกี่ครั้งต่อไฟล์ ก่อนยอมแพ้ → ส่ง file-error แล้วหยิบไฟล์ใหม่
 DEVICE_PAST_LOGIN    = {}     # serial -> bool ผ่านหน้า login (checkpoint) แล้วหรือยัง → ใช้ตัดสิน fixclear ว่าจะ restart-play8 หรือ re-enter (push ใหม่)
+DEVICE_FIXOUT_CANCEL_DONE = {}  # serial -> True เมื่อ fixout→Back spam→กด cancel สำเร็จ (ลูป play8 ใช้ break ข้ามไป step ถัดไปเลย)
 
 # ── Performance ───────────────────────────────────────────────────────────────
 SCREENCAP_SCALE = 1.0  # 1.0 = full resolution (ป้องกัน template quality loss)
@@ -2403,6 +2404,9 @@ def fixout_back_spam_until_cancel(device, serial):
                 device.shell(f"input swipe {x_c} {y_c} {x_c} {y_c} 100")
                 gui_log(serial, f"cancel.bmp found — clicked ({x_c},{y_c}), stop Back spam", step="FixOut Cancel")
                 time.sleep(1.5)
+                # กด cancel แล้ว = อยู่หน้าเมนูหลัก (เลยจุด checkpointlogin ไปแล้ว)
+                # → ตั้ง flag ให้ลูป play8 break ข้ามไปทำ step ถัดไปทันที (ไม่ต้องรอ checkpoint ที่ไม่มีวันโผล่)
+                DEVICE_FIXOUT_CANCEL_DONE[serial] = True
                 return
 
 def trigger_restart_from_play8(device, serial, original_name, reason="stuck"):
@@ -5151,9 +5155,19 @@ def process_device_login(device):
             play8_stop_logged = False   # เอาไว้ log stopplay8 แค่ครั้งแรก (กัน log ถี่)
             play8_stop_until = 0.0      # ห้ามกด play8 จนถึงเวลานี้ — ต่ออายุทุกครั้งที่เห็น stopplay8 (กันภาพกระพริบ/จับพลาดบางเฟรมแล้วเผลอกดต่อ)
             play8_pause_until = 0.0     # ช่วงพักหลังกดครบ 5 ครั้ง (พักแบบไม่หลับ — ลูปยังเช็ค checkpointlogin ตลอด)
+            DEVICE_FIXOUT_CANCEL_DONE.pop(serial, None)   # ล้าง flag ค้างจากรอบ/เฟสก่อน กัน break มั่ว
+            p8_cancel_done = False      # True = หลุดลูปด้วยทาง fixout→cancel (ข้ามขั้น event/Back spam ได้เลย)
             while True:
                 check_device_reset(serial, cycle_start)
                 img = get_screen_capture(device)
+
+                # fixout→Back spam→cancel เพิ่งทำงานสำเร็จ (จาก floating check ใน get_screen_capture)
+                # = อยู่หน้าเมนูหลักแล้ว → break ออกไปทำ step ถัดไปทันที ไม่ต้องรอ checkpointlogin
+                if DEVICE_FIXOUT_CANCEL_DONE.pop(serial, None):
+                    gui_log(serial, "fixout→cancel done — skipping checkpointlogin, proceeding to next step!", step="Checkpoint Skip")
+                    p8_cancel_done = True
+                    break
+
                 if img is not None:
                     # --- 1. เช็ค checkpointlogin — เจอเท่านั้นถึงจะหลุดลูปไปเฟสต่อไป ---
                     pts_cp = img_search(img, os.path.join(IMG_DIR, "checkpointlogin.bmp"))
@@ -5195,11 +5209,14 @@ def process_device_login(device):
                     play8_stop_logged = False
 
                     # --- 1.7 หา fixout ลอยๆ "ทุกเฟรม" (popup บังจอ เช่น Terms of Use) ---
-                    #     เจอ → กด Back รัวๆ จนเจอ cancel.bmp แล้วคลิก ค่อยกลับมาลูป play8 ต่อ
+                    #     เจอ → กด Back รัวๆ จนเจอ cancel.bmp แล้วคลิก → break ไปทำ step ถัดไปเลย
                     pts_fo = img_search(img, os.path.join(IMG_DIR, "fixout.bmp"), threshold=0.85)
                     if pts_fo:
                         fixout_back_spam_until_cancel(device, serial)
-                        continue
+                        DEVICE_FIXOUT_CANCEL_DONE.pop(serial, None)   # กันเช็คซ้ำรอบหน้า (break ตรงนี้เลย)
+                        gui_log(serial, "fixout→cancel done — skipping checkpointlogin, proceeding to next step!", step="Checkpoint Skip")
+                        p8_cancel_done = True
+                        break
 
                     # --- 2. ถ้ายังไม่เจอ Checkpoint ก็หา play8 / play8fix ---
                     pts_8 = img_search(img, os.path.join(IMG_DIR, "play8.bmp"))
@@ -5250,10 +5267,23 @@ def process_device_login(device):
             DEVICE_PAST_LOGIN[serial] = True
 
             if LOGIN_FAST:
+                if p8_cancel_done:
+                    # หลุดลูปทาง fixout→cancel (ยังไม่ได้ sort ไฟล์ในลูปเหมือนทาง checkpoint)
+                    # → login ผ่านแล้วเหมือนกัน sort เข้า login-success ให้ครบก่อนเริ่มไฟล์ใหม่
+                    gui_log(serial, "LOGIN_FAST: (fixout→cancel) — clearing app and moving to next file.", step="Fast Done", status="working")
+                    device.shell("am force-stop jp.konami.pesam")
+                    time.sleep(0.5)
+                    dest = os.path.join(LOGIN_SUCCESS_DIR, original_name)
+                    if os.path.exists(file_path):
+                        save_result(file_path, dest)
+                    release_file(original_name)
                 continue
 
             # 6. Event sequence — พฤติกรรมขึ้นกับ EVENT_IMG
-            if EVENT_IMG == 1:
+            # (ถ้าหลุดลูปทาง fixout→cancel = กด Back+cancel ไปแล้ว อยู่หน้าเมนูหลักแล้ว → ข้ามขั้นนี้ทั้งหมด)
+            if p8_cancel_done:
+                gui_log(serial, "ข้ามขั้น event/Back spam (fixout→cancel ทำไปแล้ว) — ไป step ถัดไปเลย", step="Event Skip")
+            elif EVENT_IMG == 1:
                 # ─── mode event: กด play22 → play31 ทีละภาพ ───────────────
                 for i in range(22, 32):
                     name = f"play{i}.bmp"
