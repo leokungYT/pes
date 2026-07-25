@@ -129,7 +129,14 @@ list_find_hero = [
     "Marcel Desailly",
     "Luis Suarez",
     "Schweinsteiger",
-    "Bronckhorst"
+    "Bronckhorst",
+    "Rodri",
+    "Marc Cucurella",
+    "Unai Simon",
+    "Dani Olmo",
+    "Ferran Torres",
+    "Harry Kane",
+    "Cristian Romero"
 ]
 
 # แชร์ list เดียวกัน — แก้ที่ list_find_hero อย่างเดียวพอ
@@ -261,4 +268,3 @@ ROOT_TOGGLE_WAIT = 3
 #         (ทำงานเฉพาะเครื่องที่มี >1 processor group — เครื่อง socket เดียวจะข้ามให้เอง)
 # False = ปิด (ปล่อยให้ Windows จัดการ affinity เอง)
 CPU_AFFINITY_BALANCE = True
-

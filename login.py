@@ -193,6 +193,9 @@ DEVICE_RESTART_PLAY8_COUNT = {}  # serial -> (original_name, count) นับจ
 MAX_RESTART_PLAY8 = 2         # restart-play8 ได้ไม่เกินกี่ครั้งต่อไฟล์ ก่อนยอมแพ้ → ส่ง file-error แล้วหยิบไฟล์ใหม่
 DEVICE_PAST_LOGIN    = {}     # serial -> bool ผ่านหน้า login (checkpoint) แล้วหรือยัง → ใช้ตัดสิน fixclear ว่าจะ restart-play8 หรือ re-enter (push ใหม่)
 DEVICE_FIXOUT_CANCEL_DONE = {}  # serial -> True เมื่อ fixout→Back spam→กด cancel สำเร็จ (ลูป play8 ใช้ break ข้ามไป step ถัดไปเลย)
+DEVICE_DISABLE_FIXOUT = {}      # serial -> True = ปิด floating fixout check (ตั้งตอนเข้า sequence กาชา — หน้ากาชามีปุ่มคล้าย fixout จับผิดบ่อย)
+_FIXOUT_LAST_DONE = {}          # serial -> เวลาที่ fixout→cancel ทำงานล่าสุด (cooldown กันกดซ้ำรัวๆ — กดรอบเดียวแล้วเว้น)
+FIXOUT_COOLDOWN = 60            # วินาที — หลัง fixout→cancel สำเร็จ 1 ครั้ง ห้ามยิงซ้ำภายในเวลานี้
 
 # ── Performance ───────────────────────────────────────────────────────────────
 SCREENCAP_SCALE = 1.0  # 1.0 = full resolution (ป้องกัน template quality loss)
@@ -2407,6 +2410,7 @@ def fixout_back_spam_until_cancel(device, serial):
                 # กด cancel แล้ว = อยู่หน้าเมนูหลัก (เลยจุด checkpointlogin ไปแล้ว)
                 # → ตั้ง flag ให้ลูป play8 break ข้ามไปทำ step ถัดไปทันที (ไม่ต้องรอ checkpoint ที่ไม่มีวันโผล่)
                 DEVICE_FIXOUT_CANCEL_DONE[serial] = True
+                _FIXOUT_LAST_DONE[serial] = time.time()   # เริ่ม cooldown — กดรอบเดียวแล้วเว้น ไม่ยิงซ้ำรัวๆ
                 return
 
 def trigger_restart_from_play8(device, serial, original_name, reason="stuck"):
@@ -2693,6 +2697,7 @@ def start_cpu_balancer():
     threading.Thread(target=_cpu_balancer_loop, daemon=True).start()
 
 def get_screen_capture(device):
+    global in_new_gacha_loop   # ประกาศหัวฟังก์ชัน (มีทั้งจุดอ่าน fixout-skip และจุดใช้ใน fixgachanew)
     try:
         # เช็คเกมออนอยู่หรือไม่ (ทุก 30 วิ)
         if not is_game_running(device):
@@ -3058,19 +3063,24 @@ def get_screen_capture(device):
             # fixout floating check — popup บังจอ (เช่น Terms of Use)
             # ยืนยันซ้ำ 1 ครั้ง (~1.2 วิ) กันจับพลาดตอนหน้าจอกำลังเปลี่ยน
             # เจอจริง → กด Back รัวๆ จนเจอ cancel.bmp แล้วคลิก ค่อยกลับมาทำงานต่อ
-            fo_pts = img_search(img, os.path.join(IMG_DIR, "fixout.bmp"), threshold=0.85)
-            if fo_pts:
-                gui_log(device.serial, "Floating: fixout found! Confirming (1.2s)...", step="Fix Out")
-                time.sleep(1.2)
-                img_check = fast_screencap(device)
-                pts_check = img_search(img_check, os.path.join(IMG_DIR, "fixout.bmp"), threshold=0.85) if img_check is not None else None
-                if pts_check or img_check is None:   # ยังอยู่ (หรือแคปยืนยันไม่ได้ = ถือว่ายังอยู่)
-                    fixout_back_spam_until_cancel(device, device.serial)
-                    img = fast_screencap(device)
-                    if img is None:
-                        return None
-                else:
-                    gui_log(device.serial, "fixout gone on confirm — skip", step="Fix Out")
+            # *** ยกเว้น: (1) ช่วง new-gacha/sequence กาชาทั้งหมด — หน้ากาชามีปุ่มคล้าย fixout จับผิดบ่อย
+            #             (2) ช่วง cooldown หลังเพิ่งกด cancel ไป — กดรอบเดียวพอ ไม่ยิงซ้ำรัวๆ ***
+            if (not in_new_gacha_loop
+                    and not DEVICE_DISABLE_FIXOUT.get(device.serial, False)
+                    and time.time() - _FIXOUT_LAST_DONE.get(device.serial, 0.0) > FIXOUT_COOLDOWN):
+                fo_pts = img_search(img, os.path.join(IMG_DIR, "fixout.bmp"), threshold=0.85)
+                if fo_pts:
+                    gui_log(device.serial, "Floating: fixout found! Confirming (1.2s)...", step="Fix Out")
+                    time.sleep(1.2)
+                    img_check = fast_screencap(device)
+                    pts_check = img_search(img_check, os.path.join(IMG_DIR, "fixout.bmp"), threshold=0.85) if img_check is not None else None
+                    if pts_check or img_check is None:   # ยังอยู่ (หรือแคปยืนยันไม่ได้ = ถือว่ายังอยู่)
+                        fixout_back_spam_until_cancel(device, device.serial)
+                        img = fast_screencap(device)
+                        if img is None:
+                            return None
+                    else:
+                        gui_log(device.serial, "fixout gone on confirm — skip", step="Fix Out")
 
             # fixalert1.bmp floating check — เจอ fixalert1 (หาทุกเฟรมอยู่แล้ว) → กด fixalert2 แล้วไปต่อ
             # (ไม่คลิก fixalert1 เอง — fixalert1 เป็นแค่ตัวชี้ว่ามี alert, ปุ่มที่ต้องกดคือ fixalert2)
@@ -3150,7 +3160,6 @@ def get_screen_capture(device):
                         # loop จะวนกลับไปคลิกอีกรอบอัตโนมัติ
 
             # === fixgachanew1 -> fixgachanew2 floating check ===
-            global in_new_gacha_loop
             if in_new_gacha_loop and img is not None:
                 pts_fg1 = img_search(img, os.path.join(IMG_DIR, "fixgachanew1.bmp"))
                 if pts_fg1:
@@ -3259,6 +3268,16 @@ def img_search(gray_img, find_path, threshold=0.8):
         if os.path.exists(alt_path):
             points = _match_single(gray_img, alt_path, threshold)
     return points
+
+
+def img_search_any(gray_img, names, threshold=0.8):
+    """หา template หลายชื่อในภาพเดียว — เจอตัวไหนก่อนคืนผลตัวนั้นเลย
+    (เช่น ["gacha4.bmp", "gacha4v2.bmp"] = เจอเวอร์ชันไหนก็นับว่าเจอ)"""
+    for n in names:
+        pts = img_search(gray_img, os.path.join(IMG_DIR, n), threshold)
+        if pts:
+            return pts
+    return []
 
 
 def click_cancel_until_gone(device, serial, x, y, gone_secs=3.0, step="Cancel", timeout=30.0):
@@ -4996,6 +5015,7 @@ def process_device_login(device):
 
         try:
             DEVICE_DISABLE_FIXEVENT[serial] = False
+            DEVICE_DISABLE_FIXOUT[serial] = False   # เริ่ม cycle ใหม่ → เปิด fixout check กลับ (ช่วง login ต้องใช้)
             check_device_reset(serial)
 
             # ── Reload config at the start of every cycle ──
@@ -6292,6 +6312,9 @@ def process_device_login(device):
             gacha_hero_found = None
             if (DO_GACHA == 1 or NEW_GACHA == 1) and not coin_low:
                 gui_log(serial, "Gacha sequence started...", step="Gacha Mode", status="working")
+                # ปิด floating fixout ตลอด sequence กาชา (new-g1/gacha4/gacha5/OCR ทั้งหมด)
+                # — หน้ากาชามีปุ่มคล้าย fixout จับผิดแล้ว Back spam มั่ว (เปิดกลับอัตโนมัติตอนเริ่ม cycle ใหม่)
+                DEVICE_DISABLE_FIXOUT[serial] = True
                 
                 while True:
                     try:
@@ -6493,7 +6516,7 @@ def process_device_login(device):
                                             found_g4 = "outloop"
                                             break
 
-                                        pts = img_search(img, os.path.join(IMG_DIR, "gacha4.bmp"))
+                                        pts = img_search_any(img, ["gacha4.bmp", "gacha4v2.bmp"])
                                         if pts:
                                             gui_log(serial, "gacha4.bmp found! Checking checkpoint-gacha4...", step="G4-Verify")
                                             verified = False
@@ -6505,7 +6528,7 @@ def process_device_login(device):
                                                     pts_cp4 = img_search(img_cp4, os.path.join(IMG_DIR, "checkpoint-gacha4.png"))
                                                     if pts_cp4:
                                                         verified = True
-                                                        pts_fresh = img_search(img_cp4, os.path.join(IMG_DIR, "gacha4.bmp"))
+                                                        pts_fresh = img_search_any(img_cp4, ["gacha4.bmp", "gacha4v2.bmp"])
                                                         if pts_fresh:
                                                             pts = pts_fresh
                                                         break
@@ -6577,7 +6600,7 @@ def process_device_login(device):
                                             gui_log(serial, "loopgacha1.bmp detected during Gacha5 (Custom)! Proceeding.", step="G5-Skip")
                                             break
 
-                                        pts = img_search(img, os.path.join(IMG_DIR, "gacha5.bmp"))
+                                        pts = img_search_any(img, ["gacha5.bmp", "gacha5v2.bmp"])
                                         if pts:
                                             x, y = pts[0]
                                             device.shell(f"input swipe {x} {y} {x} {y} 100")
@@ -6677,7 +6700,7 @@ def process_device_login(device):
                                         found_g4 = "outloop"
                                         break
 
-                                    pts = img_search(img, os.path.join(IMG_DIR, "gacha4.bmp"))
+                                    pts = img_search_any(img, ["gacha4.bmp", "gacha4v2.bmp"])
                                     if pts:
                                         gui_log(serial, "gacha4.bmp found! Checking checkpoint-gacha4...", step="G4-Verify")
                                         verified = False
@@ -6689,7 +6712,7 @@ def process_device_login(device):
                                                 pts_cp4 = img_search(img_cp4, os.path.join(IMG_DIR, "checkpoint-gacha4.png"))
                                                 if pts_cp4:
                                                     verified = True
-                                                    pts_fresh = img_search(img_cp4, os.path.join(IMG_DIR, "gacha4.bmp"))
+                                                    pts_fresh = img_search_any(img_cp4, ["gacha4.bmp", "gacha4v2.bmp"])
                                                     if pts_fresh:
                                                         pts = pts_fresh
                                                     break
@@ -6787,7 +6810,7 @@ def process_device_login(device):
                                             found_g4 = True
                                             break
 
-                                        pts = img_search(img, os.path.join(IMG_DIR, "gacha5.bmp"))
+                                        pts = img_search_any(img, ["gacha5.bmp", "gacha5v2.bmp"])
                                         if pts:
                                             x, y = pts[0]
                                             device.shell(f"input swipe {x} {y} {x} {y} 100")
