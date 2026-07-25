@@ -129,7 +129,14 @@ list_find_hero = [
     "Marcel Desailly",
     "Luis Suarez",
     "Schweinsteiger",
-    "Bronckhorst"
+    "Bronckhorst",
+    "Rodri",
+    "Marc Cucurella",
+    "Unai Simon",
+    "Dani Olmo",
+    "Ferran Torres",
+    "Harry Kane",
+    "Cristian Romero"
 ]
 
 # แชร์ list เดียวกัน — แก้ที่ list_find_hero อย่างเดียวพอ
