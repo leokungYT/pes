@@ -2923,6 +2923,31 @@ def get_screen_capture(device):
                             gui_log(serial_fc, f"Failed to move {original_name} to file-error: {e}", step="Fix Clear Fail")
                 raise DeviceResetException("fixclear1.png — moved to file-error")
 
+            # เช็ค updatenew1 ตลอด (ทุกเฟรม) → เจอ = clear app + ส่งไฟล์ไป file-error → หยิบ id ใหม่เลย
+            un1_pts = img_search(img, os.path.join(IMG_DIR, "updatenew1.bmp"), threshold=0.8)
+            if un1_pts:
+                serial_un = device.serial
+                original_name = DEVICE_FILE_ASSIGNMENTS.get(serial_un)
+                gui_log(serial_un, "updatenew1 detected! Clearing app & moving file to file-error, next id...", step="UpdateNew Fail", status="error")
+                device.shell("am force-stop jp.konami.pesam")
+                device.shell("su -c 'rm -f /data/data/jp.konami.pesam/files/SaveData/AUTH/online_user_id_data.dat'")
+                device.shell("su -c 'rm -rf /data/data/jp.konami.pesam/files/SaveData/AUTH/*'")
+                DEVICE_RESTART_PLAY8_COUNT.pop(serial_un, None)
+                DEVICE_RESTART_PLAY8.pop(serial_un, None)
+                if original_name:
+                    un_src  = os.path.join(INPUT_DIR, original_name)
+                    un_dest = os.path.join(FILE_ERROR_DIR, original_name)
+                    if os.path.exists(un_src):
+                        try:
+                            if os.path.exists(un_dest):
+                                os.remove(un_dest)
+                            _safe_copy(un_src, un_dest)
+                            os.remove(un_src)
+                            gui_log(serial_un, f"Moved {original_name} to file-error", step="UpdateNew Fail")
+                        except Exception as e:
+                            gui_log(serial_un, f"Failed to move {original_name} to file-error: {e}", step="UpdateNew Fail")
+                raise DeviceResetException("updatenew1 — moved to file-error")
+
             # fix0%.png / fixupdate.png → เกมค้าง 0% หรือขึ้นให้อัปเดต
             #   → ปิดแอพแล้วเข้าใหม่ด้วย "ไฟล์เดิม" (ไม่ย้ายไฟล์ ไม่ push ซ้ำ)
             fx_name = None
