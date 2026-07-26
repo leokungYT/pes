@@ -139,6 +139,10 @@ try:
     from config import NEW_GACHA_SWIPE
 except ImportError:
     NEW_GACHA_SWIPE = 1
+try:
+    from config import GACHA_LOOP_LIMIT
+except ImportError:
+    GACHA_LOOP_LIMIT = 0
 
 
 def cprint(*args, **kwargs):
@@ -682,6 +686,7 @@ if GUI_ENABLED:
             _toggle_row("  └─ Swipe (เลื่อนหน้าจอหา new-gacha1)", var_ng_swipe)
             var_custom_gacha = ctk.IntVar(value=getattr(cfg, 'CUSTOM_GACHA', 0))
             _toggle_row("สุ่มจน coin หมด", var_custom_gacha)
+            entry_gacha_limit = _entry_row("  └─ Custom จำกัดรอบ (0 = สุ่มจนหมด)", getattr(cfg, 'GACHA_LOOP_LIMIT', 0), width=70)
             var_gacha_find = ctk.IntVar(value=getattr(cfg, 'GACHA_FIND', 0))
             def _sync_gacha_find():
                 # Gacha+Find ต้องอาศัย DO_GACHA + Check Coin → เปิดให้อัตโนมัติ
@@ -923,7 +928,7 @@ if GUI_ENABLED:
 
             # ── Save button (pinned at bottom, outside scrollable area) ───
             def _save():
-                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA, NEW_GACHA_SWIPE
+                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA, NEW_GACHA_SWIPE, GACHA_LOOP_LIMIT
                 new_event = var_event.get()
                 new_box   = var_box.get()
                 new_gacha = var_gacha.get()
@@ -1099,6 +1104,16 @@ if GUI_ENABLED:
                 else:
                     content += f"\nCUSTOM_GACHA = {new_custom_gacha}\n"
 
+                try:
+                    new_gacha_limit = max(0, int(entry_gacha_limit.get()))
+                except ValueError:
+                    new_gacha_limit = 0
+                if re.search(r"^GACHA_LOOP_LIMIT\s*=\s*\d+", content, flags=re.MULTILINE):
+                    content = re.sub(r"^GACHA_LOOP_LIMIT\s*=\s*\d+", f"GACHA_LOOP_LIMIT = {new_gacha_limit}",
+                                     content, flags=re.MULTILINE)
+                else:
+                    content += f"\nGACHA_LOOP_LIMIT = {new_gacha_limit}\n"
+
                 if re.search(r"^NEW_GACHA\s*=\s*\d", content, flags=re.MULTILINE):
                     content = re.sub(r"^NEW_GACHA\s*=\s*\d", f"NEW_GACHA = {new_new_gacha}",
                                      content, flags=re.MULTILINE)
@@ -1115,6 +1130,7 @@ if GUI_ENABLED:
                     f.write(content)
                 # อัปเดต runtime ด้วย
                 CUSTOM_GACHA = new_custom_gacha
+                GACHA_LOOP_LIMIT = new_gacha_limit
                 NEW_GACHA = new_new_gacha
                 NEW_GACHA_SWIPE = new_ng_swipe
                 EVENT_IMG  = new_event
@@ -1445,6 +1461,7 @@ if GUI_ENABLED:
                     ("chk", "New Gacha Mode",            "NEW_GACHA"),
                     ("chk", "└ Swipe (เลื่อนหาจอ)",       "NEW_GACHA_SWIPE"),
                     ("chk", "สุ่มจน coin หมด",           "CUSTOM_GACHA"),
+                    ("ent", "└ Custom จำกัดรอบ (0=จนหมด)", "GACHA_LOOP_LIMIT"),
                     ("chk", "Gacha + Find + Check Coin", "GACHA_FIND"),
                 ],
                 "🆓 Gacha Free": [
@@ -5078,7 +5095,7 @@ def process_device_login(device):
                 import importlib
                 import config as cfg
                 importlib.reload(cfg)
-                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA, NEW_GACHA_SWIPE
+                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA, NEW_GACHA_SWIPE, GACHA_LOOP_LIMIT
                 EVENT_IMG = getattr(cfg, 'EVENT_IMG', 0)
                 DO_BOX = getattr(cfg, 'DO_BOX', 0)
                 DO_GACHA = getattr(cfg, 'DO_GACHA', 0)
@@ -5104,6 +5121,7 @@ def process_device_login(device):
                 CUSTOM_GACHA = getattr(cfg, 'CUSTOM_GACHA', 0)
                 NEW_GACHA = getattr(cfg, 'NEW_GACHA', 0)
                 NEW_GACHA_SWIPE = getattr(cfg, 'NEW_GACHA_SWIPE', 1)
+                GACHA_LOOP_LIMIT = getattr(cfg, 'GACHA_LOOP_LIMIT', 0)
             except Exception as ce:
                 gui_log(serial, f"⚠️ Config reload failed: {ce}", step="Reload Error")
 
@@ -6456,8 +6474,8 @@ def process_device_login(device):
                                                 time.sleep(0.1)
                                             time.sleep(0.1)
 
-                                        # 2. หา new-gacha1.bmp (วนหา/เลื่อนไม่เกิน 3 รอบ)
-                                        gui_log(serial, "Waiting new-gacha1.bmp (max 3 loops)...", step="new-g1_step2")
+                                        # 2. หา new-gacha1.bmp — วนหาไปเรื่อยๆ "จนกว่าจะเจอ" (ไม่มีลิมิต ห้ามข้ามไป Gacha4)
+                                        gui_log(serial, "Waiting new-gacha1.bmp (until found)...", step="new-g1_step2")
                                         swipe_count = 0
                                         while True:
                                             check_device_reset(serial, cycle_start)
@@ -6474,19 +6492,18 @@ def process_device_login(device):
                                                     break
                                                 else:
                                                     swipe_count += 1
-                                                    if swipe_count > 3:
-                                                        log_limit = "new-gacha1 not found after 3 swipes. Jumping to Gacha4."
-                                                        gui_log(serial, log_limit, step="NewG-Limit")
-                                                        print(f"[{serial}] {log_limit}")
-                                                        break
                                                     if NEW_GACHA_SWIPE == 1:
-                                                        # เลื่อนตำแหน่ง 144 243 -> 699 233
-                                                        log_msg = f"new-gacha1 not found (swipe {swipe_count}/3). Swiping 144 243 -> 699 233 (250ms)..."
+                                                        # เลื่อนตำแหน่ง 144 243 -> 699 233 แล้วหาต่อ
+                                                        log_msg = f"new-gacha1 not found (swipe {swipe_count}). Swiping 144 243 -> 699 233 (250ms)..."
                                                         gui_log(serial, log_msg, step="Swipe NewG")
                                                         print(f"[{serial}] {log_msg}")
                                                         res = device.shell("input swipe 144 243 699 233 250")
                                                         print(f"[{serial}] ADB swipe command executed. Result: {res.strip() if res else 'OK'}")
                                                         time.sleep(0.1)
+                                                    else:
+                                                        # ปิด swipe อยู่ → รอ 1.5 วิ/รอบ แล้ววนหาต่อจนกว่าจะเจอ
+                                                        gui_log(serial, f"new-gacha1 not found (try {swipe_count}) — waiting 1.5s...", step="Wait NewG")
+                                                        time.sleep(1.5)
                                             time.sleep(0.1)
                                         break
                                     except ResetGachaException:
@@ -6553,8 +6570,20 @@ def process_device_login(device):
                         # gacha4
                         if CUSTOM_GACHA == 1:
                             # Custom Gacha Loop Mode
-                            gui_log(serial, "Custom Gacha mode active...", step="Custom Gacha")
+                            # GACHA_LOOP_LIMIT = 0 → สุ่มจนหมด (จนเจอ nocions/outloop) | >0 → สุ่มไม่เกิน N รอบแล้ว break
+                            if GACHA_LOOP_LIMIT > 0:
+                                gui_log(serial, f"Custom Gacha mode active... (จำกัด {GACHA_LOOP_LIMIT} รอบ)", step="Custom Gacha")
+                            else:
+                                gui_log(serial, "Custom Gacha mode active... (สุ่มจน coin หมด)", step="Custom Gacha")
+                            custom_rounds = 0
                             while True:
+                                # Custom จำกัดรอบ: ครบตามที่ตั้ง → break ออกเลย ไม่รอ coin หมด
+                                if GACHA_LOOP_LIMIT > 0 and custom_rounds >= GACHA_LOOP_LIMIT:
+                                    gui_log(serial, f"ครบ {custom_rounds}/{GACHA_LOOP_LIMIT} รอบตามที่ตั้ง — break ออกจากลูปสุ่ม!", step="Custom Limit")
+                                    break
+                                custom_rounds += 1
+                                if GACHA_LOOP_LIMIT > 0:
+                                    gui_log(serial, f"สุ่มรอบที่ {custom_rounds}/{GACHA_LOOP_LIMIT}...", step="Custom Round")
                                 # 1. Wait/Click gacha4.bmp
                                 gui_log(serial, "Waiting gacha4.bmp (Custom)...", step="G4-Custom")
                                 found_g4 = False
