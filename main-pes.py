@@ -2588,7 +2588,39 @@ def process_device(serial_or_device):
             except Exception:
                 pass
 
+def download_watcher_loop():
+    """เธรดลอยกลาง: สแกนหา download.bmp "ทุกเครื่อง ตลอดเวลา ทุกขั้นตอนการทำงาน"
+    เจอเมื่อไหร่กดทันที (ทำงานอิสระจาก worker แต่ละเครื่อง — ต่อให้ worker กำลังหลับ/รออยู่ก็กดให้)"""
+    client = None
+    while True:
+        try:
+            if client is None:
+                client = AdbClient(host="127.0.0.1", port=5037)
+            for serial in get_connected_devices():
+                try:
+                    dev = client.device(serial)
+                    if dev is None:
+                        continue
+                    img_dl = fast_screencap(dev)
+                    if img_dl is None:
+                        continue
+                    pts_dl = ImgSearchADB(img_dl, os.path.join(IMG_DIR, "download.bmp"))
+                    if pts_dl:
+                        x_dl, y_dl = pts_dl[0]
+                        dev.shell(f"input swipe {x_dl} {y_dl} {x_dl} {y_dl} 100")
+                        gui_log(serial, f"download.bmp found! Clicked ({x_dl},{y_dl})", step="Download")
+                        time.sleep(1.5)
+                except Exception:
+                    pass   # เครื่องนั้นมีปัญหา (offline/ค้าง) → ข้าม ไปเครื่องถัดไป
+        except Exception:
+            client = None   # adb server สะดุด → สร้าง client ใหม่รอบหน้า
+        time.sleep(2)   # สแกนรอบใหม่ทุก 2 วิ (เบาเครื่อง ไม่กวน screencap ของ worker)
+
+def start_download_watcher():
+    threading.Thread(target=download_watcher_loop, daemon=True).start()
+
 def main():
+    start_download_watcher()   # เธรดลอยหา download.bmp ตลอด (ทั้งโหมด GUI และ CLI)
     if GUI_ENABLED:
         app = ModernBotGUI()
         app.mainloop()
