@@ -1321,6 +1321,23 @@ def gacha_free_mode_mainpes(device, cycle_start, serial):
             if not skiphero_found:
                 gui_log(serial, f"[Loop {loop_num}] skiphero.bmp not found in 30s, proceeding...", step="Skip Timeout")
 
+        # ── แวะหา unlock-hero1.bmp (3 วิ) — popup ปลดล็อกฮีโร่หลังสุ่ม เจอแล้วกดก่อนไปต่อ ──
+        #    (step เดียวกับใน login.py ฝั่ง custom gacha)
+        gui_log(serial, f"[Loop {loop_num}] Checking for unlock-hero1.bmp (3s)...", step="Check-Unlock")
+        deadline_unlock = time.time() + 3
+        while time.time() < deadline_unlock:
+            check_device_reset(serial, cycle_start)
+            img_unlock = get_screen_capture(device)
+            if img_unlock is not None:
+                pts_unlock = ImgSearchADB(img_unlock, os.path.join(IMG_DIR, "unlock-hero1.bmp"))
+                if pts_unlock:
+                    x_un, y_un = pts_unlock[0]
+                    device.shell(f"input swipe {x_un} {y_un} {x_un} {y_un} 100")
+                    gui_log(serial, f"[Loop {loop_num}] unlock-hero1.bmp found! Clicking it.", step="Unlock-Hero")
+                    time.sleep(2)
+                    break
+            time.sleep(0.5)
+
         # ── NOSCAN mode: skip checkpointgacha → jump to next ──
         if NOSCAN == 1:
             gui_log(serial, f"[Loop {loop_num}] NOSCAN=1 → Skipping checkpointgacha/OCR/scanout", step="NoScan Skip")
