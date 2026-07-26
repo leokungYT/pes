@@ -136,7 +136,13 @@ list_find_hero = [
     "Dani Olmo",
     "Ferran Torres",
     "Harry Kane",
-    "Cristian Romero"
+    "Cristian Romero",
+    "Lionel Messi",
+    "Kevin De Bruyne",
+    "James Rodriguez",
+    "Neymar Jr",
+    "Luka Modric",
+    "Manuel Neuer"
 ]
 
 # แชร์ list เดียวกัน — แก้ที่ list_find_hero อย่างเดียวพอ

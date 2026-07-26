@@ -6438,7 +6438,8 @@ def process_device_login(device):
                                                     continue
 
                                                 # 2. เช็ค new-gacha1.bmp (หากเจอแล้วจะหลุดลูปและหยุดหา fixswap)
-                                                pts = img_search(img, os.path.join(IMG_DIR, "new-gacha1.bmp"))
+                                                #    (รูปแยกเก็บใน img/ch/ — อยากแก้รูปไปเปลี่ยนที่โฟลเดอร์นั้น)
+                                                pts = img_search(img, os.path.join(IMG_DIR, "ch", "new-gacha1.bmp"))
                                                 if pts:
                                                     x, y = pts[0]
                                                     device.shell(f"input swipe {x} {y} {x} {y} 100")
@@ -6465,7 +6466,7 @@ def process_device_login(device):
                                                 img, _ = check_and_click_fixback(device, img, serial)
                                                 if img is None:
                                                     continue
-                                                pts = img_search(img, os.path.join(IMG_DIR, "new-gacha1.bmp"))
+                                                pts = img_search(img, os.path.join(IMG_DIR, "ch", "new-gacha1.bmp"))
                                                 if pts:
                                                     x, y = pts[0]
                                                     device.shell(f"input swipe {x} {y} {x} {y} 100")
