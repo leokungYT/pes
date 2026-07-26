@@ -1122,6 +1122,25 @@ def is_hero_match(hero_name, ocr_text):
 # ═══════════════════════════════════════════════════════════════════════════════
 # Gacha Free Mode (main-pes.py version)
 # ═══════════════════════════════════════════════════════════════════════════════
+def check_unlock_hero_before_next(device, cycle_start, serial, loop_num):
+    """เจอ next.bmp แล้ว "อย่าเพิ่งกด" — แวะหา unlock-hero1.bmp สูงสุด 8 วิ ก่อน
+    (popup ปลดล็อกฮีโร่หลังสุ่ม): เจอ → กดปิด / ไม่เจอครบ 8 วิ → ข้ามไปให้กด next ต่อได้เลย"""
+    gui_log(serial, f"[Loop {loop_num}] next found — checking unlock-hero1.bmp (8s) before clicking next...", step="Check-Unlock")
+    deadline_unlock = time.time() + 8
+    while time.time() < deadline_unlock:
+        check_device_reset(serial, cycle_start)
+        img_unlock = get_screen_capture(device)
+        if img_unlock is not None:
+            pts_unlock = ImgSearchADB(img_unlock, os.path.join(IMG_DIR, "unlock-hero1.bmp"))
+            if pts_unlock:
+                x_un, y_un = pts_unlock[0]
+                device.shell(f"input swipe {x_un} {y_un} {x_un} {y_un} 100")
+                gui_log(serial, f"[Loop {loop_num}] unlock-hero1.bmp found! Clicked.", step="Unlock-Hero")
+                time.sleep(2)
+                return True
+        time.sleep(0.5)
+    return False
+
 def gacha_free_mode_mainpes(device, cycle_start, serial):
     """
     Gacha Free mode for main-pes.py
@@ -1321,23 +1340,6 @@ def gacha_free_mode_mainpes(device, cycle_start, serial):
             if not skiphero_found:
                 gui_log(serial, f"[Loop {loop_num}] skiphero.bmp not found in 30s, proceeding...", step="Skip Timeout")
 
-        # ── แวะหา unlock-hero1.bmp (3 วิ) — popup ปลดล็อกฮีโร่หลังสุ่ม เจอแล้วกดก่อนไปต่อ ──
-        #    (step เดียวกับใน login.py ฝั่ง custom gacha)
-        gui_log(serial, f"[Loop {loop_num}] Checking for unlock-hero1.bmp (3s)...", step="Check-Unlock")
-        deadline_unlock = time.time() + 3
-        while time.time() < deadline_unlock:
-            check_device_reset(serial, cycle_start)
-            img_unlock = get_screen_capture(device)
-            if img_unlock is not None:
-                pts_unlock = ImgSearchADB(img_unlock, os.path.join(IMG_DIR, "unlock-hero1.bmp"))
-                if pts_unlock:
-                    x_un, y_un = pts_unlock[0]
-                    device.shell(f"input swipe {x_un} {y_un} {x_un} {y_un} 100")
-                    gui_log(serial, f"[Loop {loop_num}] unlock-hero1.bmp found! Clicking it.", step="Unlock-Hero")
-                    time.sleep(2)
-                    break
-            time.sleep(0.5)
-
         # ── NOSCAN mode: skip checkpointgacha → jump to next ──
         if NOSCAN == 1:
             gui_log(serial, f"[Loop {loop_num}] NOSCAN=1 → Skipping checkpointgacha/OCR/scanout", step="NoScan Skip")
@@ -1424,8 +1426,10 @@ def gacha_free_mode_mainpes(device, cycle_start, serial):
                         break
                 time.sleep(1)
 
-        # 2e. Wait next
+        # 2e. Wait next — เจอ next แล้ว "อย่าเพิ่งกด": แวะหา unlock-hero1 (8 วิ) ก่อน
+        #     เจอ popup → กดปิด / ไม่เจอ → ค่อยกลับมากด next (เช็คแค่ครั้งเดียวต่อ loop)
         gui_log(serial, f"[Loop {loop_num}] Waiting next.bmp...", step="Next")
+        unlock_checked = False
         if NOSCAN == 1:
             # NOSCAN mode: หา next.bmp ไปเรื่อยๆจนกว่าจะเจอ (ไม่มี timeout)
             while True:
@@ -1435,6 +1439,10 @@ def gacha_free_mode_mainpes(device, cycle_start, serial):
                 if img is not None:
                     pts = ImgSearchADB(img, os.path.join(IMG_DIR, "next.bmp"))
                     if pts:
+                        if not unlock_checked:
+                            check_unlock_hero_before_next(device, cycle_start, serial, loop_num)
+                            unlock_checked = True
+                            continue   # แคปใหม่หา next อีกรอบ (พิกัดอาจขยับหลังปิด popup)
                         x, y = pts[0]
                         device.shell(f"input swipe {x} {y} {x} {y} 100")
                         time.sleep(3)
@@ -1449,6 +1457,11 @@ def gacha_free_mode_mainpes(device, cycle_start, serial):
                 if img is not None:
                     pts = ImgSearchADB(img, os.path.join(IMG_DIR, "next.bmp"))
                     if pts:
+                        if not unlock_checked:
+                            check_unlock_hero_before_next(device, cycle_start, serial, loop_num)
+                            unlock_checked = True
+                            deadline_next = time.time() + 15   # ต่ออายุ timeout หลังเสียเวลาเช็ค 8 วิ
+                            continue   # แคปใหม่หา next อีกรอบ (พิกัดอาจขยับหลังปิด popup)
                         x, y = pts[0]
                         device.shell(f"input swipe {x} {y} {x} {y} 100")
                         time.sleep(3)
