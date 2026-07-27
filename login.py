@@ -6829,11 +6829,16 @@ def process_device_login(device):
                                     elif not g500_out900:
                                         gui_log(serial, "ไม่เจอ gacha500 — ข้ามไปรอบถัดไป", step="G500 Miss")
 
-                                    # ── เจอ out900 (ตอนหา gacha500 หรือหลังกด gacha500v1) → จบลูปสุ่มทันที ──
+                                    # ── เจอ out900 (ตอนหา gacha500 / gacha500v1 หรือหลังกด v1) ──
+                                    #    ONE_GACHA500 = 1 → จบลูปสุ่มทันที (ทำรอบเดียวพอ)
+                                    #    ONE_GACHA500 = 0 → ข้ามไปวน gacha4 ต่อตาม GACHA_LOOP_LIMIT (เหมือนเคส nocions)
                                     if g500_out900:
-                                        gui_log(serial, "out900 — จบลูปสุ่มทันที (ไม่วน gacha4 ต่อ)", step="G500 Out900")
-                                        found_g4 = False
-                                        break
+                                        if ONE_GACHA500 == 1:
+                                            gui_log(serial, "out900 + ONE_GACHA500=1 → จบลูปสุ่มทันที", step="G500 Out900")
+                                            found_g4 = False
+                                            break
+                                        gui_log(serial, "out900 + ONE_GACHA500=0 → ข้ามไปวน gacha4 ต่อ", step="G500 Out900")
+                                        continue
 
                                     # ── ONE_GACHA500 = 1 → จบลูปสุ่มเลย "เฉพาะเมื่อ gacha500 ทำงานได้จริง" ──
                                     #    (gacha4v2/gacha5v2 และ step1 coin ไม่นับ — ทำได้ก็ไม่เป็นไร แต่ยังไม่จบ)
