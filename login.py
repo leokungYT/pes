@@ -6673,9 +6673,11 @@ def process_device_login(device):
                                                              os.path.join(IMG_DIR, "gacha4v2.bmp"),
                                                              x_4v2, y_4v2, stuck_secs=3.0, timeout=None, tag="G4v2-Click")
 
+                                        # หา gacha5v2 "ไม่มี timeout" — วนจนกว่าจะเจอ (ทางออกอื่น: เจอ out900)
                                         clicked_g5v2 = False
-                                        dl_g5v2 = time.time() + 15
-                                        while time.time() < dl_g5v2:
+                                        g5v2_wait_start = time.time()
+                                        g5v2_last_log = 0.0
+                                        while True:
                                             check_device_reset(serial, cycle_start)
                                             img = get_screen_capture(device)
                                             if img is not None:
@@ -6692,9 +6694,18 @@ def process_device_login(device):
                                                                          x_5v2, y_5v2, stuck_secs=3.0, timeout=None, tag="G5v2-Click")
                                                     clicked_g5v2 = True
                                                     break
+                                                # เจอ out900 = ไปต่อไม่ได้ → เลิกรอ gacha5v2 ไปทำ gacha500 ต่อ
+                                                if img_search(img, os.path.join(IMG_DIR, "ch", "out900.bmp")):
+                                                    gui_log(serial, "เจอ out900 ระหว่างรอ gacha5v2 — ไปต่อ gacha500", step="G5v2 Out900")
+                                                    break
+                                            # log ทุก 15 วิ ให้เห็นว่ายังรออยู่ (ไม่ได้ค้างตาย)
+                                            waited = time.time() - g5v2_wait_start
+                                            if waited - g5v2_last_log >= 15:
+                                                g5v2_last_log = waited
+                                                gui_log(serial, f"ยังรอ gacha5v2 อยู่... ({waited:.0f}s)", step="G5v2 Wait")
                                             time.sleep(0.2)
                                         if not clicked_g5v2:
-                                            gui_log(serial, "ไม่เจอ gacha5v2 ใน 15 วิ — ไปต่อ gacha500", step="G5v2 Miss")
+                                            gui_log(serial, "ไม่ได้กด gacha5v2 — ไปต่อ gacha500", step="G5v2 Miss")
                                         else:
                                             # สุ่ม v2 เสร็จ → ปิดหน้าผลสุ่ม: checkpointgacha → next → ค่อยไป gacha500
                                             _g500_checkpoint_then_next(device, cycle_start, serial, tag="G4v2")
