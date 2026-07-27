@@ -6446,18 +6446,21 @@ def process_device_login(device):
                                                 # ค้างหา new-gacha1 ครบ 8 วิ → เจอ fixout ให้กดปิดเฉยๆ แล้วหาต่อตามปกติ
                                                 newg_stuck_since = fixout_click_if_stuck(device, serial, img, newg_stuck_since, step="NewG FixOut",
                                                                                 skip_if=os.path.join(IMG_DIR, "ch", "checkpoint-gacha4.png"))
-                                                # *** ต้องเจอครบ 2 เงื่อนไขถึงจะนับว่าเจอ: new-gacha1 + checkpoint-gacha4 ***
+                                                # *** เจอ checkpoint-gacha4 = อยู่หน้ากาชาแล้ว → ไป step ถัดไป (gacha4v2/gacha4) ทันที ***
+                                                pts_cp4 = img_search(img, os.path.join(IMG_DIR, "ch", "checkpoint-gacha4.png"))
                                                 pts = img_search(img, os.path.join(IMG_DIR, "ch", "new-gacha1.bmp"), threshold=0.95)
-                                                if pts:
-                                                    pts_cp4 = img_search(img, os.path.join(IMG_DIR, "ch", "checkpoint-gacha4.png"))
-                                                    if pts_cp4:
-                                                        x, y = pts[0]   # คลิกที่ new-gacha1
+                                                if pts_cp4:
+                                                    if pts:
+                                                        x, y = pts[0]   # เจอ new-gacha1 ในเฟรมเดียวกัน → กดก่อนแล้วค่อยไปต่อ
                                                         device.shell(f"input swipe {x} {y} {x} {y} 100")
                                                         gui_log(serial, f"✅ เจอครบ 2 เงื่อนไข (new-gacha1 + checkpoint-gacha4)! Clicked ({x},{y})", step="NewG Found")
                                                         time.sleep(1.5)
-                                                        break
+                                                    else:
+                                                        gui_log(serial, "✅ เจอ checkpoint-gacha4 แล้ว — ไป step ถัดไป (gacha4v2/gacha4)", step="NewG Found")
+                                                    break
+                                                if pts:
                                                     # เจอ new-gacha1 แต่ยังไม่เจอ checkpoint-gacha4 →
-                                                    #   "กด new-gacha1 ไปก่อน" แต่ยังไม่นับว่าเจอ (ยังไม่ break) วนเช็คต่อจนครบ 2 เงื่อนไข
+                                                    #   "กด new-gacha1 ไปก่อน" แต่ยังไม่นับว่าเจอ (ยังไม่ break) วนเช็คต่อ
                                                     x_ng, y_ng = pts[0]
                                                     device.shell(f"input swipe {x_ng} {y_ng} {x_ng} {y_ng} 100")
                                                     cp_wait_n += 1
