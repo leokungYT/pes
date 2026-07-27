@@ -6427,8 +6427,9 @@ def process_device_login(device):
                                             time.sleep(0.1)
 
                                         # 2. หา new-gacha1.bmp — วนหาไปเรื่อยๆ "จนกว่าจะเจอ" (ไม่มีลิมิต ห้ามข้ามไป Gacha4)
-                                        gui_log(serial, "Waiting new-gacha1.bmp (until found)...", step="new-g1_step2")
+                                        gui_log(serial, "Waiting new-gacha1 + checkpoint-gacha4 (until found)...", step="new-g1_step2")
                                         swipe_count = 0
+                                        cp_wait_n = 0                     # นับรอบที่เจอ new-gacha1 แต่ยังไม่เจอ checkpoint-gacha4
                                         newg_stuck_since = time.time()   # ค้างครบ 8 วิ → หา fixout กดเฉยๆ
                                         while True:
                                             check_device_reset(serial, cycle_start)
@@ -6439,13 +6440,21 @@ def process_device_login(device):
                                                     continue
                                                 # ค้างหา new-gacha1 ครบ 8 วิ → เจอ fixout ให้กดปิดเฉยๆ แล้วหาต่อตามปกติ
                                                 newg_stuck_since = fixout_click_if_stuck(device, serial, img, newg_stuck_since, step="NewG FixOut")
+                                                # *** ต้องเจอครบ 2 เงื่อนไขถึงจะนับว่าเจอ: new-gacha1 + checkpoint-gacha4 ***
                                                 pts = img_search(img, os.path.join(IMG_DIR, "ch", "new-gacha1.bmp"), threshold=0.95)
                                                 if pts:
-                                                    x, y = pts[0]
-                                                    device.shell(f"input swipe {x} {y} {x} {y} 100")
-                                                    gui_log(serial, f"✅ new-gacha1 found! Clicked ({x},{y}) — ไปต่อ gacha4v2/gacha4", step="NewG Found")
-                                                    time.sleep(1.5)
-                                                    break
+                                                    pts_cp4 = img_search(img, os.path.join(IMG_DIR, "ch", "checkpoint-gacha4.png"))
+                                                    if pts_cp4:
+                                                        x, y = pts[0]   # คลิกที่ new-gacha1
+                                                        device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                                        gui_log(serial, f"✅ เจอครบ 2 เงื่อนไข (new-gacha1 + checkpoint-gacha4)! Clicked ({x},{y})", step="NewG Found")
+                                                        time.sleep(1.5)
+                                                        break
+                                                    # เจอ new-gacha1 แต่ยังไม่เจอ checkpoint-gacha4 → ยังไม่นับว่าเจอ รอต่อ
+                                                    cp_wait_n += 1
+                                                    if cp_wait_n % 5 == 1:
+                                                        gui_log(serial, f"เจอ new-gacha1 แต่ยังไม่เจอ checkpoint-gacha4 ({cp_wait_n}) — รอต่อ...", step="NewG Wait CP")
+                                                    time.sleep(1.0)
                                                 else:
                                                     swipe_count += 1
                                                     if NEW_GACHA_SWIPE == 1:
