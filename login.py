@@ -6644,9 +6644,11 @@ def process_device_login(device):
                                 #       ไม่เจอ nocions  → หา checkpointgacha → กด next → ไป gacha4
                                 #  3) รอบถัดไปใช้ flow gacha4 ปกติ จนครบ GACHA_LOOP_LIMIT
                                 #     (ออกจากลูปเมื่อเจอ outloop หรือครบจำนวนรอบใน config)
-                                #  *** ทั้ง v2 และ gacha500 ทำ "รอบเดียวเท่านั้น" ต่อ 1 บัญชี ***
-                                if GACHA500 == 1 and not g500_done:
-                                    g500_done = True   # ทำครั้งเดียว — รอบถัดไปวน gacha4 ปกติ
+                                #  *** ONE_GACHA500 = 0 → v2/gacha500 ทำ "รอบเดียว" แล้ววน gacha4 ต่อ
+                                #      ONE_GACHA500 = 1 → ทำ "เฉพาะ v2 + gacha500" เท่านั้น ปิด flow gacha4 ทิ้งเลย
+                                #                         (จบเมื่อ gacha500 ทำงานได้ / เจอ out900 / ครบจำนวนรอบ) ***
+                                if GACHA500 == 1 and (ONE_GACHA500 == 1 or not g500_done):
+                                    g500_done = True   # (ONE_GACHA500=0) ทำครั้งเดียว — รอบถัดไปวน gacha4 ปกติ
                                     # ── 1) gacha4v2 (8 วิ) ──
                                     gui_log(serial, "Waiting gacha4v2 (8s)...", step="G4v2")
                                     pts_g4v2 = None
@@ -6818,7 +6820,9 @@ def process_device_login(device):
                                             gui_log(serial, "ONE_GACHA500=1 + gacha500 ทำงานแล้ว → จบลูปสุ่มเลย", step="G500 One")
                                             found_g4 = False
                                             break
-                                        gui_log(serial, "ONE_GACHA500=1 แต่ยังไม่ได้ทำ gacha500 (v2 ไม่นับ) — ไปวน gacha4 ต่อ", step="G500 One Skip")
+                                        # ยังไม่ได้ทำ gacha500 → วน "v2/gacha500" ใหม่ (ไม่แตะ flow gacha4 เลย)
+                                        gui_log(serial, "ONE_GACHA500=1 ยังไม่ได้ทำ gacha500 (v2 ไม่นับ) — วน v2/gacha500 ใหม่", step="G500 One Retry")
+                                        continue
 
                                     gui_log(serial, "จบขั้น v2/gacha500 (ทำแล้ว 1 รอบ) — รอบถัดไปกลับไปวนคลิก gacha4 ปกติ", step="G500 Done")
 
