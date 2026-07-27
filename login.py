@@ -6450,10 +6450,13 @@ def process_device_login(device):
                                                         gui_log(serial, f"✅ เจอครบ 2 เงื่อนไข (new-gacha1 + checkpoint-gacha4)! Clicked ({x},{y})", step="NewG Found")
                                                         time.sleep(1.5)
                                                         break
-                                                    # เจอ new-gacha1 แต่ยังไม่เจอ checkpoint-gacha4 → ยังไม่นับว่าเจอ รอต่อ
+                                                    # เจอ new-gacha1 แต่ยังไม่เจอ checkpoint-gacha4 →
+                                                    #   "กด new-gacha1 ไปก่อน" แต่ยังไม่นับว่าเจอ (ยังไม่ break) วนเช็คต่อจนครบ 2 เงื่อนไข
+                                                    x_ng, y_ng = pts[0]
+                                                    device.shell(f"input swipe {x_ng} {y_ng} {x_ng} {y_ng} 100")
                                                     cp_wait_n += 1
                                                     if cp_wait_n % 5 == 1:
-                                                        gui_log(serial, f"เจอ new-gacha1 แต่ยังไม่เจอ checkpoint-gacha4 ({cp_wait_n}) — รอต่อ...", step="NewG Wait CP")
+                                                        gui_log(serial, f"เจอ new-gacha1 → กด ({x_ng},{y_ng}) แต่ยังไม่เจอ checkpoint-gacha4 ({cp_wait_n}) — รอต่อ...", step="NewG Wait CP")
                                                     time.sleep(1.0)
                                                 else:
                                                     swipe_count += 1
