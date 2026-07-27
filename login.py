@@ -6610,7 +6610,7 @@ def process_device_login(device):
                                                 check_device_reset(serial, cycle_start)
                                                 img_cp4 = get_screen_capture(device)
                                                 if img_cp4 is not None:
-                                                    pts_cp4 = img_search(img_cp4, os.path.join(IMG_DIR, "checkpoint-gacha4.png"))
+                                                    pts_cp4 = img_search(img_cp4, os.path.join(IMG_DIR, "ch", "checkpoint-gacha4.png"))
                                                     if pts_cp4:
                                                         verified = True
                                                         pts_fresh = img_search_any(img_cp4, ["gacha4.bmp", "gacha4v2.bmp"])
@@ -6794,7 +6794,7 @@ def process_device_login(device):
                                             check_device_reset(serial, cycle_start)
                                             img_cp4 = get_screen_capture(device)
                                             if img_cp4 is not None:
-                                                pts_cp4 = img_search(img_cp4, os.path.join(IMG_DIR, "checkpoint-gacha4.png"))
+                                                pts_cp4 = img_search(img_cp4, os.path.join(IMG_DIR, "ch", "checkpoint-gacha4.png"))
                                                 if pts_cp4:
                                                     verified = True
                                                     pts_fresh = img_search_any(img_cp4, ["gacha4.bmp", "gacha4v2.bmp"])
