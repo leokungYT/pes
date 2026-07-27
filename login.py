@@ -3697,6 +3697,7 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
         fixfind_first_seen = None
         step_start = time.time()   # ใช้จับเวลา "ค้าง" เฉพาะ fin1
         last_countdown = None      # วินาทีล่าสุดที่ log countdown (กัน log รัว)
+        fin1_rescue_n = 0          # นับรอบ rescue ของ fin1 — เกิน 2 รอบ → แวะกด next.bmp
         while True:
             check_device_reset(serial, cycle_start)
 
@@ -3732,6 +3733,27 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
                                 gui_log(serial, f"cancel.png found at ({xb},{yb}) — clicking & stopping Back spam.", step="fin1 Rescue OK")
                                 click_cancel_until_gone(device, serial, xb, yb, step="fin1 Rescue")
                                 break
+
+                    # ── rescue เกิน 2 รอบแล้วยังไม่เจอ fin1 → แวะหา next.bmp แล้วกด (หน้าผลสุ่มอาจค้างอยู่) ──
+                    fin1_rescue_n += 1
+                    if fin1_rescue_n >= 2:
+                        gui_log(serial, f"fin1 rescue {fin1_rescue_n} รอบแล้วยังไม่เจอ — แวะหา next.bmp (8s)", step="fin1 Next")
+                        dl_fn = time.time() + 8
+                        while time.time() < dl_fn:
+                            check_device_reset(serial, cycle_start)
+                            img_fn = get_screen_capture(device)
+                            if img_fn is not None:
+                                pts_fn = img_search(img_fn, os.path.join(IMG_DIR, "next.bmp"))
+                                if pts_fn:
+                                    x_fn, y_fn = pts_fn[0]
+                                    gui_log(serial, f"เจอ next.bmp — กด ({x_fn},{y_fn})", step="fin1 Next")
+                                    click_next_until_gone(device, cycle_start, serial, x_fn, y_fn, tag="fin1 Next")
+                                    break
+                            time.sleep(0.3)
+                        else:
+                            gui_log(serial, "ไม่เจอ next.bmp ใน 8s — รอ fin1 ต่อ", step="fin1 Next Miss")
+                        fin1_rescue_n = 0   # เช็คแล้ว → เริ่มนับรอบใหม่
+
                     step_start = time.time()   # รีเซ็ตนาฬิกาแล้วกลับไปรอ fin1 ใหม่
                     continue
                     
@@ -4315,14 +4337,15 @@ def click_img_until_gone(device, cycle_start, serial, img_path, x, y,
                          stuck_secs=3.0, timeout=60.0, tag="Click", threshold=0.8,
                          label=None, settle=1.5):
     """กดรูปที่ (x,y) แล้วเฝ้าดู — ถ้ารูปยัง "ค้าง" อยู่เกิน `stuck_secs` วิ ให้กดซ้ำ
-    วนจนกว่ารูปจะหายไป (หรือครบ timeout กันค้าง). คืน True ถ้าหายแล้ว"""
+    วนจนกว่ารูปจะหายไป (หรือครบ timeout กันค้าง). คืน True ถ้าหายแล้ว
+    timeout=None → ไม่ยอมแพ้ กดซ้ำจนกว่ารูปจะหายไปจริงๆ"""
     name = label or os.path.basename(img_path)
     device.shell(f"input swipe {x} {y} {x} {y} 100")
     gui_log(serial, f"กด {name} ({x},{y})", step=tag)
     time.sleep(settle)
     last_click = time.time()
-    deadline = time.time() + timeout
-    while time.time() < deadline:
+    deadline = None if timeout is None else time.time() + timeout
+    while deadline is None or time.time() < deadline:
         check_device_reset(serial, cycle_start)
         img_c = get_screen_capture(device)
         if img_c is not None:
@@ -6628,7 +6651,7 @@ def process_device_login(device):
                                         gui_log(serial, f"gacha4v2 found! Clicking ({x_4v2},{y_4v2}) — waiting gacha5v2...", step="G4v2-Click")
                                         click_img_until_gone(device, cycle_start, serial,
                                                              os.path.join(IMG_DIR, "gacha4v2.bmp"),
-                                                             x_4v2, y_4v2, stuck_secs=3.0, timeout=30.0, tag="G4v2-Click")
+                                                             x_4v2, y_4v2, stuck_secs=3.0, timeout=None, tag="G4v2-Click")
 
                                         clicked_g5v2 = False
                                         dl_g5v2 = time.time() + 15
@@ -6646,7 +6669,7 @@ def process_device_login(device):
                                                     # ค้างเกิน 3 วิ กดซ้ำจนหาย
                                                     click_img_until_gone(device, cycle_start, serial,
                                                                          os.path.join(IMG_DIR, "gacha5v2.bmp"),
-                                                                         x_5v2, y_5v2, stuck_secs=3.0, timeout=30.0, tag="G5v2-Click")
+                                                                         x_5v2, y_5v2, stuck_secs=3.0, timeout=None, tag="G5v2-Click")
                                                     clicked_g5v2 = True
                                                     break
                                             time.sleep(0.2)
