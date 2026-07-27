@@ -4413,35 +4413,22 @@ def _g500_check_coin_and_collect(device, cycle_start, serial, original_name, fil
 def gacha_find_navigate_then_find_hero(device, cycle_start, serial, original_name, file_path, coin_prefix=None):
     """
     เส้นทางหลังสุ่ม gacha ปกติ (Gacha+Find) ก่อนเริ่มค้นหา fin1:
-      1) รอ next.bmp → คลิก (ปิดหน้าผลสุ่ม)
-      2) กด Back รัวๆ จนกว่าจะเจอ cancel.bmp → คลิก
-      3) เริ่ม find_hero_mode (fin1...) แล้วแนบเลขเหรียญที่สแกนไว้ "ก่อน" gacha ตอน export
+      1) กด Back รัวๆ จนกว่าจะเจอ cancel.bmp → คลิก (ไม่มี timeout — เจอ cancel เท่านั้นถึงหยุด)
+         *** ไม่รอ next.bmp แล้ว — กด Back ได้เลยทันที ***
+      2) เริ่ม find_hero_mode (fin1...) แล้วแนบเลขเหรียญที่สแกนไว้ "ก่อน" gacha ตอน export
     coin_prefix: เลขเหรียญที่สแกนไว้ตั้งแต่ก่อนเริ่ม gacha (ถ้าเปิด CHECK_COIN)
     """
-    # 1. รอ next.bmp → คลิก
-    gui_log(serial, "Waiting next.bmp (Gacha+Find)...", step="Next Wait")
-    deadline_next = time.time() + 30
-    while time.time() < deadline_next:
-        check_device_reset(serial, cycle_start)
-        img = get_screen_capture(device)
-        if img is not None:
-            pts = img_search(img, os.path.join(IMG_DIR, "next.bmp"))
-            if pts:
-                x, y = pts[0]
-                device.shell(f"input swipe {x} {y} {x} {y} 100")
-                gui_log(serial, f"next.bmp clicked at ({x},{y})", step="Next OK")
-                time.sleep(1.2)
-                break
-        time.sleep(0.3)
-
-    # 2. กด Back รัวๆ จนกว่าจะเจอ cancel.bmp → คลิก (timeout 60s กันค้าง)
-    gui_log(serial, "Spamming Back until cancel.bmp...", step="Back Spam")
-    deadline_cancel = time.time() + 60
-    while time.time() < deadline_cancel:
+    # 1. กด Back รัวๆ จนกว่าจะเจอ cancel.bmp → คลิก แล้วค่อยไปทำ find ต่อ
+    gui_log(serial, "Spamming Back until cancel.bmp (ไม่รอ next)...", step="Back Spam")
+    while True:
         check_device_reset(serial, cycle_start)
         device.shell("input keyevent 4")  # KEYCODE_BACK
-        time.sleep(0.4)
-        img = get_screen_capture(device)
+        time.sleep(0.6)
+        try:
+            img = get_screen_capture(device)
+        except ResetGachaException:
+            # popup กาชาเด้งระหว่างกด Back → get_screen_capture เคลียร์ให้แล้ว กด Back ต่อ
+            continue
         if img is not None:
             pts_c = img_search(img, os.path.join(IMG_DIR, "cancel.bmp"))
             if pts_c:
@@ -4450,14 +4437,14 @@ def gacha_find_navigate_then_find_hero(device, cycle_start, serial, original_nam
                 click_cancel_until_gone(device, serial, x, y, step="Cancel OK")
                 break
 
-    # 3. สแกนเหรียญใหม่อีกรอบก่อนทำ fin (อัปเดตเลขหลังสุ่มไปแล้ว เพราะเหรียญลดลง)
+    # 2. สแกนเหรียญใหม่อีกรอบก่อนทำ fin (อัปเดตเลขหลังสุ่มไปแล้ว เพราะเหรียญลดลง)
     if CHECK_COIN == 1:
         gui_log(serial, "Re-scanning coins after gacha (updated value)...", step="Coin Re-scan", status="working")
         new_coin = scan_coin_number(device, cycle_start, serial)
         if new_coin is not None:
             coin_prefix = new_coin
 
-    # 4. เริ่มค้นหา fin1... (แนบเลขเหรียญที่สแกนใหม่หลังสุ่มตอน export ถ้ามี)
+    # 3. เริ่มค้นหา fin1... (แนบเลขเหรียญที่สแกนใหม่หลังสุ่มตอน export ถ้ามี)
     return find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_prefix=coin_prefix)
 
 
@@ -6318,8 +6305,9 @@ def process_device_login(device):
             # 7.3.5 CheckCoin + FindHero (ไม่มี gacha) → ใช้เลขเหรียญที่สแกนไว้ก่อนแล้ว → หา hero
             #       เลขเหรียญที่สแกนได้จะ "เขียนทับ" เลขเดิมใน -[เลข] (ไม่ต่อเพิ่มจนชื่อยาว)
             #       เจอ → Hero+ชื่อ-[เลขใหม่] , ไม่เจอ → ชื่อ-[เลขใหม่]
+            #       *** เปิดกาชาอยู่ (DO_GACHA/NEW_GACHA) → ข้ามไปทำ find "หลังสุ่มเสร็จ" แทน ***
             if (CHECK_COIN == 1 and FIND_HERO == 1
-                    and DO_GACHA != 1 and GACHA_FIND != 1 and GACHA_CHECK != 1):
+                    and DO_GACHA != 1 and NEW_GACHA != 1 and GACHA_FIND != 1 and GACHA_CHECK != 1):
                 gui_log(serial, "CheckCoin+Find mode → using pre-scanned coin, find hero...", step="Coin+Find", status="working")
                 if find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_prefix=coin_prefix):
                     continue  # Start next file immediately
@@ -6332,7 +6320,10 @@ def process_device_login(device):
                     continue  # Start next file immediately
 
             # 7.5 Find Hero Sequence (Optional)
-            if FIND_HERO == 1 and GACHA_CHECK != 1 and GACHA_FIND != 1:
+            #     *** ถ้าเปิดกาชาอยู่ (DO_GACHA/NEW_GACHA) → ไม่ทำตรงนี้ ***
+            #     ให้ไปทำ find "หลังสุ่มกาชาเสร็จ" (บล็อก 8.5) เพื่อไม่ให้ปิดแอพก่อนสุ่ม
+            if (FIND_HERO == 1 and GACHA_CHECK != 1 and GACHA_FIND != 1
+                    and DO_GACHA != 1 and NEW_GACHA != 1):
                 if find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_prefix=coin_prefix):
                     continue  # Start next file immediately
 
@@ -6682,8 +6673,8 @@ def process_device_login(device):
                                             pts_g500 = img_search(img, os.path.join(IMG_DIR, "ch", "gacha500.png"), threshold=0.95)
                                             if pts_g500:
                                                 break
-                                            # เจอ out900 → หยุดหา gacha500 ไปทำ step ต่อไปเลย
-                                            if img_search(img, os.path.join(IMG_DIR, "out900.bmp")):
+                                            # เจอ out900 (img/ch/) → หยุดหา gacha500 ไปทำ step ต่อไปเลย
+                                            if img_search(img, os.path.join(IMG_DIR, "ch", "out900.bmp")):
                                                 gui_log(serial, "เจอ out900 → หยุดหา gacha500 ไป step ถัดไปเลย", step="G500 Out900")
                                                 g500_out900 = True
                                                 break
@@ -6735,6 +6726,10 @@ def process_device_login(device):
                                             check_device_reset(serial, cycle_start)
                                             img_w = get_screen_capture(device)
                                             if img_w is not None:
+                                                # เจอ out900 → ไปต่อไม่ได้แล้ว หยุดรอ ไป step ถัดไปเลย
+                                                if img_search(img_w, os.path.join(IMG_DIR, "ch", "out900.bmp")):
+                                                    gui_log(serial, "เจอ out900 → หยุดรอ ไป step ถัดไปเลย", step="G500 Out900")
+                                                    break
                                                 # เงื่อนไข 1 — coin ไม่พอ
                                                 if img_search(img_w, os.path.join(IMG_DIR, "nocions.bmp")):
                                                     device.shell("input keyevent 4")   # Back 1 ครั้ง
@@ -7186,8 +7181,12 @@ def process_device_login(device):
                         continue
             # 8.5 Gacha + Find Hero (Optional) — หลังสุ่มกาชาเสร็จ "ไม่ clear app"
             #      next → กด Back รัวๆจนเจอ cancel → คลิก → แล้วค่อยค้นหา fin1
-            if DO_GACHA == 1 and GACHA_FIND == 1 and not coin_low:
-                gui_log(serial, "Gacha finished. Gacha+Find mode active: next → Back→cancel → Find Hero...", step="Gacha+Find")
+            #      ทำงานเมื่อ: เปิด GACHA_FIND  หรือ  เปิด FIND_HERO (find=1) คู่กับกาชา
+            #      → ออกจากลูปสุ่มด้วยเหตุใดก็ตาม (outloop / nocions / ครบจำนวนรอบ) จะ "ไม่ปิดแอพจบรอบ"
+            #        แต่ไปทำ find ต่อจนส่งไฟล์ออก แล้วค่อยปิดแอพเริ่มไฟล์ใหม่
+            if ((GACHA_FIND == 1 or FIND_HERO == 1)
+                    and (DO_GACHA == 1 or NEW_GACHA == 1) and not coin_low):
+                gui_log(serial, "Gacha finished → ไม่ปิดแอพ ไปทำ Find Hero ต่อ (next → Back→cancel → fin1)...", step="Gacha+Find")
                 if gacha_find_navigate_then_find_hero(device, cycle_start, serial, original_name, file_path, coin_prefix=coin_prefix):
                     continue  # find_hero_mode จัดการปิดแอป + ย้ายไฟล์ + จบรอบให้แล้ว
 

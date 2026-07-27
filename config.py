@@ -84,7 +84,7 @@ LOGIN_SUCCESS_DIR = "login-success"
 # ── Find Hero Sequence ─────────────────────────────
 # 1 = ทำงาน fin1-fin8 และค้นหาฮีโร่ตามภาพ
 # 0 = ข้าม
-FIND_HERO = 0
+FIND_HERO = 1
 
 # แมพไฟล์ภาพฮีโร่เข้ากับชื่อฮีโร่
 HERO_IMG_MAP = {
@@ -159,7 +159,7 @@ list_find_hero = [
     "Ferran Torres",
     "Harry Kane",
     "Cristian Romero",
-    "Lionel Messi",
+    "Lionel Messi=x2",
     "Kevin De Bruyne",
     "James Rodriguez",
     "Neymar Jr",
