@@ -3323,6 +3323,19 @@ def img_search(gray_img, find_path, threshold=0.8):
     return points
 
 
+def fixout_click_if_stuck(device, serial, img, stuck_since, secs=8.0, step="FixOut"):
+    """ค้างอยู่หน้าเดิมครบ `secs` วิ → หา fixout ในภาพ เจอแล้ว "กดเฉยๆ" (ไม่ Back spam ไม่ทำอะไรต่อ)
+    แล้วให้ลูปเดิมทำงานตามปกติ. คืนค่า stuck_since ใหม่ (รีเซ็ตนาฬิกาเมื่อครบรอบเช็ค)"""
+    if img is None or time.time() - stuck_since < secs:
+        return stuck_since
+    pts_fo = img_search(img, os.path.join(IMG_DIR, "fixout.bmp"), threshold=0.85)
+    if pts_fo:
+        x_fo, y_fo = pts_fo[0]
+        device.shell(f"input swipe {x_fo} {y_fo} {x_fo} {y_fo} 100")
+        gui_log(serial, f"ค้าง {secs:.0f}s — เจอ fixout กดปิด ({x_fo},{y_fo}) แล้วทำงานต่อ", step=step)
+        time.sleep(1.0)
+    return time.time()   # เริ่มจับเวลาใหม่ (เช็ครอบถัดไปอีก secs วิ)
+
 def img_search_any(gray_img, names, threshold=0.8):
     """หา template หลายชื่อในภาพเดียว — เจอตัวไหนก่อนคืนผลตัวนั้นเลย
     (เช่น ["gacha4.bmp", "gacha4v2.bmp"] = เจอเวอร์ชันไหนก็นับว่าเจอ)"""
@@ -6458,6 +6471,7 @@ def process_device_login(device):
                                         new_g1_swipe_count = 0
                                         fixswap_first_seen = None
                                         fixswap_triggered = False
+                                        newg1_stuck_since = time.time()   # ค้างครบ 8 วิ → หา fixout กดเฉยๆ
                                         while True:
                                             check_device_reset(serial, cycle_start)
                                             img = get_screen_capture(device)
@@ -6465,6 +6479,9 @@ def process_device_login(device):
                                                 img, _ = check_and_click_fixback(device, img, serial)
                                                 if img is None:
                                                     continue
+
+                                                # ค้างหา new-gacha1 ครบ 8 วิ → เจอ fixout ให้กดปิดเฉยๆ แล้วหาต่อตามปกติ
+                                                newg1_stuck_since = fixout_click_if_stuck(device, serial, img, newg1_stuck_since, step="NewG FixOut")
 
                                                 # 1. เช็ค fixswap.bmp ก่อน (หาแบบลอยๆ ตลอดเวลา)
                                                 pts_fixswap = img_search(img, os.path.join(IMG_DIR, "fixswap.bmp"))
@@ -6513,7 +6530,7 @@ def process_device_login(device):
 
                                                 # 2. เช็ค new-gacha1.bmp (หากเจอแล้วจะหลุดลูปและหยุดหา fixswap)
                                                 #    (รูปแยกเก็บใน img/ch/ — อยากแก้รูปไปเปลี่ยนที่โฟลเดอร์นั้น)
-                                                pts = img_search(img, os.path.join(IMG_DIR, "ch", "new-gacha1.bmp"))
+                                                pts = img_search(img, os.path.join(IMG_DIR, "ch", "new-gacha1.bmp"), threshold=0.95)
                                                 if pts:
                                                     # GACHA500 step1: สแกน coin ที่หน้า new-gacha1 (จอนี้ coin อ่านได้ชัด) ก่อนกด
                                                     #   coin >= เกณฑ์ → เก็บเข้า coin<threshold>+ แล้วจบบัญชี | < เกณฑ์ → สุ่มต่อ
@@ -6537,6 +6554,7 @@ def process_device_login(device):
                                         # 2. หา new-gacha1.bmp — วนหาไปเรื่อยๆ "จนกว่าจะเจอ" (ไม่มีลิมิต ห้ามข้ามไป Gacha4)
                                         gui_log(serial, "Waiting new-gacha1.bmp (until found)...", step="new-g1_step2")
                                         swipe_count = 0
+                                        newg_stuck_since = time.time()   # ค้างครบ 8 วิ → หา fixout กดเฉยๆ
                                         while True:
                                             check_device_reset(serial, cycle_start)
                                             img = get_screen_capture(device)
@@ -6544,7 +6562,9 @@ def process_device_login(device):
                                                 img, _ = check_and_click_fixback(device, img, serial)
                                                 if img is None:
                                                     continue
-                                                pts = img_search(img, os.path.join(IMG_DIR, "ch", "new-gacha1.bmp"))
+                                                # ค้างหา new-gacha1 ครบ 8 วิ → เจอ fixout ให้กดปิดเฉยๆ แล้วหาต่อตามปกติ
+                                                newg_stuck_since = fixout_click_if_stuck(device, serial, img, newg_stuck_since, step="NewG FixOut")
+                                                pts = img_search(img, os.path.join(IMG_DIR, "ch", "new-gacha1.bmp"), threshold=0.95)
                                                 if pts:
                                                     x, y = pts[0]
                                                     device.shell(f"input swipe {x} {y} {x} {y} 100")
@@ -6636,6 +6656,7 @@ def process_device_login(device):
                             else:
                                 gui_log(serial, "Custom Gacha mode active... (สุ่มจน coin หมด)", step="Custom Gacha")
                             custom_rounds = 0
+                            g500_done = False   # ขั้น gacha500 ทำ "รอบเดียวพอ" ต่อ 1 บัญชี
                             while True:
                                 # Custom จำกัดรอบ: ครบตามที่ตั้ง → break ออกเลย ไม่รอ coin หมด
                                 if GACHA_LOOP_LIMIT > 0 and custom_rounds >= GACHA_LOOP_LIMIT:
@@ -6644,6 +6665,99 @@ def process_device_login(device):
                                 custom_rounds += 1
                                 if GACHA_LOOP_LIMIT > 0:
                                     gui_log(serial, f"สุ่มรอบที่ {custom_rounds}/{GACHA_LOOP_LIMIT}...", step="Custom Round")
+
+                                # ══════════ step2 (GACHA500 = 1) ══════════
+                                #  1) หา gacha4v2 (8 วิ) → เจอ = กด → หา gacha5v2 → กด  (= สุ่มปกติ 1 ครั้ง)
+                                #     ไม่เจอ gacha4v2 ใน 8 วิ → ข้ามไปทำ gacha500 แทน
+                                #  2) หา gacha500 → เจอ = กด → ถ้าเจอ nocions ให้กด Back 1 ครั้ง (ไม่เจอก็ผ่าน)
+                                #  3) วนรอบถัดไปตาม GACHA_LOOP_LIMIT ใน config
+                                #  *** ทั้ง gacha4v2/gacha5v2 และ gacha500 ทำ "รอบเดียวเท่านั้น" ***
+                                #      รอบถัดไปตกไปใช้ flow gacha4 ปกติด้านล่างจนครบจำนวน loop
+                                if GACHA500 == 1 and not g500_done:
+                                    g500_done = True   # ทำครั้งเดียว — รอบถัดไปวน gacha4 ปกติ
+                                    # ── 1) gacha4v2 (8 วิ) ──
+                                    gui_log(serial, "Waiting gacha4v2 (8s)...", step="G4v2")
+                                    pts_g4v2 = None
+                                    dl_g4v2 = time.time() + 8
+                                    while time.time() < dl_g4v2:
+                                        check_device_reset(serial, cycle_start)
+                                        img = get_screen_capture(device)
+                                        if img is not None:
+                                            img, _ = check_and_click_fixback(device, img, serial, check_g1=False)
+                                            if img is None:
+                                                continue
+                                            pts_g4v2 = img_search(img, os.path.join(IMG_DIR, "gacha4v2.bmp"))
+                                            if pts_g4v2:
+                                                break
+                                        time.sleep(0.2)
+
+                                    if pts_g4v2:
+                                        # เจอ → กด gacha4v2 แล้วหา gacha5v2 กดต่อ (สุ่มปกติ 1 ครั้ง)
+                                        x_4v2, y_4v2 = pts_g4v2[0]
+                                        device.shell(f"input swipe {x_4v2} {y_4v2} {x_4v2} {y_4v2} 100")
+                                        gui_log(serial, f"gacha4v2 found! Clicked ({x_4v2},{y_4v2}) — waiting gacha5v2...", step="G4v2-Click")
+                                        time.sleep(1.5)
+
+                                        clicked_g5v2 = False
+                                        dl_g5v2 = time.time() + 15
+                                        while time.time() < dl_g5v2:
+                                            check_device_reset(serial, cycle_start)
+                                            img = get_screen_capture(device)
+                                            if img is not None:
+                                                img, _ = check_and_click_fixback(device, img, serial, check_g1=False)
+                                                if img is None:
+                                                    continue
+                                                pts_g5v2 = img_search(img, os.path.join(IMG_DIR, "gacha5v2.bmp"))
+                                                if pts_g5v2:
+                                                    x_5v2, y_5v2 = pts_g5v2[0]
+                                                    device.shell(f"input swipe {x_5v2} {y_5v2} {x_5v2} {y_5v2} 100")
+                                                    gui_log(serial, f"gacha5v2 found! Clicked ({x_5v2},{y_5v2}) — สุ่มปกติ 1 ครั้ง", step="G5v2-Click")
+                                                    time.sleep(1.5)
+                                                    clicked_g5v2 = True
+                                                    break
+                                            time.sleep(0.2)
+                                        if not clicked_g5v2:
+                                            gui_log(serial, "ไม่เจอ gacha5v2 ใน 15 วิ — ไปต่อ gacha500", step="G5v2 Miss")
+                                    else:
+                                        gui_log(serial, "ไม่เจอ gacha4v2 ใน 8 วิ → ไปทำ gacha500 แทน", step="G4v2 Miss")
+
+                                    # ── 2) gacha500 → กด → เช็ค nocions → Back 1 ครั้ง ──
+                                    gui_log(serial, "Looking for gacha500 (8s, ทำรอบเดียว)...", step="G500")
+                                    pts_g500 = None
+                                    dl_g500 = time.time() + 8
+                                    while time.time() < dl_g500:
+                                        check_device_reset(serial, cycle_start)
+                                        img = get_screen_capture(device)
+                                        if img is not None:
+                                            pts_g500 = img_search(img, os.path.join(IMG_DIR, "ch", "gacha500.png"), threshold=0.95)
+                                            if pts_g500:
+                                                break
+                                        time.sleep(0.3)
+
+                                    if pts_g500:
+                                        x_g5, y_g5 = pts_g500[0]
+                                        device.shell(f"input swipe {x_g5} {y_g5} {x_g5} {y_g5} 100")
+                                        gui_log(serial, f"gacha500 found! Clicked ({x_g5},{y_g5})", step="G500-Click")
+                                        time.sleep(2)
+                                        # เจอ nocions (coin ไม่พอ) → กด Back 1 ครั้ง / ไม่เจอก็ไม่เป็นไร
+                                        img_nc = get_screen_capture(device)
+                                        if img_nc is not None and img_search(img_nc, os.path.join(IMG_DIR, "nocions.bmp")):
+                                            device.shell("input keyevent 4")   # Back 1 ครั้ง
+                                            gui_log(serial, "เจอ nocions หลัง gacha500 → กด Back 1 ครั้ง", step="G500 Back")
+                                            time.sleep(1.5)
+                                            if GACHA_LOOP_LIMIT <= 0:
+                                                # โหมด "สุ่มจน coin หมด" → coin หมดแล้ว จบ custom gacha
+                                                gui_log(serial, "coin หมด (nocions) — จบ Custom Gacha", step="No-Coins")
+                                                break
+                                    else:
+                                        gui_log(serial, "ไม่เจอ gacha500 — ข้ามไปรอบถัดไป", step="G500 Miss")
+                                    gui_log(serial, "จบขั้น v2/gacha500 (ทำแล้ว 1 รอบ) — รอบถัดไปกลับไปวนคลิก gacha4 ปกติ", step="G500 Done")
+
+                                    # ── 3) วนรอบถัดไป (ตาม GACHA_LOOP_LIMIT) → ใช้ flow gacha4 ปกติ ──
+                                    continue
+
+                                # ══════════ สุ่ม loop ปกติ (flow เดิม: gacha4 → gacha5 → loopgacha1) ══════════
+                                #   ใช้เมื่อ GACHA500 = 0  หรือ  GACHA500 = 1 แต่ทำ v2/gacha500 ไปแล้ว (รอบ 2 เป็นต้นไป)
                                 # 1. Wait/Click gacha4.bmp
                                 gui_log(serial, "Waiting gacha4.bmp (Custom)...", step="G4-Custom")
                                 found_g4 = False
@@ -6686,6 +6800,11 @@ def process_device_login(device):
                                                 gui_log(serial, f"Clicking gacha4.bmp... (count: {g4_click_count})", step="G4-Click")
                                                 time.sleep(0.8)
                                                 found_g4 = True
+                                                # กด gacha4 ครบ 5 ครั้งแล้วยังไปต่อไม่ได้ (จอไม่เปลี่ยน)
+                                                # → เลิกกดวน ไปทำ step Gacha5/gacha500 ต่อเลย
+                                                if g4_click_count >= 5:
+                                                    gui_log(serial, "กด gacha4 ครบ 5 ครั้งแล้วไปต่อไม่ได้ — ข้ามไป Gacha5/gacha500 เลย", step="G4-Limit")
+                                                    break
                                                 continue
                                             else:
                                                 gui_log(serial, "checkpoint-gacha4.png not found in 8s! Proceeding to Gacha5...", step="G4-Failed")
@@ -6761,18 +6880,7 @@ def process_device_login(device):
                                 if found_g4 in ["nocoin", "outloop"]:
                                     break
 
-                                # ── step2: หา gacha500 (img/ch/gacha500.png) ──
-                                #   ถ้าเจอ แล้วเจอ nocions.bmp → กด Back 1 ครั้ง (ถ้าไม่เจอ nocions ก็ข้ามไป)
-                                if GACHA500 == 1:
-                                    img_g500 = get_screen_capture(device)
-                                    if img_g500 is not None and img_search(img_g500, os.path.join(IMG_DIR, "ch", "gacha500.png")):
-                                        gui_log(serial, "gacha500 found (step2) — checking nocions...", step="G500")
-                                        time.sleep(0.5)
-                                        img_nc = get_screen_capture(device)
-                                        if img_nc is not None and img_search(img_nc, os.path.join(IMG_DIR, "nocions.bmp")):
-                                            device.shell("input keyevent 4")   # Back 1 ครั้ง
-                                            gui_log(serial, "nocions after gacha500 → กด Back 1 ครั้ง", step="G500 Back")
-                                            time.sleep(1)
+                                # (step2 gacha500 ย้ายไปอยู่ต้นรอบแล้ว — ทำงานเฉพาะ GACHA500=1 ซึ่ง continue ไปก่อนถึงตรงนี้)
 
                                 # 4. Wait for loopgacha1.bmp or outloop.bmp
                                 gui_log(serial, "Waiting for loopgacha1.bmp or outloop.bmp...", step="Loop-Check")
