@@ -4436,13 +4436,31 @@ def _g500_check_coin_and_collect(device, cycle_start, serial, original_name, fil
 def gacha_find_navigate_then_find_hero(device, cycle_start, serial, original_name, file_path, coin_prefix=None):
     """
     เส้นทางหลังสุ่ม gacha ปกติ (Gacha+Find) ก่อนเริ่มค้นหา fin1:
-      1) กด Back รัวๆ จนกว่าจะเจอ cancel.bmp → คลิก (ไม่มี timeout — เจอ cancel เท่านั้นถึงหยุด)
-         *** ไม่รอ next.bmp แล้ว — กด Back ได้เลยทันที ***
-      2) เริ่ม find_hero_mode (fin1...) แล้วแนบเลขเหรียญที่สแกนไว้ "ก่อน" gacha ตอน export
+      1) เช็คหา next.bmp ก่อน (8 วิ) — เจอ = กดจนกว่าจะหายไป (ปิดหน้าผลสุ่มที่ค้าง)
+      2) กด Back รัวๆ จนกว่าจะเจอ cancel.bmp → คลิก (ไม่มี timeout — เจอ cancel เท่านั้นถึงหยุด)
+      3) เริ่ม find_hero_mode (fin1...) แล้วแนบเลขเหรียญที่สแกนไว้ "ก่อน" gacha ตอน export
     coin_prefix: เลขเหรียญที่สแกนไว้ตั้งแต่ก่อนเริ่ม gacha (ถ้าเปิด CHECK_COIN)
     """
-    # 1. กด Back รัวๆ จนกว่าจะเจอ cancel.bmp → คลิก แล้วค่อยไปทำ find ต่อ
-    gui_log(serial, "Spamming Back until cancel.bmp (ไม่รอ next)...", step="Back Spam")
+    # 1. เช็ค next.bmp ก่อน — เจอ = กดจนกว่าจะหายไป แล้วค่อยไปกด Back
+    gui_log(serial, "เช็คหา next.bmp ก่อน (8s)...", step="Next Check")
+    dl_next_chk = time.time() + 8
+    while time.time() < dl_next_chk:
+        check_device_reset(serial, cycle_start)
+        img_nc = get_screen_capture(device)
+        if img_nc is not None:
+            pts_nc = img_search(img_nc, os.path.join(IMG_DIR, "next.bmp"))
+            if pts_nc:
+                x_nc, y_nc = pts_nc[0]
+                gui_log(serial, f"เจอ next.bmp — กดจนกว่าจะหาย ({x_nc},{y_nc})", step="Next Check")
+                click_next_until_gone(device, cycle_start, serial, x_nc, y_nc,
+                                      stuck_secs=3.0, timeout=None, tag="Next Check")
+                break
+        time.sleep(0.3)
+    else:
+        gui_log(serial, "ไม่เจอ next.bmp ใน 8s — ไปกด Back เลย", step="Next Check Miss")
+
+    # 2. กด Back รัวๆ จนกว่าจะเจอ cancel.bmp → คลิก แล้วค่อยไปทำ find ต่อ
+    gui_log(serial, "Spamming Back until cancel.bmp...", step="Back Spam")
     while True:
         check_device_reset(serial, cycle_start)
         device.shell("input keyevent 4")  # KEYCODE_BACK
@@ -4460,14 +4478,14 @@ def gacha_find_navigate_then_find_hero(device, cycle_start, serial, original_nam
                 click_cancel_until_gone(device, serial, x, y, step="Cancel OK")
                 break
 
-    # 2. สแกนเหรียญใหม่อีกรอบก่อนทำ fin (อัปเดตเลขหลังสุ่มไปแล้ว เพราะเหรียญลดลง)
+    # 3. สแกนเหรียญใหม่อีกรอบก่อนทำ fin (อัปเดตเลขหลังสุ่มไปแล้ว เพราะเหรียญลดลง)
     if CHECK_COIN == 1:
         gui_log(serial, "Re-scanning coins after gacha (updated value)...", step="Coin Re-scan", status="working")
         new_coin = scan_coin_number(device, cycle_start, serial)
         if new_coin is not None:
             coin_prefix = new_coin
 
-    # 3. เริ่มค้นหา fin1... (แนบเลขเหรียญที่สแกนใหม่หลังสุ่มตอน export ถ้ามี)
+    # 4. เริ่มค้นหา fin1... (แนบเลขเหรียญที่สแกนใหม่หลังสุ่มตอน export ถ้ามี)
     return find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_prefix=coin_prefix)
 
 
@@ -6689,6 +6707,8 @@ def process_device_login(device):
                                     g500_wait_start = time.time()
                                     g500_last_log = 0.0
                                     g500_out900 = False   # เจอ out900 = เลิกหา gacha500 ไป step ถัดไปเลย
+                                    g500_worked = False   # gacha500 "กดได้จริง" หรือยัง — ONE_GACHA500 นับจากตัวนี้เท่านั้น
+                                                          # (gacha4v2/gacha5v2 ไม่นับ, step1 coin ก็ไม่นับ)
                                     while True:
                                         check_device_reset(serial, cycle_start)
                                         img = get_screen_capture(device)
@@ -6719,6 +6739,7 @@ def process_device_login(device):
                                         x_g5, y_g5 = pts_g500[0]
                                         device.shell(f"input swipe {x_g5} {y_g5} {x_g5} {y_g5} 100")
                                         gui_log(serial, f"gacha500 found! Clicked ({x_g5},{y_g5})", step="G500-Click")
+                                        g500_worked = True   # ✅ gacha500 ทำงานแล้ว → ONE_GACHA500 ถึงจะนับว่าจบได้
                                         time.sleep(2)
 
                                         # ── กด gacha500v1 ต่อ (ปุ่มยืนยัน) ก่อนไปเช็ค nocions / checkpointgacha ──
@@ -6749,9 +6770,10 @@ def process_device_login(device):
                                             check_device_reset(serial, cycle_start)
                                             img_w = get_screen_capture(device)
                                             if img_w is not None:
-                                                # เจอ out900 → ไปต่อไม่ได้แล้ว หยุดรอ ไป step ถัดไปเลย
+                                                # เจอ out900 → ไปต่อไม่ได้แล้ว → จบลูปสุ่มทันที
                                                 if img_search(img_w, os.path.join(IMG_DIR, "ch", "out900.bmp")):
-                                                    gui_log(serial, "เจอ out900 → หยุดรอ ไป step ถัดไปเลย", step="G500 Out900")
+                                                    gui_log(serial, "เจอ out900 (หลัง gacha500v1) → จบลูปสุ่มทันที", step="G500 Out900")
+                                                    g500_out900 = True
                                                     break
                                                 # เงื่อนไข 1 — coin ไม่พอ
                                                 if img_search(img_w, os.path.join(IMG_DIR, "nocions.bmp")):
@@ -6780,15 +6802,23 @@ def process_device_login(device):
                                                         gui_log(serial, "ไม่เจอ next.bmp ใน 20 วิ — ไป gacha4 ต่อ", step="G500 Next Miss")
                                                     break
                                             time.sleep(0.3)
-                                    elif g500_out900:
-                                        gui_log(serial, "out900 — ข้ามขั้น gacha500 ไป step ถัดไป", step="G500 Out900")
-                                    else:
+                                    elif not g500_out900:
                                         gui_log(serial, "ไม่เจอ gacha500 — ข้ามไปรอบถัดไป", step="G500 Miss")
-                                    # ── ONE_GACHA500 = 1 → ทำ v2/gacha500 รอบเดียวพอ จบลูปสุ่มเลย (ไม่วนไป gacha4) ──
-                                    if ONE_GACHA500 == 1:
-                                        gui_log(serial, "ONE_GACHA500=1 → ทำ v2/gacha500 รอบเดียวพอ จบลูปสุ่มเลย (ไม่ไป gacha4)", step="G500 One")
+
+                                    # ── เจอ out900 (ตอนหา gacha500 หรือหลังกด gacha500v1) → จบลูปสุ่มทันที ──
+                                    if g500_out900:
+                                        gui_log(serial, "out900 — จบลูปสุ่มทันที (ไม่วน gacha4 ต่อ)", step="G500 Out900")
                                         found_g4 = False
                                         break
+
+                                    # ── ONE_GACHA500 = 1 → จบลูปสุ่มเลย "เฉพาะเมื่อ gacha500 ทำงานได้จริง" ──
+                                    #    (gacha4v2/gacha5v2 และ step1 coin ไม่นับ — ทำได้ก็ไม่เป็นไร แต่ยังไม่จบ)
+                                    if ONE_GACHA500 == 1:
+                                        if g500_worked:
+                                            gui_log(serial, "ONE_GACHA500=1 + gacha500 ทำงานแล้ว → จบลูปสุ่มเลย", step="G500 One")
+                                            found_g4 = False
+                                            break
+                                        gui_log(serial, "ONE_GACHA500=1 แต่ยังไม่ได้ทำ gacha500 (v2 ไม่นับ) — ไปวน gacha4 ต่อ", step="G500 One Skip")
 
                                     gui_log(serial, "จบขั้น v2/gacha500 (ทำแล้ว 1 รอบ) — รอบถัดไปกลับไปวนคลิก gacha4 ปกติ", step="G500 Done")
 

@@ -48,7 +48,7 @@ GACHA_LOOP_LIMIT = 0
 # 0 = ปิด → Custom Gacha สุ่ม loop แบบปกติ (ไม่เช็ค coin / ไม่หา gacha500)
 GACHA500 = 1
 # เกณฑ์ coin ที่จะ "เก็บ" (>= ค่านี้เก็บ, < ค่านี้สุ่มต่อ) — ชื่อโฟลเดอร์จะเป็น coin<ค่านี้>+
-COIN_GACHA_THRESHOLD = 700
+COIN_GACHA_THRESHOLD = 800
 
 # ── One Gacha500: ทำ v2/gacha500 "รอบเดียวพอ" แล้วจบเลย ──
 # 1 = ทำ step v2/gacha500 รอบเดียว → จบลูปสุ่มทันที (ไม่วนไปทำ gacha4 ต่อ)
@@ -164,7 +164,9 @@ list_find_hero = [
     "James Rodriguez",
     "Neymar Jr",
     "Luka Modric",
-    "Manuel Neuer"
+    "Manuel Neuer",
+    "Cristiano Ronaldo",
+    ""
 ]
 
 # แชร์ list เดียวกัน — แก้ที่ list_find_hero อย่างเดียวพอ
