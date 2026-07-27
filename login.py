@@ -151,6 +151,10 @@ try:
     from config import COIN_GACHA_THRESHOLD
 except ImportError:
     COIN_GACHA_THRESHOLD = 700
+try:
+    from config import ONE_GACHA500
+except ImportError:
+    ONE_GACHA500 = 0
 
 
 def cprint(*args, **kwargs):
@@ -1473,6 +1477,7 @@ if GUI_ENABLED:
                     ("ent", "└ Custom จำกัดรอบ (0=จนหมด)", "GACHA_LOOP_LIMIT"),
                     ("chk", "└ Gacha500 (step1 coin + step2)", "GACHA500"),
                     ("ent", "  └ Coin เก็บ (>= → coin+)",  "COIN_GACHA_THRESHOLD"),
+                    ("chk", "  └ One Gacha500 (รอบเดียวจบ)", "ONE_GACHA500"),
                     ("chk", "Gacha + Find + Check Coin", "GACHA_FIND"),
                 ],
                 "🆓 Gacha Free": [
@@ -6626,9 +6631,9 @@ def process_device_login(device):
                                         gui_log(serial, "ไม่เจอ gacha4v2 ใน 8 วิ → ไปทำ gacha500 แทน", step="G4v2 Miss")
 
                                     # ── 2) gacha500 → กด → เช็ค nocions → Back 1 ครั้ง ──
-                                    gui_log(serial, "Looking for gacha500 (8s, ทำรอบเดียว)...", step="G500")
+                                    gui_log(serial, "Looking for gacha500 (35s, ทำรอบเดียว)...", step="G500")
                                     pts_g500 = None
-                                    dl_g500 = time.time() + 8
+                                    dl_g500 = time.time() + 35
                                     while time.time() < dl_g500:
                                         check_device_reset(serial, cycle_start)
                                         img = get_screen_capture(device)
@@ -6702,6 +6707,12 @@ def process_device_login(device):
                                             time.sleep(0.3)
                                     else:
                                         gui_log(serial, "ไม่เจอ gacha500 — ข้ามไปรอบถัดไป", step="G500 Miss")
+                                    # ── ONE_GACHA500 = 1 → ทำ v2/gacha500 รอบเดียวพอ จบลูปสุ่มเลย (ไม่วนไป gacha4) ──
+                                    if ONE_GACHA500 == 1:
+                                        gui_log(serial, "ONE_GACHA500=1 → ทำ v2/gacha500 รอบเดียวพอ จบลูปสุ่มเลย (ไม่ไป gacha4)", step="G500 One")
+                                        found_g4 = False
+                                        break
+
                                     gui_log(serial, "จบขั้น v2/gacha500 (ทำแล้ว 1 รอบ) — รอบถัดไปกลับไปวนคลิก gacha4 ปกติ", step="G500 Done")
 
                                     # ── 3) วนรอบถัดไป (ตาม GACHA_LOOP_LIMIT) → ใช้ flow gacha4 ปกติ ──
@@ -7282,7 +7293,7 @@ def _disable_console_quickedit():
 def apply_config_now(reason=""):
     """โหลด config.py ใหม่แล้วอัปเดตตัวแปร runtime ทันที (ใช้ได้ทุกที่ ทุกเวลา)
     คืน True ถ้าสำเร็จ — ตัวนี้คือหัวใจของ 'แก้ config ปุ๊บ มีผลปั๊บ'"""
-    global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA, NEW_GACHA_SWIPE, GACHA_LOOP_LIMIT, GACHA500, COIN_GACHA_THRESHOLD, HERO_LIST, HERO_LIST_FREE
+    global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA, NEW_GACHA_SWIPE, GACHA_LOOP_LIMIT, GACHA500, COIN_GACHA_THRESHOLD, ONE_GACHA500, HERO_LIST, HERO_LIST_FREE
     try:
         import importlib
         import config as cfg
@@ -7315,6 +7326,7 @@ def apply_config_now(reason=""):
         GACHA_LOOP_LIMIT = getattr(cfg, 'GACHA_LOOP_LIMIT', 0)
         GACHA500 = getattr(cfg, 'GACHA500', 0)
         COIN_GACHA_THRESHOLD = getattr(cfg, 'COIN_GACHA_THRESHOLD', 700)
+        ONE_GACHA500 = getattr(cfg, 'ONE_GACHA500', 0)
         # รายชื่อฮีโร่ก็อัปเดตสดด้วย (แก้ list ใน config แล้วมีผลทันที)
         HERO_LIST = getattr(cfg, 'HERO_LIST', HERO_LIST)
         HERO_LIST_FREE = getattr(cfg, 'HERO_LIST_FREE', HERO_LIST_FREE)

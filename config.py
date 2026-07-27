@@ -36,7 +36,7 @@ CUSTOM_GACHA = 1
 # ── Custom Gacha Loop Limit (ใช้คู่กับ "สุ่มจน coin หมด") ──
 # 0  = สุ่มจนหมด (จนเจอ nocions/outloop) — พฤติกรรมเดิม
 # >0 = Custom: สุ่มไม่เกินกี่รอบแล้ว break ออกเลย (เช่น 5 = สุ่มแค่ 5 รอบ)
-GACHA_LOOP_LIMIT = 2
+GACHA_LOOP_LIMIT = 0
 
 # ── GACHA500: step พิเศษใน Custom Gacha (หลังเจอ checkpoint-gacha4) ──
 # ใช้ได้เฉพาะเมื่อ CUSTOM_GACHA = 1
@@ -49,6 +49,11 @@ GACHA_LOOP_LIMIT = 2
 GACHA500 = 1
 # เกณฑ์ coin ที่จะ "เก็บ" (>= ค่านี้เก็บ, < ค่านี้สุ่มต่อ) — ชื่อโฟลเดอร์จะเป็น coin<ค่านี้>+
 COIN_GACHA_THRESHOLD = 700
+
+# ── One Gacha500: ทำ v2/gacha500 "รอบเดียวพอ" แล้วจบเลย ──
+# 1 = ทำ step v2/gacha500 รอบเดียว → จบลูปสุ่มทันที (ไม่วนไปทำ gacha4 ต่อ)
+# 0 = ทำ v2/gacha500 รอบเดียว แล้ววน gacha4 ต่อจนครบ GACHA_LOOP_LIMIT (ค่าเดิม)
+ONE_GACHA500 = 0
 
 # ── Gacha + Check Mode ──────────────────────────────
 # 1 = สุ่มกาชาเสร็จแล้วกด backhome ต่อด้วยค้นหาฮีโร่ทันที
