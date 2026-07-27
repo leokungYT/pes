@@ -6772,12 +6772,15 @@ def process_device_login(device):
                                         g500_worked = True   # ✅ gacha500 ทำงานแล้ว → ONE_GACHA500 ถึงจะนับว่าจบได้
                                         time.sleep(2)
 
-                                        # ── กด gacha500v1 ต่อ (ปุ่มยืนยัน) — หา "พร้อมกับ nocions/out900" ──
+                                        # ── กด gacha500v1 ต่อ (ปุ่มยืนยัน) — หา "พร้อมกับ nocions/out900/gacha500" ──
                                         #    หาไปเรื่อยๆ "ไม่มี timeout" (ยังไงก็ต้องเจอ)
-                                        #    ทางออก: กด v1 ได้ / เจอ nocions (coin ไม่พอ) / เจอ out900
+                                        #    เจอ v1 = กด แล้ววนเช็คต่อ — ยังค้างอยู่ก็กดซ้ำ "สูงสุด 5 ครั้ง"
+                                        #    ทางออก: v1 หายแล้ว / กดครบ 5 ครั้ง / เจอ nocions / เจอ out900
                                         #    (เจอ gacha500 ซ้ำ = คลิกแรกไม่ติด → กดซ้ำแล้วหา v1 ต่อ)
                                         gui_log(serial, "หา gacha500v1 + nocions + out900 + gacha500 (until found)...", step="G500v1")
                                         clicked_g5v1 = False
+                                        g5v1_clicks = 0        # จำนวนครั้งที่กด gacha500v1 (limit 5 กันกดค้างวนไม่จบ)
+                                        G5V1_MAX_CLICKS = 5
                                         g500_nocions = False   # เจอ nocions ตั้งแต่ตอนหา v1 → ไม่ต้องวนรอหลัง v1 อีก
                                         g5v1_wait_start = time.time()
                                         g5v1_last_log = 0.0
@@ -6787,11 +6790,20 @@ def process_device_login(device):
                                             if img_v1 is not None:
                                                 pts_v1 = img_search(img_v1, os.path.join(IMG_DIR, "ch", "gacha500v1.png"), threshold=0.95)
                                                 if pts_v1:
+                                                    # ยังเจอ v1 อยู่ = ยังกดไม่ติด → กดซ้ำจนกว่าจะหาย (สูงสุด 5 ครั้ง)
+                                                    if g5v1_clicks >= G5V1_MAX_CLICKS:
+                                                        gui_log(serial, f"กด gacha500v1 ครบ {G5V1_MAX_CLICKS} ครั้งแล้วยังค้าง — ไปเช็ค nocions/checkpointgacha ต่อ", step="G500v1 Limit")
+                                                        break
                                                     x_v1, y_v1 = pts_v1[0]
                                                     device.shell(f"input swipe {x_v1} {y_v1} {x_v1} {y_v1} 100")
-                                                    gui_log(serial, f"gacha500v1 found! Clicked ({x_v1},{y_v1})", step="G500v1-Click")
-                                                    time.sleep(2)
+                                                    g5v1_clicks += 1
                                                     clicked_g5v1 = True
+                                                    gui_log(serial, f"gacha500v1 found! Clicked ({x_v1},{y_v1}) [{g5v1_clicks}/{G5V1_MAX_CLICKS}]", step="G500v1-Click")
+                                                    time.sleep(2)
+                                                    continue   # วนเช็คใหม่ — หายแล้วค่อยไปต่อ, ยังค้างก็กดซ้ำ
+                                                # เคยกดไปแล้ว + ตอนนี้ v1 หายแล้ว → สำเร็จ ไปเช็ค nocions/checkpointgacha ต่อ
+                                                if clicked_g5v1:
+                                                    gui_log(serial, f"gacha500v1 หายแล้ว (กด {g5v1_clicks} ครั้ง) → ไปต่อ", step="G500v1 Gone")
                                                     break
                                                 # เจอ nocions (coin ไม่พอ) → v1 ไม่มีวันมา → Back 1 ครั้ง → skip ไป gacha4
                                                 if img_search(img_v1, os.path.join(IMG_DIR, "nocions.bmp")):
