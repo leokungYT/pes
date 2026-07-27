@@ -6669,7 +6669,7 @@ def process_device_login(device):
                                             if pts_g4v2:
                                                 break
                                             # เจอ out900 ตั้งแต่ตอนหา gacha4v2 → ข้าม v2/gacha500 ที่เหลือทั้งหมด
-                                            if img_search(img, os.path.join(IMG_DIR, "ch", "out900.bmp")):
+                                            if img_search(img, os.path.join(IMG_DIR, "ch", "out900.bmp"), threshold=0.95):
                                                 gui_log(serial, "เจอ out900 (ตอนหา gacha4v2) → ข้าม step v2/gacha500", step="G4v2 Out900")
                                                 g500_out900 = True
                                                 break
@@ -6706,7 +6706,7 @@ def process_device_login(device):
                                                     clicked_g5v2 = True
                                                     break
                                                 # เจอ out900 = ไปต่อไม่ได้ → ข้าม gacha500 ที่เหลือทั้งหมด
-                                                if img_search(img, os.path.join(IMG_DIR, "ch", "out900.bmp")):
+                                                if img_search(img, os.path.join(IMG_DIR, "ch", "out900.bmp"), threshold=0.95):
                                                     gui_log(serial, "เจอ out900 ระหว่างรอ gacha5v2 → ข้าม step gacha500", step="G5v2 Out900")
                                                     g500_out900 = True
                                                     break
@@ -6747,7 +6747,7 @@ def process_device_login(device):
                                             if pts_g500:
                                                 break
                                             # เจอ out900 (img/ch/) → หยุดหา gacha500 ไปทำ step ต่อไปเลย
-                                            if img_search(img, os.path.join(IMG_DIR, "ch", "out900.bmp")):
+                                            if img_search(img, os.path.join(IMG_DIR, "ch", "out900.bmp"), threshold=0.95):
                                                 gui_log(serial, "เจอ out900 → หยุดหา gacha500 ไป step ถัดไปเลย", step="G500 Out900")
                                                 g500_out900 = True
                                                 break
@@ -6801,7 +6801,7 @@ def process_device_login(device):
                                                     g500_nocions = True
                                                     break
                                                 # เจอ out900 (img/ch/) → ไปต่อไม่ได้แล้ว → หยุดหา gacha500v1
-                                                if img_search(img_v1, os.path.join(IMG_DIR, "ch", "out900.bmp")):
+                                                if img_search(img_v1, os.path.join(IMG_DIR, "ch", "out900.bmp"), threshold=0.95):
                                                     gui_log(serial, "เจอ out900 → หยุดหา gacha500v1", step="G500v1 Out900")
                                                     g500_out900 = True
                                                     break
@@ -6830,7 +6830,7 @@ def process_device_login(device):
                                             img_w = get_screen_capture(device)
                                             if img_w is not None:
                                                 # เจอ out900 → ไปต่อไม่ได้แล้ว → จบลูปสุ่มทันที
-                                                if img_search(img_w, os.path.join(IMG_DIR, "ch", "out900.bmp")):
+                                                if img_search(img_w, os.path.join(IMG_DIR, "ch", "out900.bmp"), threshold=0.95):
                                                     gui_log(serial, "เจอ out900 (หลัง gacha500v1) → จบลูปสุ่มทันที", step="G500 Out900")
                                                     g500_out900 = True
                                                     break
