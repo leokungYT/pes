@@ -38,6 +38,18 @@ CUSTOM_GACHA = 1
 # >0 = Custom: สุ่มไม่เกินกี่รอบแล้ว break ออกเลย (เช่น 5 = สุ่มแค่ 5 รอบ)
 GACHA_LOOP_LIMIT = 2
 
+# ── GACHA500: step พิเศษใน Custom Gacha (หลังเจอ checkpoint-gacha4) ──
+# ใช้ได้เฉพาะเมื่อ CUSTOM_GACHA = 1
+# 1 = เปิด step1 + step2:
+#     • step1: หลังเจอ checkpoint-gacha4 → OCR อ่าน coin (region 52,10,106,41) 1 ครั้ง/รอบ
+#         - coin >= COIN_GACHA_THRESHOLD → เก็บไฟล์เข้าโฟลเดอร์ coin<threshold>+ (ชื่อ [coin]+เดิม) แล้วจบบัญชี
+#         - coin <  COIN_GACHA_THRESHOLD → สุ่ม loop ต่อ
+#     • step2: หลังกด gacha5 → หา gacha500 (img/ch/gacha500.png); เจอ + เจอ nocions → กด Back 1 ครั้ง
+# 0 = ปิด → Custom Gacha สุ่ม loop แบบปกติ (ไม่เช็ค coin / ไม่หา gacha500)
+GACHA500 = 1
+# เกณฑ์ coin ที่จะ "เก็บ" (>= ค่านี้เก็บ, < ค่านี้สุ่มต่อ) — ชื่อโฟลเดอร์จะเป็น coin<ค่านี้>+
+COIN_GACHA_THRESHOLD = 700
+
 # ── Gacha + Check Mode ──────────────────────────────
 # 1 = สุ่มกาชาเสร็จแล้วกด backhome ต่อด้วยค้นหาฮีโร่ทันที
 # 0 = ข้าม

@@ -17,6 +17,8 @@ backup-id/
 logs/
 debug-ocr/
 cap-id-result/
+check-coin/
+coin*+/
 
 # Dat files / zip archives / installer files
 *.dat

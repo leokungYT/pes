@@ -143,6 +143,14 @@ try:
     from config import GACHA_LOOP_LIMIT
 except ImportError:
     GACHA_LOOP_LIMIT = 0
+try:
+    from config import GACHA500
+except ImportError:
+    GACHA500 = 0
+try:
+    from config import COIN_GACHA_THRESHOLD
+except ImportError:
+    COIN_GACHA_THRESHOLD = 700
 
 
 def cprint(*args, **kwargs):
@@ -252,6 +260,7 @@ class CycleTimeoutException(Exception): pass
 class SellScreenException(Exception):  pass
 class RestartFromQuest8Exception(Exception): pass
 class RestartFromPlay8Exception(Exception): pass
+class GachaCoinCollectedException(Exception): pass  # coin >= เกณฑ์ ใน custom gacha → เก็บไฟล์แล้วจบรอบ
 GQ_ACTIVE = False
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1462,6 +1471,8 @@ if GUI_ENABLED:
                     ("chk", "└ Swipe (เลื่อนหาจอ)",       "NEW_GACHA_SWIPE"),
                     ("chk", "สุ่มจน coin หมด",           "CUSTOM_GACHA"),
                     ("ent", "└ Custom จำกัดรอบ (0=จนหมด)", "GACHA_LOOP_LIMIT"),
+                    ("chk", "└ Gacha500 (step1 coin + step2)", "GACHA500"),
+                    ("ent", "  └ Coin เก็บ (>= → coin+)",  "COIN_GACHA_THRESHOLD"),
                     ("chk", "Gacha + Find + Check Coin", "GACHA_FIND"),
                 ],
                 "🆓 Gacha Free": [
@@ -4394,6 +4405,49 @@ def scan_coin_number(device, cycle_start, serial):
     return coin_number
 
 
+def _read_coin_from_img(img, serial):
+    """OCR อ่านเลข coin จากมุมซ้ายบน (region เดิม 52,10,106,41) ของภาพที่ให้มา.
+    คืนค่า int (0 ถ้าอ่านไม่ได้) — ใช้ตอน GACHA500 อ่าน coin ที่หน้า checkpoint-gacha4."""
+    import re
+    try:
+        ocr_text = read_screen_text(img, region=Region(52, 10, 106, 41), serial=serial)
+        digits = "".join(re.findall(r"\d+", ocr_text or ""))
+        return int(digits) if digits else 0
+    except Exception:
+        return 0
+
+
+def _g500_check_coin_and_collect(device, cycle_start, serial, original_name, file_path, img):
+    """GACHA500 step1: สแกน coin จากภาพ img (region 52,10,106,41).
+    coin >= COIN_GACHA_THRESHOLD → เก็บไฟล์เข้า coin<threshold>+ (ชื่อ [coin]+เดิม) + release
+      แล้ว raise GachaCoinCollectedException (จบบัญชี ไม่สุ่ม)
+    coin <  COIN_GACHA_THRESHOLD → return เฉยๆ (ไปสุ่ม loop ต่อ)"""
+    import re
+    coin_val = _read_coin_from_img(img, serial)
+    gui_log(serial, f"🪙 อ่าน coin (ที่ new-gacha1) = {coin_val} | เกณฑ์เก็บ {COIN_GACHA_THRESHOLD}", step="G500-Coin")
+    if coin_val < COIN_GACHA_THRESHOLD:
+        return
+    _m = re.match(r"^\[\d+\]\+(.+)$", original_name)
+    base = _m.group(1) if _m else original_name
+    final_name = f"[{coin_val}]+{base}"
+    coin_dir = f"coin{COIN_GACHA_THRESHOLD}+"
+    device.shell("am force-stop jp.konami.pesam")
+    time.sleep(1)
+    dest = os.path.join(coin_dir, final_name)
+    if os.path.exists(file_path):
+        time.sleep(1)
+        try:
+            if os.path.exists(dest):
+                os.remove(dest)
+            _safe_copy(file_path, dest)   # สร้างโฟลเดอร์ปลายทางให้เอง
+            os.remove(file_path)
+            gui_log(serial, f"✅ Coin {coin_val} ≥ {COIN_GACHA_THRESHOLD} → เก็บ {final_name} เข้า {coin_dir}", step="Coin Collected", status="working")
+        except Exception as _e:
+            gui_log(serial, f"⚠️ เก็บไฟล์ coin ล้มเหลว: {_e}", step="Coin Sort Error")
+    release_file(original_name)
+    raise GachaCoinCollectedException(f"coin {coin_val} >= {COIN_GACHA_THRESHOLD}")
+
+
 def gacha_find_navigate_then_find_hero(device, cycle_start, serial, original_name, file_path, coin_prefix=None):
     """
     เส้นทางหลังสุ่ม gacha ปกติ (Gacha+Find) ก่อนเริ่มค้นหา fin1:
@@ -5095,7 +5149,7 @@ def process_device_login(device):
                 import importlib
                 import config as cfg
                 importlib.reload(cfg)
-                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA, NEW_GACHA_SWIPE, GACHA_LOOP_LIMIT
+                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA, NEW_GACHA_SWIPE, GACHA_LOOP_LIMIT, GACHA500, COIN_GACHA_THRESHOLD
                 EVENT_IMG = getattr(cfg, 'EVENT_IMG', 0)
                 DO_BOX = getattr(cfg, 'DO_BOX', 0)
                 DO_GACHA = getattr(cfg, 'DO_GACHA', 0)
@@ -5122,6 +5176,8 @@ def process_device_login(device):
                 NEW_GACHA = getattr(cfg, 'NEW_GACHA', 0)
                 NEW_GACHA_SWIPE = getattr(cfg, 'NEW_GACHA_SWIPE', 1)
                 GACHA_LOOP_LIMIT = getattr(cfg, 'GACHA_LOOP_LIMIT', 0)
+                GACHA500 = getattr(cfg, 'GACHA500', 0)
+                COIN_GACHA_THRESHOLD = getattr(cfg, 'COIN_GACHA_THRESHOLD', 700)
             except Exception as ce:
                 gui_log(serial, f"⚠️ Config reload failed: {ce}", step="Reload Error")
 
@@ -6459,6 +6515,10 @@ def process_device_login(device):
                                                 #    (รูปแยกเก็บใน img/ch/ — อยากแก้รูปไปเปลี่ยนที่โฟลเดอร์นั้น)
                                                 pts = img_search(img, os.path.join(IMG_DIR, "ch", "new-gacha1.bmp"))
                                                 if pts:
+                                                    # GACHA500 step1: สแกน coin ที่หน้า new-gacha1 (จอนี้ coin อ่านได้ชัด) ก่อนกด
+                                                    #   coin >= เกณฑ์ → เก็บเข้า coin<threshold>+ แล้วจบบัญชี | < เกณฑ์ → สุ่มต่อ
+                                                    if GACHA500 == 1:
+                                                        _g500_check_coin_and_collect(device, cycle_start, serial, original_name, file_path, img)
                                                     x, y = pts[0]
                                                     device.shell(f"input swipe {x} {y} {x} {y} 100")
                                                     time.sleep(1.5)
@@ -6595,8 +6655,8 @@ def process_device_login(device):
                                         img, _ = check_and_click_fixback(device, img, serial, check_g1=False)
                                         if img is None:
                                             continue
-                                        # เช็ค outloop.bmp ก่อนเสมอ เจอแล้วจบการทำงานทันที
-                                        if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
+                                        # เช็ค outloop.bmp — โหมด GACHA500=1 ไม่สน (สุ่มต่อจนกว่า coin หมด/coin≥เกณฑ์/ครบ limit)
+                                        if GACHA500 != 1 and img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
                                             gui_log(serial, "outloop.bmp detected while waiting/clicking gacha4!", step="G4-Outloop")
                                             found_g4 = "outloop"
                                             break
@@ -6675,7 +6735,7 @@ def process_device_login(device):
                                         if img is None:
                                             continue
                                         # เช็ค outloop.bmp ก่อนเสมอ เจอแล้วจบการทำงานทันที
-                                        if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
+                                        if GACHA500 != 1 and img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
                                             gui_log(serial, "outloop.bmp detected during Gacha5 (Custom)!", step="G5-Outloop")
                                             found_g4 = "outloop"
                                             break
@@ -6701,6 +6761,19 @@ def process_device_login(device):
                                 if found_g4 in ["nocoin", "outloop"]:
                                     break
 
+                                # ── step2: หา gacha500 (img/ch/gacha500.png) ──
+                                #   ถ้าเจอ แล้วเจอ nocions.bmp → กด Back 1 ครั้ง (ถ้าไม่เจอ nocions ก็ข้ามไป)
+                                if GACHA500 == 1:
+                                    img_g500 = get_screen_capture(device)
+                                    if img_g500 is not None and img_search(img_g500, os.path.join(IMG_DIR, "ch", "gacha500.png")):
+                                        gui_log(serial, "gacha500 found (step2) — checking nocions...", step="G500")
+                                        time.sleep(0.5)
+                                        img_nc = get_screen_capture(device)
+                                        if img_nc is not None and img_search(img_nc, os.path.join(IMG_DIR, "nocions.bmp")):
+                                            device.shell("input keyevent 4")   # Back 1 ครั้ง
+                                            gui_log(serial, "nocions after gacha500 → กด Back 1 ครั้ง", step="G500 Back")
+                                            time.sleep(1)
+
                                 # 4. Wait for loopgacha1.bmp or outloop.bmp
                                 gui_log(serial, "Waiting for loopgacha1.bmp or outloop.bmp...", step="Loop-Check")
                                 action_taken = False
@@ -6711,8 +6784,13 @@ def process_device_login(device):
                                         img, _ = check_and_click_fixback(device, img, serial, check_g1=False)
                                         if img is None:
                                             continue
-                                        if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
+                                        if GACHA500 != 1 and img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
                                             gui_log(serial, "outloop.bmp detected! Ending Custom Gacha.", step="Outloop Found")
+                                            action_taken = "outloop"
+                                            break
+                                        # GACHA500=1: outloop ถูกข้าม → กันค้างด้วยการเช็ค nocions (coin หมด = จบได้)
+                                        if GACHA500 == 1 and img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
+                                            gui_log(serial, "nocions.bmp (GACHA500) — coin หมด จบ custom gacha", step="No-Coins")
                                             action_taken = "outloop"
                                             break
                                         pts_loop = img_search(img, os.path.join(IMG_DIR, "loopgacha1.bmp"))
@@ -7020,6 +7098,13 @@ def process_device_login(device):
                     gui_instance.login_times.append(dur)
 
             release_file(original_name)
+
+        except GachaCoinCollectedException as e:
+            # step1: coin >= เกณฑ์ → ย้ายไฟล์เข้า coin<threshold>+ + release_file เรียบร้อยแล้วใน loop
+            gui_log(serial, f"🪙✅ Coin collected — จบรอบ ({e})", step="Coin Done", status="working")
+            device.shell("am force-stop jp.konami.pesam")
+            time.sleep(1)
+            continue
 
         except DeviceTimeoutException:
             gui_log(serial, f"⏱️ Timeout Exceeded! Moving file to timeout...", step="Timeout", status="error")
