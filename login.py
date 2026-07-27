@@ -3195,11 +3195,15 @@ def img_search(gray_img, find_path, threshold=0.8):
     return points
 
 
-def fixout_click_if_stuck(device, serial, img, stuck_since, secs=8.0, step="FixOut"):
+def fixout_click_if_stuck(device, serial, img, stuck_since, secs=8.0, step="FixOut", skip_if=None):
     """ค้างอยู่หน้าเดิมครบ `secs` วิ → หา fixout ในภาพ เจอแล้ว "กดเฉยๆ" (ไม่ Back spam ไม่ทำอะไรต่อ)
-    แล้วให้ลูปเดิมทำงานตามปกติ. คืนค่า stuck_since ใหม่ (รีเซ็ตนาฬิกาเมื่อครบรอบเช็ค)"""
+    แล้วให้ลูปเดิมทำงานตามปกติ. คืนค่า stuck_since ใหม่ (รีเซ็ตนาฬิกาเมื่อครบรอบเช็ค)
+    skip_if: path รูป — ถ้าเจอรูปนี้ในเฟรม จะ "ไม่กด fixout" (เช่น checkpoint-gacha4 = หน้าจอถูกต้องแล้ว)"""
     if img is None or time.time() - stuck_since < secs:
         return stuck_since
+    if skip_if and img_search(img, skip_if):
+        gui_log(serial, f"ค้าง {secs:.0f}s แต่เจอ {os.path.basename(skip_if)} — ไม่กด fixout", step=step)
+        return time.time()
     pts_fo = img_search(img, os.path.join(IMG_DIR, "fixout.bmp"), threshold=0.85)
     if pts_fo:
         x_fo, y_fo = pts_fo[0]
@@ -6355,7 +6359,8 @@ def process_device_login(device):
                                                     continue
 
                                                 # ค้างหา new-gacha1 ครบ 8 วิ → เจอ fixout ให้กดปิดเฉยๆ แล้วหาต่อตามปกติ
-                                                newg1_stuck_since = fixout_click_if_stuck(device, serial, img, newg1_stuck_since, step="NewG FixOut")
+                                                newg1_stuck_since = fixout_click_if_stuck(device, serial, img, newg1_stuck_since, step="NewG FixOut",
+                                                                                          skip_if=os.path.join(IMG_DIR, "ch", "checkpoint-gacha4.png"))
 
                                                 # 1. เช็ค fixswap.bmp ก่อน (หาแบบลอยๆ ตลอดเวลา)
                                                 pts_fixswap = img_search(img, os.path.join(IMG_DIR, "fixswap.bmp"))
@@ -6439,7 +6444,8 @@ def process_device_login(device):
                                                 if img is None:
                                                     continue
                                                 # ค้างหา new-gacha1 ครบ 8 วิ → เจอ fixout ให้กดปิดเฉยๆ แล้วหาต่อตามปกติ
-                                                newg_stuck_since = fixout_click_if_stuck(device, serial, img, newg_stuck_since, step="NewG FixOut")
+                                                newg_stuck_since = fixout_click_if_stuck(device, serial, img, newg_stuck_since, step="NewG FixOut",
+                                                                                skip_if=os.path.join(IMG_DIR, "ch", "checkpoint-gacha4.png"))
                                                 # *** ต้องเจอครบ 2 เงื่อนไขถึงจะนับว่าเจอ: new-gacha1 + checkpoint-gacha4 ***
                                                 pts = img_search(img, os.path.join(IMG_DIR, "ch", "new-gacha1.bmp"), threshold=0.95)
                                                 if pts:
