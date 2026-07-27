@@ -4430,6 +4430,40 @@ def _read_coin_from_img(img, serial):
         return 0
 
 
+def _g500_checkpoint_then_next(device, cycle_start, serial, cp_secs=30, next_secs=20, tag="G500"):
+    """หา checkpointgacha.bmp → เจอแล้วหา next.bmp → กด (ใช้ปิดหน้าผลสุ่มก่อนไป step ต่อไป)
+    คืน True ถ้ากด next สำเร็จ / False ถ้าไม่เจอ checkpointgacha หรือ next"""
+    gui_log(serial, f"หา checkpointgacha ({cp_secs:.0f}s)...", step=f"{tag} CP")
+    found_cp = False
+    dl_cp = time.time() + cp_secs
+    while time.time() < dl_cp:
+        check_device_reset(serial, cycle_start)
+        img = get_screen_capture(device)
+        if img is not None and img_search(img, os.path.join(IMG_DIR, "checkpointgacha.bmp")):
+            found_cp = True
+            break
+        time.sleep(0.3)
+    if not found_cp:
+        gui_log(serial, "ไม่เจอ checkpointgacha — ข้ามการกด next", step=f"{tag} CP Miss")
+        return False
+
+    gui_log(serial, "เจอ checkpointgacha → หา next.bmp แล้วกด", step=f"{tag} CP")
+    dl_next = time.time() + next_secs
+    while time.time() < dl_next:
+        check_device_reset(serial, cycle_start)
+        img = get_screen_capture(device)
+        if img is not None:
+            pts_n = img_search(img, os.path.join(IMG_DIR, "next.bmp"))
+            if pts_n:
+                x_n, y_n = pts_n[0]
+                device.shell(f"input swipe {x_n} {y_n} {x_n} {y_n} 100")
+                gui_log(serial, f"กด next.bmp ({x_n},{y_n})", step=f"{tag} Next")
+                time.sleep(1.5)
+                return True
+        time.sleep(0.3)
+    gui_log(serial, "ไม่เจอ next.bmp", step=f"{tag} Next Miss")
+    return False
+
 def _g500_check_coin_and_collect(device, cycle_start, serial, original_name, file_path, img):
     """GACHA500 step1: สแกน coin จากภาพ img (region 52,10,106,41).
     coin >= COIN_GACHA_THRESHOLD → เก็บไฟล์เข้า coin<threshold>+ (ชื่อ [coin]+เดิม) + release
@@ -5157,42 +5191,10 @@ def process_device_login(device):
             DEVICE_DISABLE_FIXOUT[serial] = False   # เริ่ม cycle ใหม่ → เปิด fixout check กลับ (ช่วง login ต้องใช้)
             check_device_reset(serial)
 
-            # ── Reload config at the start of every cycle ──
-            try:
-                import importlib
-                import config as cfg
-                importlib.reload(cfg)
-                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA, NEW_GACHA_SWIPE, GACHA_LOOP_LIMIT, GACHA500, COIN_GACHA_THRESHOLD
-                EVENT_IMG = getattr(cfg, 'EVENT_IMG', 0)
-                DO_BOX = getattr(cfg, 'DO_BOX', 0)
-                DO_GACHA = getattr(cfg, 'DO_GACHA', 0)
-                FIND_HERO = getattr(cfg, 'FIND_HERO', 0)
-                GACHA_FREE = getattr(cfg, 'GACHA_FREE', 0)
-                CHECK_COIN = getattr(cfg, 'CHECK_COIN', 0)
-                GACHA_FREE_LOOPS = getattr(cfg, 'GACHA_FREE_LOOPS', 2)
-                NOSCAN = getattr(cfg, 'NOSCAN', 0)
-                SKIPANIMATION = getattr(cfg, 'SKIPANIMATION', 0)
-                GACHA_CHECK = getattr(cfg, 'GACHA_CHECK', 0)
-                GACHA_FIND = getattr(cfg, 'GACHA_FIND', 0)
-                AUTORUN = getattr(cfg, 'AUTORUN', 0)
-                SILENT_UPDATE_MODE = getattr(cfg, 'SILENT_UPDATE_MODE', 'normal')
-                OVERWRITE_CONFIG_ON_UPDATE = getattr(cfg, 'OVERWRITE_CONFIG_ON_UPDATE', False)
-                GETCODE = getattr(cfg, 'GETCODE', 0)
-                GETCODE_TEXT = getattr(cfg, 'GETCODE_TEXT', 'eFCONNECT')
-                GETQUEST = getattr(cfg, 'GETQUEST', 0)
-                LOGIN_FAST = getattr(cfg, 'LOGIN_FAST', 0)
-                GACHA_MIN_COIN = getattr(cfg, 'GACHA_MIN_COIN', 100)
-                DEBUG_CONSOLE = getattr(cfg, 'DEBUG_CONSOLE', 0)
-                MOVE_LS_ENABLE = getattr(cfg, 'MOVE_LS_ENABLE', 0)
-                MOVE_LS_TIME = getattr(cfg, 'MOVE_LS_TIME', '09:00')
-                CUSTOM_GACHA = getattr(cfg, 'CUSTOM_GACHA', 0)
-                NEW_GACHA = getattr(cfg, 'NEW_GACHA', 0)
-                NEW_GACHA_SWIPE = getattr(cfg, 'NEW_GACHA_SWIPE', 1)
-                GACHA_LOOP_LIMIT = getattr(cfg, 'GACHA_LOOP_LIMIT', 0)
-                GACHA500 = getattr(cfg, 'GACHA500', 0)
-                COIN_GACHA_THRESHOLD = getattr(cfg, 'COIN_GACHA_THRESHOLD', 700)
-            except Exception as ce:
-                gui_log(serial, f"⚠️ Config reload failed: {ce}", step="Reload Error")
+            # ── Reload config ต้น cycle (ปกติ config watcher โหลดให้ realtime อยู่แล้ว
+            #    อันนี้เป็นตัวกันพลาดเผื่อ watcher ตาย/ไฟล์ mtime ไม่ขยับ) ──
+            if not apply_config_now("cycle"):
+                gui_log(serial, "⚠️ Config reload failed", step="Reload Error")
 
             # ── ด่านเช็ค device online ก่อนเริ่ม cycle ──
             # กัน 2 อาการ: (1) spin วน cycle รัวๆ ตอนเครื่องตาย
@@ -6667,12 +6669,16 @@ def process_device_login(device):
                                     gui_log(serial, f"สุ่มรอบที่ {custom_rounds}/{GACHA_LOOP_LIMIT}...", step="Custom Round")
 
                                 # ══════════ step2 (GACHA500 = 1) ══════════
-                                #  1) หา gacha4v2 (8 วิ) → เจอ = กด → หา gacha5v2 → กด  (= สุ่มปกติ 1 ครั้ง)
-                                #     ไม่เจอ gacha4v2 ใน 8 วิ → ข้ามไปทำ gacha500 แทน
-                                #  2) หา gacha500 → เจอ = กด → ถ้าเจอ nocions ให้กด Back 1 ครั้ง (ไม่เจอก็ผ่าน)
-                                #  3) วนรอบถัดไปตาม GACHA_LOOP_LIMIT ใน config
-                                #  *** ทั้ง gacha4v2/gacha5v2 และ gacha500 ทำ "รอบเดียวเท่านั้น" ***
-                                #      รอบถัดไปตกไปใช้ flow gacha4 ปกติด้านล่างจนครบจำนวน loop
+                                #  1) หา gacha4v2 (8 วิ)
+                                #       เจอ  → กด → หา gacha5v2 → กด (สุ่มปกติ 1 ครั้ง)
+                                #              → หา checkpointgacha → กด next → ไปทำ gacha500 ต่อ
+                                #       ไม่เจอ → ข้ามไปทำ gacha500 เลย
+                                #  2) หา gacha500 → เจอ = กด
+                                #       เจอ nocions     → กด Back 1 ครั้ง → skip ไป gacha4
+                                #       ไม่เจอ nocions  → หา checkpointgacha → กด next → ไป gacha4
+                                #  3) รอบถัดไปใช้ flow gacha4 ปกติ จนครบ GACHA_LOOP_LIMIT
+                                #     (ออกจากลูปเมื่อเจอ outloop หรือครบจำนวนรอบใน config)
+                                #  *** ทั้ง v2 และ gacha500 ทำ "รอบเดียวเท่านั้น" ต่อ 1 บัญชี ***
                                 if GACHA500 == 1 and not g500_done:
                                     g500_done = True   # ทำครั้งเดียว — รอบถัดไปวน gacha4 ปกติ
                                     # ── 1) gacha4v2 (8 วิ) ──
@@ -6718,6 +6724,9 @@ def process_device_login(device):
                                             time.sleep(0.2)
                                         if not clicked_g5v2:
                                             gui_log(serial, "ไม่เจอ gacha5v2 ใน 15 วิ — ไปต่อ gacha500", step="G5v2 Miss")
+                                        else:
+                                            # สุ่ม v2 เสร็จ → ปิดหน้าผลสุ่ม: checkpointgacha → next → ค่อยไป gacha500
+                                            _g500_checkpoint_then_next(device, cycle_start, serial, tag="G4v2")
                                     else:
                                         gui_log(serial, "ไม่เจอ gacha4v2 ใน 8 วิ → ไปทำ gacha500 แทน", step="G4v2 Miss")
 
@@ -6739,16 +6748,16 @@ def process_device_login(device):
                                         device.shell(f"input swipe {x_g5} {y_g5} {x_g5} {y_g5} 100")
                                         gui_log(serial, f"gacha500 found! Clicked ({x_g5},{y_g5})", step="G500-Click")
                                         time.sleep(2)
-                                        # เจอ nocions (coin ไม่พอ) → กด Back 1 ครั้ง / ไม่เจอก็ไม่เป็นไร
+                                        # เจอ nocions (coin ไม่พอ) → กด Back 1 ครั้ง → skip ไปทำ gacha4 เลย
                                         img_nc = get_screen_capture(device)
                                         if img_nc is not None and img_search(img_nc, os.path.join(IMG_DIR, "nocions.bmp")):
                                             device.shell("input keyevent 4")   # Back 1 ครั้ง
-                                            gui_log(serial, "เจอ nocions หลัง gacha500 → กด Back 1 ครั้ง", step="G500 Back")
+                                            gui_log(serial, "เจอ nocions หลัง gacha500 → กด Back 1 ครั้ง → skip ไป gacha4", step="G500 Back")
                                             time.sleep(1.5)
-                                            if GACHA_LOOP_LIMIT <= 0:
-                                                # โหมด "สุ่มจน coin หมด" → coin หมดแล้ว จบ custom gacha
-                                                gui_log(serial, "coin หมด (nocions) — จบ Custom Gacha", step="No-Coins")
-                                                break
+                                        else:
+                                            # ไม่เจอ nocions = สุ่ม 500 ผ่าน → ปิดหน้าผลสุ่ม: checkpointgacha → next
+                                            gui_log(serial, "ไม่เจอ nocions (สุ่ม 500 ผ่าน) → หา checkpointgacha แล้วกด next", step="G500 OK")
+                                            _g500_checkpoint_then_next(device, cycle_start, serial, tag="G500")
                                     else:
                                         gui_log(serial, "ไม่เจอ gacha500 — ข้ามไปรอบถัดไป", step="G500 Miss")
                                     gui_log(serial, "จบขั้น v2/gacha500 (ทำแล้ว 1 รอบ) — รอบถัดไปกลับไปวนคลิก gacha4 ปกติ", step="G500 Done")
@@ -6770,7 +6779,7 @@ def process_device_login(device):
                                         if img is None:
                                             continue
                                         # เช็ค outloop.bmp — โหมด GACHA500=1 ไม่สน (สุ่มต่อจนกว่า coin หมด/coin≥เกณฑ์/ครบ limit)
-                                        if GACHA500 != 1 and img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
+                                        if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
                                             gui_log(serial, "outloop.bmp detected while waiting/clicking gacha4!", step="G4-Outloop")
                                             found_g4 = "outloop"
                                             break
@@ -6854,7 +6863,7 @@ def process_device_login(device):
                                         if img is None:
                                             continue
                                         # เช็ค outloop.bmp ก่อนเสมอ เจอแล้วจบการทำงานทันที
-                                        if GACHA500 != 1 and img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
+                                        if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
                                             gui_log(serial, "outloop.bmp detected during Gacha5 (Custom)!", step="G5-Outloop")
                                             found_g4 = "outloop"
                                             break
@@ -6892,13 +6901,13 @@ def process_device_login(device):
                                         img, _ = check_and_click_fixback(device, img, serial, check_g1=False)
                                         if img is None:
                                             continue
-                                        if GACHA500 != 1 and img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
+                                        if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
                                             gui_log(serial, "outloop.bmp detected! Ending Custom Gacha.", step="Outloop Found")
                                             action_taken = "outloop"
                                             break
-                                        # GACHA500=1: outloop ถูกข้าม → กันค้างด้วยการเช็ค nocions (coin หมด = จบได้)
-                                        if GACHA500 == 1 and img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
-                                            gui_log(serial, "nocions.bmp (GACHA500) — coin หมด จบ custom gacha", step="No-Coins")
+                                        # coin หมดกลางลูป → จบ custom gacha (กันวนรอ loopgacha1 ที่ไม่มีวันมา)
+                                        if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
+                                            gui_log(serial, "nocions.bmp — coin หมด จบ custom gacha", step="No-Coins")
                                             action_taken = "outloop"
                                             break
                                         pts_loop = img_search(img, os.path.join(IMG_DIR, "loopgacha1.bmp"))
@@ -7316,6 +7325,87 @@ def _disable_console_quickedit():
         print(f"{Fore.YELLOW}[Console] Could not disable QuickEdit: {e}{Style.RESET_ALL}")
 
 
+def apply_config_now(reason=""):
+    """โหลด config.py ใหม่แล้วอัปเดตตัวแปร runtime ทันที (ใช้ได้ทุกที่ ทุกเวลา)
+    คืน True ถ้าสำเร็จ — ตัวนี้คือหัวใจของ 'แก้ config ปุ๊บ มีผลปั๊บ'"""
+    global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA, NEW_GACHA_SWIPE, GACHA_LOOP_LIMIT, GACHA500, COIN_GACHA_THRESHOLD, HERO_LIST, HERO_LIST_FREE
+    try:
+        import importlib
+        import config as cfg
+        importlib.reload(cfg)
+        EVENT_IMG = getattr(cfg, 'EVENT_IMG', 0)
+        DO_BOX = getattr(cfg, 'DO_BOX', 0)
+        DO_GACHA = getattr(cfg, 'DO_GACHA', 0)
+        FIND_HERO = getattr(cfg, 'FIND_HERO', 0)
+        GACHA_FREE = getattr(cfg, 'GACHA_FREE', 0)
+        CHECK_COIN = getattr(cfg, 'CHECK_COIN', 0)
+        GACHA_FREE_LOOPS = getattr(cfg, 'GACHA_FREE_LOOPS', 2)
+        NOSCAN = getattr(cfg, 'NOSCAN', 0)
+        SKIPANIMATION = getattr(cfg, 'SKIPANIMATION', 0)
+        GACHA_CHECK = getattr(cfg, 'GACHA_CHECK', 0)
+        GACHA_FIND = getattr(cfg, 'GACHA_FIND', 0)
+        AUTORUN = getattr(cfg, 'AUTORUN', 0)
+        SILENT_UPDATE_MODE = getattr(cfg, 'SILENT_UPDATE_MODE', 'normal')
+        OVERWRITE_CONFIG_ON_UPDATE = getattr(cfg, 'OVERWRITE_CONFIG_ON_UPDATE', False)
+        GETCODE = getattr(cfg, 'GETCODE', 0)
+        GETCODE_TEXT = getattr(cfg, 'GETCODE_TEXT', 'eFCONNECT')
+        GETQUEST = getattr(cfg, 'GETQUEST', 0)
+        LOGIN_FAST = getattr(cfg, 'LOGIN_FAST', 0)
+        GACHA_MIN_COIN = getattr(cfg, 'GACHA_MIN_COIN', 100)
+        DEBUG_CONSOLE = getattr(cfg, 'DEBUG_CONSOLE', 0)
+        MOVE_LS_ENABLE = getattr(cfg, 'MOVE_LS_ENABLE', 0)
+        MOVE_LS_TIME = getattr(cfg, 'MOVE_LS_TIME', '09:00')
+        CUSTOM_GACHA = getattr(cfg, 'CUSTOM_GACHA', 0)
+        NEW_GACHA = getattr(cfg, 'NEW_GACHA', 0)
+        NEW_GACHA_SWIPE = getattr(cfg, 'NEW_GACHA_SWIPE', 1)
+        GACHA_LOOP_LIMIT = getattr(cfg, 'GACHA_LOOP_LIMIT', 0)
+        GACHA500 = getattr(cfg, 'GACHA500', 0)
+        COIN_GACHA_THRESHOLD = getattr(cfg, 'COIN_GACHA_THRESHOLD', 700)
+        # รายชื่อฮีโร่ก็อัปเดตสดด้วย (แก้ list ใน config แล้วมีผลทันที)
+        HERO_LIST = getattr(cfg, 'HERO_LIST', HERO_LIST)
+        HERO_LIST_FREE = getattr(cfg, 'HERO_LIST_FREE', HERO_LIST_FREE)
+        # TIMEOUT_ENABLE / TIMEOUT_MINUTES ไม่ต้องเก็บเป็น global —
+        # check_device_reset อ่านสดจาก config ทุกครั้งอยู่แล้ว
+        return True
+    except Exception as e:
+        cprint(f"{Fore.YELLOW}[Config] reload failed{(' ('+reason+')') if reason else ''}: {e}{Style.RESET_ALL}")
+        return False
+
+def config_watcher_loop():
+    """เฝ้าไฟล์ config.py — แก้ไฟล์ปุ๊บ (เวลาแก้ไขเปลี่ยน) โหลดใหม่ทันทีภายใน ~1 วิ
+    ไม่ต้องรอจบ cycle / ไม่ต้อง restart บอท"""
+    try:
+        cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.py")
+    except Exception:
+        cfg_path = os.path.abspath("config.py")   # fallback กันเธรดตายตั้งแต่ยังไม่เริ่ม
+    last_mtime = None
+    try:
+        last_mtime = os.path.getmtime(cfg_path)
+    except Exception:
+        pass
+    while True:
+        try:
+            mtime = os.path.getmtime(cfg_path)
+            if last_mtime is None or mtime != last_mtime:
+                last_mtime = mtime
+                time.sleep(0.2)   # เผื่อ editor เขียนไฟล์ยังไม่เสร็จ
+                if apply_config_now("watcher"):
+                    msg = (f"⚙️ Config เปลี่ยน → โหลดใหม่แล้ว (realtime) | "
+                           f"BOX={DO_BOX} GACHA={DO_GACHA} NEW={NEW_GACHA} CUSTOM={CUSTOM_GACHA} "
+                           f"LIMIT={GACHA_LOOP_LIMIT} G500={GACHA500} FREE={GACHA_FREE} FIND={FIND_HERO}")
+                    cprint(f"{Fore.GREEN}[Config] {msg}{Style.RESET_ALL}")
+                    if gui_instance is not None:
+                        try:
+                            gui_instance.log(msg)
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+        time.sleep(1)
+
+def start_config_watcher():
+    threading.Thread(target=config_watcher_loop, daemon=True).start()
+
 def download_watcher_loop():
     """เธรดลอยกลาง: สแกนหา download.bmp "ทุกเครื่อง ตลอดเวลา ทุกขั้นตอนการทำงาน"
     เจอเมื่อไหร่กดทันที (ทำงานอิสระจาก worker แต่ละเครื่อง — ต่อให้ worker กำลังหลับ/รออยู่ก็กดให้)"""
@@ -7349,6 +7439,7 @@ def start_download_watcher():
 
 def main():
     _disable_console_quickedit()
+    start_config_watcher()     # เฝ้า config.py — แก้ปุ๊บมีผลปั๊บ (realtime ไม่ต้องรอจบ cycle)
     start_download_watcher()   # เธรดลอยหา download.bmp ตลอด (ทั้งโหมด GUI และ headless)
     if GUI_ENABLED:
         LoginBotGUI().mainloop()
