@@ -6662,12 +6662,18 @@ def process_device_login(device):
                                     pts_g500 = None
                                     g500_wait_start = time.time()
                                     g500_last_log = 0.0
+                                    g500_out900 = False   # เจอ out900 = เลิกหา gacha500 ไป step ถัดไปเลย
                                     while True:
                                         check_device_reset(serial, cycle_start)
                                         img = get_screen_capture(device)
                                         if img is not None:
                                             pts_g500 = img_search(img, os.path.join(IMG_DIR, "ch", "gacha500.png"), threshold=0.95)
                                             if pts_g500:
+                                                break
+                                            # เจอ out900 → หยุดหา gacha500 ไปทำ step ต่อไปเลย
+                                            if img_search(img, os.path.join(IMG_DIR, "out900.bmp")):
+                                                gui_log(serial, "เจอ out900 → หยุดหา gacha500 ไป step ถัดไปเลย", step="G500 Out900")
+                                                g500_out900 = True
                                                 break
                                             # แวะหา next.bmp ระหว่างรอ — เจอ = กด (หน้าผลสุ่มอาจค้างบัง gacha500 อยู่)
                                             pts_nw = img_search(img, os.path.join(IMG_DIR, "next.bmp"))
@@ -6744,6 +6750,8 @@ def process_device_login(device):
                                                         gui_log(serial, "ไม่เจอ next.bmp ใน 20 วิ — ไป gacha4 ต่อ", step="G500 Next Miss")
                                                     break
                                             time.sleep(0.3)
+                                    elif g500_out900:
+                                        gui_log(serial, "out900 — ข้ามขั้น gacha500 ไป step ถัดไป", step="G500 Out900")
                                     else:
                                         gui_log(serial, "ไม่เจอ gacha500 — ข้ามไปรอบถัดไป", step="G500 Miss")
                                     # ── ONE_GACHA500 = 1 → ทำ v2/gacha500 รอบเดียวพอ จบลูปสุ่มเลย (ไม่วนไป gacha4) ──
