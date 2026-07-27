@@ -6674,6 +6674,7 @@ def process_device_login(device):
                                                              x_4v2, y_4v2, stuck_secs=3.0, timeout=None, tag="G4v2-Click")
 
                                         # หา gacha5v2 "ไม่มี timeout" — วนจนกว่าจะเจอ (ทางออกอื่น: เจอ out900)
+                                        #   แวะหา next.bmp ด้วย — หน้าผลสุ่มค้างอยู่จะบัง gacha5v2 ไว้
                                         clicked_g5v2 = False
                                         g5v2_wait_start = time.time()
                                         g5v2_last_log = 0.0
@@ -6698,6 +6699,13 @@ def process_device_login(device):
                                                 if img_search(img, os.path.join(IMG_DIR, "ch", "out900.bmp")):
                                                     gui_log(serial, "เจอ out900 ระหว่างรอ gacha5v2 — ไปต่อ gacha500", step="G5v2 Out900")
                                                     break
+                                                # แวะหา next.bmp ระหว่างรอ — เจอ = กดจนหาย (หน้าผลสุ่มค้างบัง gacha5v2 อยู่)
+                                                pts_nx5 = img_search(img, os.path.join(IMG_DIR, "next.bmp"))
+                                                if pts_nx5:
+                                                    x_nx5, y_nx5 = pts_nx5[0]
+                                                    gui_log(serial, f"ระหว่างรอ gacha5v2 — เจอ next.bmp กด ({x_nx5},{y_nx5})", step="G5v2 Next")
+                                                    click_next_until_gone(device, cycle_start, serial, x_nx5, y_nx5, tag="G5v2 Next")
+                                                    continue
                                             # log ทุก 15 วิ ให้เห็นว่ายังรออยู่ (ไม่ได้ค้างตาย)
                                             waited = time.time() - g5v2_wait_start
                                             if waited - g5v2_last_log >= 15:
