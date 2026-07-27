@@ -6870,11 +6870,7 @@ def process_device_login(device):
                                         img, _ = check_and_click_fixback(device, img, serial, check_g1=False)
                                         if img is None:
                                             continue
-                                        # เช็ค outloop.bmp — โหมด GACHA500=1 ไม่สน (สุ่มต่อจนกว่า coin หมด/coin≥เกณฑ์/ครบ limit)
-                                        if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
-                                            gui_log(serial, "outloop.bmp detected while waiting/clicking gacha4!", step="G4-Outloop")
-                                            found_g4 = "outloop"
-                                            break
+                                        # (ไม่เช็ค outloop ตรงนี้ — outloop เช็คเฉพาะ "หลังกด gacha5" แล้วเท่านั้น)
 
                                         # ค้างรอ gacha4 เกิน 8 วิ → หน้าผลสุ่มอาจยังค้างอยู่ → ลองหา next.bmp แล้วกด
                                         if time.time() - g4_wait_since > 8:
@@ -6957,7 +6953,7 @@ def process_device_login(device):
 
                                 # 3. Wait/Click gacha5.bmp
                                 #    (โหมด Custom: ไม่มี watchdog restart — ปล่อยให้ loop ทำงานจนเจอ
-                                #     outloop/loopgacha1/nocions เอง ห้าม clear app กลางคัน)
+                                #     loopgacha1/nocions เอง ห้าม clear app กลางคัน)
                                 while True:
                                     check_device_reset(serial, cycle_start)
                                     img = get_screen_capture(device)
@@ -6965,11 +6961,7 @@ def process_device_login(device):
                                         img, _ = check_and_click_fixback(device, img, serial, check_g1=False)
                                         if img is None:
                                             continue
-                                        # เช็ค outloop.bmp ก่อนเสมอ เจอแล้วจบการทำงานทันที
-                                        if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
-                                            gui_log(serial, "outloop.bmp detected during Gacha5 (Custom)!", step="G5-Outloop")
-                                            found_g4 = "outloop"
-                                            break
+                                        # (ไม่เช็ค outloop ตรงนี้ — ยังไม่ได้กด gacha5 เช็คที่ step Loop-Check หลังกดแล้ว)
 
                                         # หากเจอ loopgacha1.bmp แสดงว่าเลย gacha5 ไปแล้ว ให้หลุดลูปทันที
                                         if img_search(img, os.path.join(IMG_DIR, "loopgacha1.bmp")):
