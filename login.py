@@ -6412,6 +6412,7 @@ def process_device_login(device):
                                                         _g500_check_coin_and_collect(device, cycle_start, serial, original_name, file_path, img)
                                                     x, y = pts[0]
                                                     device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                                    gui_log(serial, f"✅ new-gacha1 found! Clicked ({x},{y})", step="NewG Found")
                                                     time.sleep(1.5)
                                                     break
 
@@ -6442,6 +6443,7 @@ def process_device_login(device):
                                                 if pts:
                                                     x, y = pts[0]
                                                     device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                                    gui_log(serial, f"✅ new-gacha1 found! Clicked ({x},{y}) — ไปต่อ gacha4v2/gacha4", step="NewG Found")
                                                     time.sleep(1.5)
                                                     break
                                                 else:
@@ -6690,6 +6692,7 @@ def process_device_login(device):
                                 gui_log(serial, "Waiting gacha4.bmp (Custom)...", step="G4-Custom")
                                 found_g4 = False
                                 g4_click_count = 0
+                                g4_wait_since = time.time()   # ค้างรอ gacha4 เกิน 8 วิ → ลองหา next.bmp แล้วกด
                                 while True:
                                     check_device_reset(serial, cycle_start)
                                     img = get_screen_capture(device)
@@ -6702,6 +6705,17 @@ def process_device_login(device):
                                             gui_log(serial, "outloop.bmp detected while waiting/clicking gacha4!", step="G4-Outloop")
                                             found_g4 = "outloop"
                                             break
+
+                                        # ค้างรอ gacha4 เกิน 8 วิ → หน้าผลสุ่มอาจยังค้างอยู่ → ลองหา next.bmp แล้วกด
+                                        if time.time() - g4_wait_since > 8:
+                                            pts_nx = img_search(img, os.path.join(IMG_DIR, "next.bmp"))
+                                            if pts_nx:
+                                                x_nx, y_nx = pts_nx[0]
+                                                device.shell(f"input swipe {x_nx} {y_nx} {x_nx} {y_nx} 100")
+                                                gui_log(serial, f"ค้างรอ gacha4 8s — เจอ next.bmp กด ({x_nx},{y_nx})", step="G4 Next")
+                                                time.sleep(1.5)
+                                            g4_wait_since = time.time()   # เริ่มจับเวลาใหม่ (เจอหรือไม่เจอก็ตาม)
+                                            continue
 
                                         pts = img_search_any(img, ["gacha4.bmp", "gacha4v2.bmp"])
                                         if pts:
