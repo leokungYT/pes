@@ -6631,16 +6631,24 @@ def process_device_login(device):
                                         gui_log(serial, "ไม่เจอ gacha4v2 ใน 8 วิ → ไปทำ gacha500 แทน", step="G4v2 Miss")
 
                                     # ── 2) gacha500 → กด → เช็ค nocions → Back 1 ครั้ง ──
-                                    gui_log(serial, "Looking for gacha500 (35s, ทำรอบเดียว)...", step="G500")
+                                    #    หาไปเรื่อยๆ "ไม่มี timeout" (ยังไงก็ต้องเจอ) — กันเคสพลาดแล้วข้ามไป gacha4
+                                    #    โดยไม่ได้ทำ gacha500 เลย
+                                    gui_log(serial, "Looking for gacha500 (until found)...", step="G500")
                                     pts_g500 = None
-                                    dl_g500 = time.time() + 35
-                                    while time.time() < dl_g500:
+                                    g500_wait_start = time.time()
+                                    g500_last_log = 0.0
+                                    while True:
                                         check_device_reset(serial, cycle_start)
                                         img = get_screen_capture(device)
                                         if img is not None:
                                             pts_g500 = img_search(img, os.path.join(IMG_DIR, "ch", "gacha500.png"), threshold=0.95)
                                             if pts_g500:
                                                 break
+                                        # log ทุก 15 วิ ให้เห็นว่ายังหาอยู่ (ไม่ได้ค้างตาย)
+                                        waited = time.time() - g500_wait_start
+                                        if waited - g500_last_log >= 15:
+                                            g500_last_log = waited
+                                            gui_log(serial, f"ยังหา gacha500 อยู่... ({waited:.0f}s)", step="G500 Wait")
                                         time.sleep(0.3)
 
                                     if pts_g500:
