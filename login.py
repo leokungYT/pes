@@ -6669,6 +6669,13 @@ def process_device_login(device):
                                             pts_g500 = img_search(img, os.path.join(IMG_DIR, "ch", "gacha500.png"), threshold=0.95)
                                             if pts_g500:
                                                 break
+                                            # แวะหา next.bmp ระหว่างรอ — เจอ = กด (หน้าผลสุ่มอาจค้างบัง gacha500 อยู่)
+                                            pts_nw = img_search(img, os.path.join(IMG_DIR, "next.bmp"))
+                                            if pts_nw:
+                                                x_nw, y_nw = pts_nw[0]
+                                                gui_log(serial, f"ระหว่างรอ gacha500 — เจอ next.bmp กด ({x_nw},{y_nw})", step="G500 Next")
+                                                click_next_until_gone(device, cycle_start, serial, x_nw, y_nw, tag="G500 Next")
+                                                continue
                                         # log ทุก 15 วิ ให้เห็นว่ายังหาอยู่ (ไม่ได้ค้างตาย)
                                         waited = time.time() - g500_wait_start
                                         if waited - g500_last_log >= 15:
