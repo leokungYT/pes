@@ -6748,6 +6748,27 @@ def process_device_login(device):
                                         device.shell(f"input swipe {x_g5} {y_g5} {x_g5} {y_g5} 100")
                                         gui_log(serial, f"gacha500 found! Clicked ({x_g5},{y_g5})", step="G500-Click")
                                         time.sleep(2)
+
+                                        # ── กด gacha500v1 ต่อ (ปุ่มยืนยัน) ก่อนไปเช็ค nocions / checkpointgacha ──
+                                        gui_log(serial, "หา gacha500v1 (8s) แล้วกดต่อ...", step="G500v1")
+                                        dl_g5v1 = time.time() + 8
+                                        clicked_g5v1 = False
+                                        while time.time() < dl_g5v1:
+                                            check_device_reset(serial, cycle_start)
+                                            img_v1 = get_screen_capture(device)
+                                            if img_v1 is not None:
+                                                pts_v1 = img_search(img_v1, os.path.join(IMG_DIR, "ch", "gacha500v1.png"), threshold=0.95)
+                                                if pts_v1:
+                                                    x_v1, y_v1 = pts_v1[0]
+                                                    device.shell(f"input swipe {x_v1} {y_v1} {x_v1} {y_v1} 100")
+                                                    gui_log(serial, f"gacha500v1 found! Clicked ({x_v1},{y_v1})", step="G500v1-Click")
+                                                    time.sleep(2)
+                                                    clicked_g5v1 = True
+                                                    break
+                                            time.sleep(0.3)
+                                        if not clicked_g5v1:
+                                            gui_log(serial, "ไม่เจอ gacha500v1 ใน 8 วิ — ไปเช็ค nocions/checkpointgacha ต่อ", step="G500v1 Miss")
+
                                         # เจอ nocions (coin ไม่พอ) → กด Back 1 ครั้ง → skip ไปทำ gacha4 เลย
                                         img_nc = get_screen_capture(device)
                                         if img_nc is not None and img_search(img_nc, os.path.join(IMG_DIR, "nocions.bmp")):
