@@ -4311,6 +4311,32 @@ def _read_coin_from_img(img, serial):
         return 0
 
 
+def click_next_until_gone(device, cycle_start, serial, x, y, stuck_secs=8.0, timeout=60.0, tag="Next"):
+    """กด next.bmp ที่ (x,y) แล้วเฝ้าดู — ถ้ายังเจอ next ค้างเกิน `stuck_secs` วิ ให้กดซ้ำ
+    วนจนกว่า next จะหายไป (หรือครบ timeout กันค้าง). คืน True ถ้าหายแล้ว"""
+    device.shell(f"input swipe {x} {y} {x} {y} 100")
+    gui_log(serial, f"กด next.bmp ({x},{y})", step=tag)
+    time.sleep(1.5)
+    last_click = time.time()
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        check_device_reset(serial, cycle_start)
+        img_n = get_screen_capture(device)
+        if img_n is not None:
+            pts_n = img_search(img_n, os.path.join(IMG_DIR, "next.bmp"))
+            if not pts_n:
+                return True   # next หายแล้ว → ไปต่อ
+            # ยังเจอ next อยู่ — ค้างเกิน stuck_secs → กดซ้ำ
+            if time.time() - last_click >= stuck_secs:
+                x_n, y_n = pts_n[0]
+                device.shell(f"input swipe {x_n} {y_n} {x_n} {y_n} 100")
+                gui_log(serial, f"next.bmp ค้างเกิน {stuck_secs:.0f}s — กดซ้ำ ({x_n},{y_n})", step=f"{tag} Retry")
+                last_click = time.time()
+                time.sleep(1.5)
+        time.sleep(0.3)
+    gui_log(serial, f"next.bmp ยังไม่หายใน {timeout:.0f}s — ไปต่อ", step=f"{tag} Timeout")
+    return False
+
 def _g500_checkpoint_then_next(device, cycle_start, serial, cp_secs=30, next_secs=20, tag="G500"):
     """หา checkpointgacha.bmp → เจอแล้วหา next.bmp → กด (ใช้ปิดหน้าผลสุ่มก่อนไป step ต่อไป)
     คืน True ถ้ากด next สำเร็จ / False ถ้าไม่เจอ checkpointgacha หรือ next"""
@@ -4337,9 +4363,8 @@ def _g500_checkpoint_then_next(device, cycle_start, serial, cp_secs=30, next_sec
             pts_n = img_search(img, os.path.join(IMG_DIR, "next.bmp"))
             if pts_n:
                 x_n, y_n = pts_n[0]
-                device.shell(f"input swipe {x_n} {y_n} {x_n} {y_n} 100")
-                gui_log(serial, f"กด next.bmp ({x_n},{y_n})", step=f"{tag} Next")
-                time.sleep(1.5)
+                # กด next แล้วถ้ายังค้างเกิน 8 วิ กดซ้ำจนหาย
+                click_next_until_gone(device, cycle_start, serial, x_n, y_n, tag=f"{tag} Next")
                 return True
         time.sleep(0.3)
     gui_log(serial, "ไม่เจอ next.bmp", step=f"{tag} Next Miss")
@@ -6703,9 +6728,8 @@ def process_device_login(device):
                                                             pts_n = img_search(img_n, os.path.join(IMG_DIR, "next.bmp"))
                                                             if pts_n:
                                                                 x_n, y_n = pts_n[0]
-                                                                device.shell(f"input swipe {x_n} {y_n} {x_n} {y_n} 100")
-                                                                gui_log(serial, f"กด next.bmp ({x_n},{y_n}) → ไป gacha4", step="G500 Next")
-                                                                time.sleep(1.5)
+                                                                # กด next แล้วถ้ายังค้างเกิน 8 วิ กดซ้ำจนหาย
+                                                                click_next_until_gone(device, cycle_start, serial, x_n, y_n, tag="G500 Next")
                                                                 clicked_next = True
                                                                 break
                                                         time.sleep(0.3)
