@@ -2266,50 +2266,6 @@ _MIN_GLOBAL_LAUNCH_GAP = 6.0            # วินาที — ระยะข
 _LAUNCH_GATE_LOCK = threading.Lock()
 _GLOBAL_LAST_LAUNCH_TS = [0.0]
 
-# ── MuMu ANR / freeze auto-recovery ─────────────────────────────────────────
-# กู้เครื่องที่ "ค้างระดับ Windows" (หน้าต่าง MuMu ขึ้น Application Not Responding) อัตโนมัติ:
-# ถ้าเฟรมภาพนิ่งสนิทนานเกิน MUMU_FREEZE_SECONDS หรือ screencap ล้มเหลว (None) ต่อเนื่องเกิน
-# MUMU_DEAD_SECONDS → สั่งรีสตาร์ต instance นั้นผ่าน MuMuManager (ไม่ยุ่งกับเครื่องอื่น)
-MUMU_ANR_RECOVER      = True     # เปิด/ปิดระบบกู้เครื่องค้างอัตโนมัติ
-MUMU_FREEZE_SECONDS   = 150      # เฟรมนิ่งไม่เปลี่ยนเลยเกินกี่วิ = MuMu ค้าง (ANR)
-MUMU_DEAD_SECONDS     = 90       # screencap คืน None ต่อเนื่องเกินกี่วิ = MuMu ตาย/หลุด
-MUMU_RESTART_COOLDOWN = 240      # ห้ามรีสตาร์ต instance เดิมถี่กว่านี้ (วิ) กันรีสตาร์ตวน
-_DEVICE_FRAME_SIG         = {}   # serial -> signature เฟรมล่าสุด
-_DEVICE_FRAME_CHANGE_TS   = {}   # serial -> เวลาที่เฟรมเปลี่ยนล่าสุด
-_DEVICE_SCREENCAP_FAIL_TS = {}   # serial -> เวลาเริ่ม screencap ล้มเหลวต่อเนื่อง (None = ปกติ)
-_DEVICE_LAST_MUMU_RESTART = {}   # serial -> เวลาสั่งรีสตาร์ต MuMu ล่าสุด
-
-def _mumu_frame_sig(gray):
-    """signature ราคาถูกของเฟรม (ย่อ 16x16 แล้ว hash) — ไว้เทียบว่าภาพเปลี่ยนไหม"""
-    try:
-        return hash(cv2.resize(gray, (16, 16), interpolation=cv2.INTER_AREA).tobytes())
-    except Exception:
-        return None
-
-def _mumu_track_frame(serial, gray):
-    """อัปเดตสถานะเฟรม/ความล้มเหลวของ screencap ต่อเครื่อง (ใช้ตัดสินว่าเครื่องค้างไหม)"""
-    now = time.time()
-    if gray is None:
-        if _DEVICE_SCREENCAP_FAIL_TS.get(serial) is None:
-            _DEVICE_SCREENCAP_FAIL_TS[serial] = now   # เริ่มจับเวลา screencap ล้มเหลว
-        return
-    _DEVICE_SCREENCAP_FAIL_TS[serial] = None           # แคปได้ = เคลียร์สถานะล้มเหลว
-    sig = _mumu_frame_sig(gray)
-    if sig is None:
-        return
-    if _DEVICE_FRAME_SIG.get(serial) != sig:
-        _DEVICE_FRAME_SIG[serial] = sig
-        _DEVICE_FRAME_CHANGE_TS[serial] = now          # เฟรมเปลี่ยน → รีเซ็ตนาฬิกาค้าง
-    elif serial not in _DEVICE_FRAME_CHANGE_TS:
-        _DEVICE_FRAME_CHANGE_TS[serial] = now
-
-def _mumu_freeze_reset(serial):
-    """รีเซ็ต baseline ตัวจับค้าง — เรียกทุกครั้งหลัง cold-start/รีสตาร์ต instance
-    กัน false-positive ช่วงจอโหลด/จอดำที่เฟรมนิ่งเป็นปกติ"""
-    _DEVICE_FRAME_CHANGE_TS[serial] = time.time()
-    _DEVICE_SCREENCAP_FAIL_TS[serial] = None
-    _DEVICE_FRAME_SIG.pop(serial, None)
-
 def launch_game(device, settle=14.0):
     """Cold-start เกมแบบมี cooldown ต่อเครื่อง + global gate ทั้งระบบ —
     กัน relaunch ซ้อนถี่/หลายเครื่องบูตพร้อมกันจน MuMu ค้าง (ANR)."""
@@ -2330,18 +2286,11 @@ def launch_game(device, settle=14.0):
     now = time.time()
     _LAST_LAUNCH_TS[serial] = now
     DEVICE_LAST_GAME_CHECK[serial] = now
-    _mumu_freeze_reset(serial)   # เพิ่ง cold-start → รีเซ็ต baseline ตัวจับค้าง
     if settle > 0:
         time.sleep(settle)
 
 def fast_screencap(device):
-    # ห่อ _fast_screencap_raw เพื่อบันทึกสถานะเฟรม/ความล้มเหลว (ไว้ให้ตัวจับ MuMu ค้างใช้)
-    gray = _fast_screencap_raw(device)
-    try:
-        _mumu_track_frame(device.serial, gray)
-    except Exception:
-        pass
-    return gray
+    return _fast_screencap_raw(device)
 
 def _fast_screencap_raw(device):
     # ── per-device throttle ──
@@ -2455,80 +2404,6 @@ def trigger_restart_from_play8(device, serial, original_name, reason="stuck"):
         DEVICE_RESTART_PLAY8[serial] = (os.path.join(INPUT_DIR, original_name), original_name)
     gui_log(serial, f"Restarting from play8 (attempt {cnt}, {reason}, keep login, no re-push)...", step="Restart play8", status="working")
     raise RestartFromPlay8Exception(f"restart from play8 — {reason}")
-
-def resolve_mumu_index(serial):
-    """หา MuMu instance index จาก serial — เติม SERIAL_TO_INDEX ให้ถ้ายังว่าง"""
-    idx = SERIAL_TO_INDEX.get(serial)
-    if idx is not None:
-        return idx
-    try:
-        for i, s in get_mumu_instances():
-            SERIAL_TO_INDEX[s] = i
-    except Exception:
-        pass
-    return SERIAL_TO_INDEX.get(serial)
-
-def mumu_restart_instance(index):
-    """สั่ง MuMuManager ปิดแล้วเปิด instance ใหม่ (กู้หน้าต่างที่ค้าง ANR ระดับ Windows)"""
-    _mumu(["control", "-v", str(index), "shutdown"], timeout=60)
-    time.sleep(6)
-    _mumu(["control", "-v", str(index), "launch"], timeout=90)
-
-def maybe_recover_frozen_mumu(device):
-    """ตรวจว่าหน้าต่าง MuMu ค้าง (ANR) หรือ screencap ตายต่อเนื่องไหม —
-    ถ้าใช่: รีสตาร์ต instance นั้นผ่าน MuMuManager แล้ว raise DeviceResetException
-    (คืนไฟล์กลับ input-id + เริ่มรอบใหม่บนเครื่องที่เพิ่งบูตใหม่). ต้องใช้ MuMu (USE_MUMU_ROOT)."""
-    if not MUMU_ANR_RECOVER or not USE_MUMU_ROOT:
-        return
-    serial = device.serial
-    now = time.time()
-
-    frozen_for = now - _DEVICE_FRAME_CHANGE_TS.get(serial, now)
-    fail_ts = _DEVICE_SCREENCAP_FAIL_TS.get(serial)
-    dead_for = (now - fail_ts) if fail_ts else 0.0
-    if frozen_for < MUMU_FREEZE_SECONDS and dead_for < MUMU_DEAD_SECONDS:
-        return   # ยังไม่เข้าเกณฑ์ค้าง
-
-    last_restart = _DEVICE_LAST_MUMU_RESTART.get(serial, 0.0)
-    if now - last_restart < MUMU_RESTART_COOLDOWN:
-        return   # เพิ่งรีสตาร์ตไป — ให้เวลาฟื้นก่อน (กันรีสตาร์ตวน)
-
-    reason = (f"frozen {frozen_for:.0f}s" if frozen_for >= MUMU_FREEZE_SECONDS
-              else f"screencap dead {dead_for:.0f}s")
-    idx = resolve_mumu_index(serial)
-    if idx is None:
-        gui_log(serial, f"⚠️ MuMu ค้าง ({reason}) แต่หา instance index ไม่เจอ — ข้ามรีสตาร์ต",
-                step="MuMu ANR", status="error")
-        _mumu_freeze_reset(serial)   # เลื่อน baseline กันเตือนรัวๆ
-        return
-
-    _DEVICE_LAST_MUMU_RESTART[serial] = now
-    gui_log(serial, f"🧊 MuMu ค้าง/ไม่ตอบสนอง ({reason}) → รีสตาร์ต instance {idx}...",
-            step="MuMu Restart", status="error")
-    try:
-        mumu_restart_instance(idx)
-    except Exception as e:
-        gui_log(serial, f"⚠️ รีสตาร์ต MuMu ล้มเหลว: {e}", step="MuMu Restart", status="error")
-
-    # รอเครื่องกลับมา online หลังบูตใหม่ (สูงสุด ~120 วิ)
-    online = False
-    deadline = time.time() + 120
-    while time.time() < deadline:
-        try_reconnect_device(serial)
-        if is_device_online(device):
-            online = True
-            break
-        time.sleep(4)
-
-    _mumu_freeze_reset(serial)
-    DEVICE_LAST_GAME_CHECK[serial] = time.time()   # กัน is_game_running relaunch ซ้อนทันที
-    if online:
-        gui_log(serial, f"✅ MuMu instance {idx} กลับมา online — เริ่มรอบใหม่",
-                step="MuMu Back", status="working")
-    else:
-        gui_log(serial, f"⚠️ MuMu instance {idx} ยังไม่ online — เริ่มรอบใหม่แล้วลองต่อ",
-                step="MuMu Back", status="stuck")
-    raise DeviceResetException(f"mumu ANR recovered ({reason})")
 
 # ═════════════════════════════════════════════════════════════════════════════
 # CPU affinity balancer (เครื่อง 2 socket / NUMA / >64 logical processors)
@@ -2738,9 +2613,6 @@ def get_screen_capture(device):
             gui_log(device.serial, "⚠️ Game not running! Relaunching...", step="Relaunch")
             launch_game(device, settle=14)
             DEVICE_LAST_GAME_CHECK[device.serial] = time.time()
-
-        # ตรวจ/กู้ MuMu ที่ค้างระดับ Windows (ANR) อัตโนมัติ — raise DeviceResetException ถ้ากู้
-        maybe_recover_frozen_mumu(device)
 
         img = fast_screencap(device)
         if img is None:
