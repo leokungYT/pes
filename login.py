@@ -6769,16 +6769,42 @@ def process_device_login(device):
                                         if not clicked_g5v1:
                                             gui_log(serial, "ไม่เจอ gacha500v1 ใน 8 วิ — ไปเช็ค nocions/checkpointgacha ต่อ", step="G500v1 Miss")
 
-                                        # เจอ nocions (coin ไม่พอ) → กด Back 1 ครั้ง → skip ไปทำ gacha4 เลย
-                                        img_nc = get_screen_capture(device)
-                                        if img_nc is not None and img_search(img_nc, os.path.join(IMG_DIR, "nocions.bmp")):
-                                            device.shell("input keyevent 4")   # Back 1 ครั้ง
-                                            gui_log(serial, "เจอ nocions หลัง gacha500 → กด Back 1 ครั้ง → skip ไป gacha4", step="G500 Back")
-                                            time.sleep(1.5)
-                                        else:
-                                            # ไม่เจอ nocions = สุ่ม 500 ผ่าน → ปิดหน้าผลสุ่ม: checkpointgacha → next
-                                            gui_log(serial, "ไม่เจอ nocions (สุ่ม 500 ผ่าน) → หา checkpointgacha แล้วกด next", step="G500 OK")
-                                            _g500_checkpoint_then_next(device, cycle_start, serial, tag="G500")
+                                        # ── หลังกด gacha500v1 → วนเช็ค 2 เงื่อนไข "ไม่มี timeout" ──
+                                        #   1) เจอ nocions        → กด Back 1 ครั้ง → skip ไปทำ gacha4 เลย
+                                        #   2) เจอ checkpointgacha → กด next.bmp → ไปทำ gacha4 ตามจำนวน loop ใน config
+                                        gui_log(serial, "รอ nocions หรือ checkpointgacha (ไม่มี timeout)...", step="G500 Wait")
+                                        while True:
+                                            check_device_reset(serial, cycle_start)
+                                            img_w = get_screen_capture(device)
+                                            if img_w is not None:
+                                                # เงื่อนไข 1 — coin ไม่พอ
+                                                if img_search(img_w, os.path.join(IMG_DIR, "nocions.bmp")):
+                                                    device.shell("input keyevent 4")   # Back 1 ครั้ง
+                                                    gui_log(serial, "เจอ nocions → กด Back 1 ครั้ง → skip ไป gacha4", step="G500 Back")
+                                                    time.sleep(1.5)
+                                                    break
+                                                # เงื่อนไข 2 — สุ่มผ่าน เข้าหน้าผลสุ่ม
+                                                if img_search(img_w, os.path.join(IMG_DIR, "checkpointgacha.bmp")):
+                                                    gui_log(serial, "เจอ checkpointgacha → หา next.bmp แล้วกด", step="G500 CP")
+                                                    dl_next = time.time() + 20
+                                                    clicked_next = False
+                                                    while time.time() < dl_next:
+                                                        check_device_reset(serial, cycle_start)
+                                                        img_n = get_screen_capture(device)
+                                                        if img_n is not None:
+                                                            pts_n = img_search(img_n, os.path.join(IMG_DIR, "next.bmp"))
+                                                            if pts_n:
+                                                                x_n, y_n = pts_n[0]
+                                                                device.shell(f"input swipe {x_n} {y_n} {x_n} {y_n} 100")
+                                                                gui_log(serial, f"กด next.bmp ({x_n},{y_n}) → ไป gacha4", step="G500 Next")
+                                                                time.sleep(1.5)
+                                                                clicked_next = True
+                                                                break
+                                                        time.sleep(0.3)
+                                                    if not clicked_next:
+                                                        gui_log(serial, "ไม่เจอ next.bmp ใน 20 วิ — ไป gacha4 ต่อ", step="G500 Next Miss")
+                                                    break
+                                            time.sleep(0.3)
                                     else:
                                         gui_log(serial, "ไม่เจอ gacha500 — ข้ามไปรอบถัดไป", step="G500 Miss")
                                     gui_log(serial, "จบขั้น v2/gacha500 (ทำแล้ว 1 รอบ) — รอบถัดไปกลับไปวนคลิก gacha4 ปกติ", step="G500 Done")
