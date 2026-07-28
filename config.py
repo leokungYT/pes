@@ -161,7 +161,7 @@ list_find_hero = [
     "Ferran Torres",
     "Harry Kane",
     "Cristian Romero",
-    "Lionel Messi=x2",
+    "Lionel Messi",
     "Kevin De Bruyne",
     "James Rodriguez",
     "Neymar Jr",
@@ -173,6 +173,21 @@ list_find_hero = [
 
 # แชร์ list เดียวกัน — แก้ที่ list_find_hero อย่างเดียวพอ
 HERO_LIST_FREE = list_find_hero
+
+
+# ── Extra Find (ยืนยันซ้ำด้วยรูปภาพ) ────────────────
+# ชื่อที่ใส่ไว้ใน dict นี้ ต้อง "OCR สแกนเจอชื่อ" + "เจอรูปในหน้าจอด้วย" ถึงจะนับว่าเจอ
+#   - OCR เจอ + รูป match  → นับว่าเจอ
+#   - OCR เจอ แต่ไม่เจอรูป → ไม่นับ (กัน OCR อ่านผิด/มั่ว)
+#   - ชื่อที่ไม่ได้ใส่ในนี้ → ใช้ OCR อย่างเดียวเหมือนเดิม
+# path รูป = img/extar/<ชื่อไฟล์>   (นามสกุล .png/.bmp สลับกันได้ ระบบหาให้เอง)
+# ปิดฟีเจอร์นี้ = ปล่อยเป็น dict ว่าง  EXTAR_FIND = {}
+EXTAR_FIND = {
+    "Lionel Messi": "extarfind1.png",
+}
+
+# ความแม่นตอนเทียบรูปของ EXTAR_FIND (0.0 - 1.0) — ยิ่งสูงยิ่งเข้มงวด
+EXTAR_FIND_THRESHOLD = 0.8
 
 
 # ── Debug OCR ─────────────────────────────────────

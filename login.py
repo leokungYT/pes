@@ -87,6 +87,19 @@ try:
     from config import list_find_hero
 except ImportError:
     list_find_hero = HERO_LIST
+# EXTAR_FIND — ฮีโร่ที่ต้องยืนยันด้วยรูปซ้ำอีกชั้น (รับชื่อตัวเล็ก extar_find ด้วย เผื่อพิมพ์คนละแบบ)
+try:
+    from config import EXTAR_FIND
+except ImportError:
+    try:
+        from config import extar_find as EXTAR_FIND
+    except ImportError:
+        EXTAR_FIND = {}
+try:
+    from config import EXTAR_FIND_THRESHOLD
+except ImportError:
+    EXTAR_FIND_THRESHOLD = 0.8
+EXTAR_SUBDIR = "extar"   # โฟลเดอร์รูปของ EXTAR_FIND → img/extar/
 try:
     from config import AUTORUN
 except ImportError:
@@ -3404,6 +3417,53 @@ def is_hero_match(hero_name, ocr_text):
 
     return False
 
+def _extar_file_for(hero_name):
+    """หาชื่อไฟล์รูปของ EXTAR_FIND จากชื่อฮีโร่ (ไม่สนตัวพิมพ์ใหญ่-เล็ก / ช่องว่างหัวท้าย)
+    ไม่ได้อยู่ในลิสต์ → None"""
+    if not EXTAR_FIND:
+        return None
+    key = str(hero_name).strip().lower()
+    for k, v in EXTAR_FIND.items():
+        if str(k).strip().lower() == key and v:
+            return str(v).strip()
+    return None
+
+def extar_img_confirm(img, hero_name, serial, step_tag="Extar", cache=None):
+    """EXTAR_FIND — ฮีโร่บางคนต้อง "OCR เจอชื่อ" + "เจอรูปในจอ" ถึงจะนับว่าเจอจริง
+    (กัน OCR อ่านผิดแล้วนับเกิน)
+
+      - ชื่อไม่ได้อยู่ใน EXTAR_FIND   → True (ใช้ OCR อย่างเดียวเหมือนเดิม)
+      - อยู่ในลิสต์ + เจอรูป          → True
+      - อยู่ในลิสต์ + ไม่เจอรูป       → False (ไม่นับว่าเจอ)
+      - ไฟล์รูปหาย                   → True + log เตือน (ไม่บล็อกการทำงาน)
+
+    cache: dict ว่างๆ ส่งเข้ามาได้ — เฟรมเดียวกันเทียบรูปเดิมซ้ำหลาย lock จะใช้ผลเดิม
+    """
+    fname = _extar_file_for(hero_name)
+    if not fname:
+        return True
+    if img is None:
+        return True
+
+    if cache is not None and fname in cache:
+        return cache[fname]
+
+    path = os.path.join(IMG_DIR, EXTAR_SUBDIR, fname)
+    base, _ext = os.path.splitext(path)
+    if not (os.path.exists(path) or os.path.exists(base + ".png") or os.path.exists(base + ".bmp")):
+        gui_log(serial, f"⚠️ EXTAR_FIND: ไม่พบไฟล์รูป {path} — ใช้ผล OCR อย่างเดียว", step=f"{step_tag} No Img")
+        return True   # ไม่ cache — เผื่อเพิ่งวางไฟล์รูปทีหลัง
+
+    pts = img_search(img, path, threshold=EXTAR_FIND_THRESHOLD)
+    ok = bool(pts)
+    if ok:
+        gui_log(serial, f"EXTAR ✅ {hero_name}: OCR เจอ + รูป {fname} match ที่ {pts[0]}", step=f"{step_tag} OK")
+    else:
+        gui_log(serial, f"EXTAR ❌ {hero_name}: OCR เจอ แต่ไม่เจอรูป {fname} → ไม่นับว่าเจอ", step=f"{step_tag} Reject")
+    if cache is not None:
+        cache[fname] = ok
+    return ok
+
 def parse_hero_config(config_list):
     """
     Parses a list of hero configurations.
@@ -3655,7 +3715,12 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
                  ไว้หน้าชื่อไฟล์ตอน export.
     """
     gui_log(serial, "Find Hero sequence started...", step="Find Hero", status="working")
-    
+
+    # ปิด floating fixout ตลอด sequence fin (fin1..fin13)
+    # — หน้า fin มีปุ่มคล้าย fixout จับผิดแล้ว Back spam มั่ว หลุด sequence
+    #   (เปิดกลับอัตโนมัติตอนเริ่ม cycle ใหม่ — find_hero_mode จบรอบเสมอ)
+    DEVICE_DISABLE_FIXOUT[serial] = True
+
     def _check_fixteam(img_current):
         pts_team = img_search(img_current, os.path.join(IMG_DIR, "fixteam.bmp"), threshold=0.95)
         if pts_team:
@@ -4084,6 +4149,8 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
             lock1_matches = set()
             lock2_matches = set()
             lock3_matches = set()
+            # เฟรมเดียวกันทั้ง 3 lock → เทียบรูป EXTAR_FIND ครั้งเดียวพอ (ใช้ผลซ้ำ)
+            extar_cache = {}
 
             # Lock 1 Scanning
             lock1_region = Region(154, 134, 679, 39)
@@ -4092,6 +4159,9 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
             gui_log(serial, f"Lock 1 OCR: {lock1_text if lock1_text else '<EMPTY>'}", step="Scan Lock 1")
             for h in target_heroes:
                 if is_hero_match(h, lock1_text):
+                    # อยู่ใน EXTAR_FIND → ต้องเจอรูปในจอด้วย ถึงจะนับ
+                    if not extar_img_confirm(img, h, serial, step_tag="Extar L1", cache=extar_cache):
+                        continue
                     lock1_matches.add(h)
                     gui_log(serial, f"Lock 1 Match: {h}", step=f"⭐ {h}")
 
@@ -4102,6 +4172,8 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
             gui_log(serial, f"Lock 2 OCR: {lock2_text if lock2_text else '<EMPTY>'}", step="Scan Lock 2")
             for h in target_heroes:
                 if is_hero_match(h, lock2_text):
+                    if not extar_img_confirm(img, h, serial, step_tag="Extar L2", cache=extar_cache):
+                        continue
                     lock2_matches.add(h)
                     gui_log(serial, f"Lock 2 Match: {h}", step=f"⭐ {h}")
 
@@ -4112,6 +4184,8 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
             gui_log(serial, f"Lock 3 OCR: {lock3_text if lock3_text else '<EMPTY>'}", step="Scan Lock 3")
             for h in target_heroes:
                 if is_hero_match(h, lock3_text):
+                    if not extar_img_confirm(img, h, serial, step_tag="Extar L3", cache=extar_cache):
+                        continue
                     lock3_matches.add(h)
                     gui_log(serial, f"Lock 3 Match: {h}", step=f"⭐ {h}")
 
@@ -6683,12 +6757,12 @@ def process_device_login(device):
                                                              os.path.join(IMG_DIR, "gacha4v2.bmp"),
                                                              x_4v2, y_4v2, stuck_secs=3.0, timeout=None, tag="G4v2-Click")
 
-                                        # หา gacha5v2 — วนจนกว่าจะเจอ (ทางออกอื่น: เจอ out900 / รอเกิน 150 วิ)
+                                        # หา gacha5v2 — วนจนกว่าจะเจอ (ทางออกอื่น: เจอ out900 / รอเกิน 70 วิ)
                                         #   แวะหา next.bmp ด้วย — หน้าผลสุ่มค้างอยู่จะบัง gacha5v2 ไว้
                                         clicked_g5v2 = False
                                         g5v2_wait_start = time.time()
                                         g5v2_last_log = 0.0
-                                        G5V2_MAX_WAIT = 150   # รอเกินนี้ = ข้ามไปทำ gacha500 ต่อเลย
+                                        G5V2_MAX_WAIT = 70    # รอเกินนี้ = ข้ามไปทำ gacha500 ต่อเลย
                                         while True:
                                             check_device_reset(serial, cycle_start)
                                             img = get_screen_capture(device)
@@ -7478,7 +7552,7 @@ def _disable_console_quickedit():
 def apply_config_now(reason=""):
     """โหลด config.py ใหม่แล้วอัปเดตตัวแปร runtime ทันที (ใช้ได้ทุกที่ ทุกเวลา)
     คืน True ถ้าสำเร็จ — ตัวนี้คือหัวใจของ 'แก้ config ปุ๊บ มีผลปั๊บ'"""
-    global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA, NEW_GACHA_SWIPE, GACHA_LOOP_LIMIT, GACHA500, COIN_GACHA_THRESHOLD, ONE_GACHA500, HERO_LIST, HERO_LIST_FREE
+    global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA, NEW_GACHA_SWIPE, GACHA_LOOP_LIMIT, GACHA500, COIN_GACHA_THRESHOLD, ONE_GACHA500, HERO_LIST, HERO_LIST_FREE, EXTAR_FIND, EXTAR_FIND_THRESHOLD
     try:
         import importlib
         import config as cfg
@@ -7515,6 +7589,9 @@ def apply_config_now(reason=""):
         # รายชื่อฮีโร่ก็อัปเดตสดด้วย (แก้ list ใน config แล้วมีผลทันที)
         HERO_LIST = getattr(cfg, 'HERO_LIST', HERO_LIST)
         HERO_LIST_FREE = getattr(cfg, 'HERO_LIST_FREE', HERO_LIST_FREE)
+        # EXTAR_FIND (ยืนยันด้วยรูป) — แก้ใน config แล้วมีผลทันทีเหมือนกัน
+        EXTAR_FIND = getattr(cfg, 'EXTAR_FIND', getattr(cfg, 'extar_find', {})) or {}
+        EXTAR_FIND_THRESHOLD = getattr(cfg, 'EXTAR_FIND_THRESHOLD', 0.8)
         # TIMEOUT_ENABLE / TIMEOUT_MINUTES ไม่ต้องเก็บเป็น global —
         # check_device_reset อ่านสดจาก config ทุกครั้งอยู่แล้ว
         return True
