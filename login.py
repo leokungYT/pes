@@ -4437,8 +4437,8 @@ def click_img_until_gone(device, cycle_start, serial, img_path, x, y,
     gui_log(serial, f"{name} ยังไม่หายใน {timeout:.0f}s — ไปต่อ", step=f"{tag} Timeout")
     return False
 
-def click_next_until_gone(device, cycle_start, serial, x, y, stuck_secs=8.0, timeout=60.0, tag="Next"):
-    """กด next.bmp — ค้างเกิน 8 วิ กดซ้ำจนหาย (wrapper ของ click_img_until_gone)"""
+def click_next_until_gone(device, cycle_start, serial, x, y, stuck_secs=5.0, timeout=60.0, tag="Next"):
+    """กด next.bmp — ค้างเกิน 5 วิ กดซ้ำจนหาย (wrapper ของ click_img_until_gone)"""
     return click_img_until_gone(device, cycle_start, serial,
                                 os.path.join(IMG_DIR, "next.bmp"), x, y,
                                 stuck_secs=stuck_secs, timeout=timeout, tag=tag)
