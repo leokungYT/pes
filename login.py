@@ -100,6 +100,32 @@ try:
 except ImportError:
     EXTAR_FIND_THRESHOLD = 0.8
 EXTAR_SUBDIR = "extar"   # โฟลเดอร์รูปของ EXTAR_FIND → img/extar/
+# ── Auto restart เครื่องที่ adb หลุด (offline ค้าง) ──
+try:
+    from config import AUTO_RESTART_OFFLINE
+except ImportError:
+    AUTO_RESTART_OFFLINE = 1
+try:
+    from config import OFFLINE_RESTART_AFTER
+except ImportError:
+    OFFLINE_RESTART_AFTER = 90
+try:
+    from config import OFFLINE_BOOT_WAIT
+except ImportError:
+    OFFLINE_BOOT_WAIT = 240
+try:
+    from config import OFFLINE_RESTART_COOLDOWN
+except ImportError:
+    OFFLINE_RESTART_COOLDOWN = 600
+# ── โหลดที่ยิงใส่ adb (กัน adb server ล้นจนจอหลุด) ──
+try:
+    from config import SCREENCAP_MAX_CONCURRENT
+except ImportError:
+    SCREENCAP_MAX_CONCURRENT = 12
+try:
+    from config import SCREENCAP_INTERVAL
+except ImportError:
+    SCREENCAP_INTERVAL = 0.25
 try:
     from config import AUTORUN
 except ImportError:
@@ -225,6 +251,7 @@ DEVICE_FIXOUT_CANCEL_DONE = {}  # serial -> True เมื่อ fixout→Back s
 DEVICE_DISABLE_FIXOUT = {}      # serial -> True = ปิด floating fixout check (ตั้งตอนเข้า sequence กาชา — หน้ากาชามีปุ่มคล้าย fixout จับผิดบ่อย)
 _FIXOUT_LAST_DONE = {}          # serial -> เวลาที่ fixout→cancel ทำงานล่าสุด (cooldown กันกดซ้ำรัวๆ — กดรอบเดียวแล้วเว้น)
 FIXOUT_COOLDOWN = 60            # วินาที — หลัง fixout→cancel สำเร็จ 1 ครั้ง ห้ามยิงซ้ำภายในเวลานี้
+DEVICE_OFFLINE_SINCE = {}       # serial -> เวลาที่เริ่ม offline (นานเกินกำหนด → restart MuMu เฉพาะเครื่องนั้น)
 
 # ── Performance ───────────────────────────────────────────────────────────────
 SCREENCAP_SCALE = 1.0  # 1.0 = full resolution (ป้องกัน template quality loss)
@@ -1609,6 +1636,7 @@ if GUI_ENABLED:
 
             client = AdbClient(host="127.0.0.1", port=5037)
             start_cpu_balancer()   # เกลี่ย CPU ของ MuMu ข้าม socket (กันโหลดกอง group เดียวจนค้าง)
+            refresh_serial_index_map()   # จำ serial -> MuMu index ไว้ตอนทุกเครื่องยังปกติ (ไว้สั่ง restart ตอนหลุด)
             self.log(f"Starting threads for {len(devices)} devices...")
 
             def launch_device(index):
@@ -2120,6 +2148,196 @@ def mumu_set_root(index, on):
     _mumu(["setting", "-v", str(index), "-k", "root_permission",
            "-val", "true" if on else "false"])
 
+# ── Auto restart MuMu instance ที่ adb หลุด (offline ค้าง) ────────────────
+_MUMU_RESTART_LOCK  = threading.Lock()   # รีสตาร์ททีละเครื่อง — กันหลายตัวบูตพร้อมกันจนโฮสต์แขวน
+_MUMU_LAST_RESTART  = {}                 # serial -> เวลาที่สั่ง restart ล่าสุด (cooldown)
+_MUMU_LAST_BOOT_TS  = [0.0]              # เวลาที่ instance ล่าสุดถูกสั่งบูต (เว้นระยะระหว่างเครื่อง)
+_MUMU_COOLDOWN_LOGGED = {}               # serial -> เวลา restart ที่เคย log cooldown ไปแล้ว (กัน log ซ้ำทุก 10 วิ)
+_MIN_RESTART_GAP    = 30.0               # วินาที — เว้นระยะขั้นต่ำระหว่างการบูต instance แต่ละตัว
+
+def mumu_running_indexes():
+    """คืน list ของ index ที่ instance กำลังรันอยู่ (อ่านจาก MuMuManager info -v all)"""
+    import json
+    r = _mumu(["info", "-v", "all"])
+    if r is None:
+        return []
+    try:
+        data = json.loads((r.stdout or "").strip())
+    except Exception:
+        return []
+    if "index" in data and not any(isinstance(v, dict) for v in data.values()):
+        data = {str(data.get("index", "0")): data}
+    out = []
+    for key, inf in data.items():
+        if isinstance(inf, dict) and inf.get("is_android_started"):
+            out.append(str(inf.get("index", key)))
+    return out
+
+def mumu_adb_endpoint(index):
+    """ถาม MuMuManager ตรงๆ ว่า instance นี้ใช้ adb host:port ไหน (สั่ง connect ให้ในตัวด้วย)
+    แม่นกว่าอ่านจาก info เพราะบาง version ไม่ใส่ adb_port มาใน info"""
+    import json
+    r = _mumu(["adb", "-v", str(index), "-c", "connect"], timeout=25)
+    if r is None:
+        return None
+    try:
+        data = json.loads((r.stdout or "").strip())
+        if isinstance(data, dict):
+            if data.get("adb_port"):
+                return f"{data.get('adb_host', '127.0.0.1')}:{data['adb_port']}"
+            for v in data.values():   # เผื่อคืนเป็น dict ซ้อนราย index
+                if isinstance(v, dict) and v.get("adb_port"):
+                    return f"{v.get('adb_host', '127.0.0.1')}:{v['adb_port']}"
+    except Exception:
+        pass
+    return None
+
+def refresh_serial_index_map(force=False):
+    """สร้างแมพ serial -> MuMu index — เรียกตอนบอทเริ่ม (ตอนที่ทุกเครื่องยังปกติ)
+
+    ทำไมต้องทำล่วงหน้า: instance ที่ "ดับไปแล้ว" จะไม่มี adb port ให้ถามอีก
+    → ถ้าไม่มีแมพไว้ก่อน จะสั่ง restart ไม่ได้ (และห้ามเดา เดี๋ยวไปดับจอที่ยังดีอยู่)
+
+    ทำไมต้องจับคู่ด้วย boot_id: instance เดียวกันมองเห็นได้หลาย port
+    (เช่น 127.0.0.1:5557 กับ 127.0.0.1:16416 = เครื่องเดียวกัน) — บอทใช้ port 55xx
+    แต่ MuMuManager รายงานอีก port หนึ่ง เทียบ string ตรงๆ จะไม่เจอกัน
+    """
+    try:
+        # 1) ทางลัด — info ใส่ adb_port มาให้เลย (MuMu บาง version)
+        idx_ep = {}
+        try:
+            for idx, s in get_mumu_instances():
+                idx_ep[str(idx)] = s
+                if force or s not in SERIAL_TO_INDEX:
+                    SERIAL_TO_INDEX[s] = str(idx)
+        except Exception:
+            pass
+
+        # 2) index ที่รันอยู่แต่ยังไม่รู้ port → ถาม MuMuManager ตรงๆ (ขนานกัน)
+        missing = [i for i in mumu_running_indexes() if i not in idx_ep]
+        if missing:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+                for idx, ep in zip(missing, ex.map(mumu_adb_endpoint, missing)):
+                    if ep:
+                        idx_ep[str(idx)] = ep
+                        if force or ep not in SERIAL_TO_INDEX:
+                            SERIAL_TO_INDEX[ep] = str(idx)
+
+        # 3) serial ที่บอทใช้จริงอาจเป็นคนละ port กับที่ MuMuManager บอก → จับคู่ด้วย boot_id
+        serials = [s for s in get_connected_devices() if force or s not in SERIAL_TO_INDEX]
+        if serials and idx_ep:
+            idx_list = list(idx_ep.keys())
+            with concurrent.futures.ThreadPoolExecutor(max_workers=16) as ex:
+                ep_boot  = list(ex.map(_device_boot_id, [idx_ep[i] for i in idx_list]))
+                ser_boot = list(ex.map(_device_boot_id, serials))
+            boot_to_idx = {b: i for i, b in zip(idx_list, ep_boot) if b}
+            for s, b in zip(serials, ser_boot):
+                if b and b in boot_to_idx:
+                    SERIAL_TO_INDEX[s] = boot_to_idx[b]
+    except Exception as e:
+        cprint(f"{Fore.YELLOW}[MuMu] สร้างแมพ serial→index ไม่สำเร็จ: {e}{Style.RESET_ALL}")
+    return SERIAL_TO_INDEX
+
+def mumu_index_for_serial(serial):
+    """หา MuMu index ของ serial นี้ — ต้องรู้ index จริงเท่านั้น (ไม่เดาจากเลข port)
+    หาไม่เจอ → None เพื่อกัน 'รีสตาร์ทผิดเครื่อง' ไปดับจอที่ยังทำงานดีอยู่"""
+    idx = SERIAL_TO_INDEX.get(serial)
+    if idx is not None:
+        return idx
+    refresh_serial_index_map()
+    return SERIAL_TO_INDEX.get(serial)
+
+def mumu_control(index, action, timeout=120):
+    """สั่ง MuMuManager control -v <index> <action>   (launch / shutdown / restart)
+    คืน (ok, ข้อความ)"""
+    r = _mumu(["control", "-v", str(index), action], timeout=timeout)
+    if r is None:
+        return False, "เรียก MuMuManager ไม่ได้"
+    out = ((r.stdout or "") + " " + (r.stderr or "")).strip()
+    return (r.returncode == 0), out
+
+def wait_device_online(serial, timeout=240, poll=3.0, mumu_index=None):
+    """รอจนเครื่องกลับมา online จริง (adb get-state = device + sys.boot_completed = 1)
+    ระหว่างรอจะ adb connect ให้เป็นระยะ — ถ้าส่ง mumu_index มาด้วย จะให้ MuMuManager
+    สั่ง connect ฝั่งตัวมันเองเป็นระยะด้วย (เผื่อ adb ฝั่งเราต่อไม่ติดหลังบูตใหม่)"""
+    kwargs = {'creationflags': 0x08000000} if os.name == 'nt' else {}
+    deadline = time.time() + timeout
+    rounds = 0
+    while time.time() < deadline:
+        try_reconnect_device(serial)
+        rounds += 1
+        if mumu_index is not None and rounds % 5 == 1:
+            try:
+                mumu_adb_endpoint(mumu_index)
+            except Exception:
+                pass
+        try:
+            r = subprocess.run([adb_path, "-s", serial, "get-state"],
+                               capture_output=True, text=True, timeout=5, **kwargs)
+            if r.stdout.strip() == "device":
+                b = subprocess.run([adb_path, "-s", serial, "shell", "getprop sys.boot_completed"],
+                                   capture_output=True, text=True, timeout=8, **kwargs)
+                if b.stdout.strip() == "1":
+                    return True
+        except Exception:
+            pass
+        time.sleep(poll)
+    return False
+
+def restart_mumu_instance(serial):
+    """MuMu instance ของ serial นี้ค้าง/ดับไปเอง → สั่งปิด-เปิด "เฉพาะตัวนี้ตัวเดียว"
+    แล้วรอจนบูตกลับมา online (เครื่องอื่นไม่โดนแตะ)
+
+    คืน True = กลับมาใช้งานได้แล้ว (ให้ worker เริ่ม cycle ใหม่ตั้งแต่ต้นได้เลย)
+    """
+    now = time.time()
+    last = _MUMU_LAST_RESTART.get(serial, 0.0)
+    if now - last < OFFLINE_RESTART_COOLDOWN:
+        # log ครั้งเดียวต่อรอบ cooldown (ไม่งั้นจะขึ้นซ้ำทุก 10 วิ)
+        if _MUMU_COOLDOWN_LOGGED.get(serial) != last:
+            _MUMU_COOLDOWN_LOGGED[serial] = last
+            gui_log(serial, f"รีสตาร์ทไปแล้วแต่ยังไม่กลับมา — รอ cooldown "
+                            f"{OFFLINE_RESTART_COOLDOWN}s ก่อนสั่งใหม่", step="Restart Cooldown")
+        return False
+
+    idx = mumu_index_for_serial(serial)
+    if idx is None:
+        gui_log(serial, "❌ หา MuMu index ของเครื่องนี้ไม่เจอ — ไม่สั่ง restart "
+                        "(กันรีสตาร์ทผิดเครื่อง) เช็ค MuMuManager info -v all",
+                step="Restart Fail", status="error")
+        return False
+
+    with _MUMU_RESTART_LOCK:
+        gap = _MIN_RESTART_GAP - (time.time() - _MUMU_LAST_BOOT_TS[0])
+        if gap > 0:
+            time.sleep(gap)   # เว้นระยะจากเครื่องก่อนหน้า — กันบูตพร้อมกันจนโฮสต์แขวน
+        _MUMU_LAST_RESTART[serial] = time.time()
+        _MUMU_LAST_BOOT_TS[0] = time.time()
+
+        gui_log(serial, f"🔄 offline นานเกิน {OFFLINE_RESTART_AFTER}s → restart MuMu idx={idx} "
+                        f"(เฉพาะเครื่องนี้)...", step="MuMu Restart", status="stuck")
+        ok_s, out_s = mumu_control(idx, "shutdown")
+        gui_log(serial, f"  shutdown → {out_s[:120] if out_s else ('ok' if ok_s else 'fail')}", step="MuMu Restart")
+        time.sleep(10)   # ให้ instance ปิดสนิทก่อนเปิดใหม่
+        ok_l, out_l = mumu_control(idx, "launch")
+        gui_log(serial, f"  launch → {out_l[:120] if out_l else ('ok' if ok_l else 'fail')}", step="MuMu Restart")
+
+    gui_log(serial, f"⏳ รอ {serial} บูตกลับมา (สูงสุด {OFFLINE_BOOT_WAIT}s)...", step="MuMu Boot")
+    if not wait_device_online(serial, timeout=OFFLINE_BOOT_WAIT, mumu_index=idx):
+        gui_log(serial, "❌ บูตกลับไม่สำเร็จภายในเวลา — จะลองใหม่รอบหน้า", step="MuMu Boot Fail", status="error")
+        return False
+
+    # บูตใหม่แล้ว root_permission อาจกลับเป็นค่าเดิม → เปิด root ให้ก่อนเริ่มงาน
+    try:
+        if USE_MUMU_ROOT:
+            mumu_set_root(idx, True)
+            time.sleep(2)
+    except Exception:
+        pass
+
+    gui_log(serial, "✅ MuMu กลับมาแล้ว — เริ่มกระบวนการใหม่ตั้งแต่ต้น", step="MuMu Boot OK", status="working")
+    return True
+
 def su_wrap(cmd):
     """wrap คำสั่ง shell ด้วย su -c ถ้าตั้ง USE_SU"""
     return f"su -c '{cmd}'" if USE_SU else cmd
@@ -2270,8 +2488,51 @@ def check_and_click_fixback(device, img, serial, check_g1=True):
 # ═════════════════════════════════════════════════════════════════════════════
 # Throttle: จำกัดความถี่ screencap ต่อเครื่อง — กัน loop ที่เรียกถี่เกินไปยิงใส่ MuMu
 # จนค้าง (ANR). ไม่ว่าจะเรียกถี่แค่ไหน แต่ละเครื่องจะถูกแคปไม่เกิน ~1/_MIN_SCREENCAP_INTERVAL ครั้ง/วิ
-_MIN_SCREENCAP_INTERVAL = 0.25          # วินาที (≈ 4 ครั้ง/วิ/เครื่อง)
+_MIN_SCREENCAP_INTERVAL = SCREENCAP_INTERVAL   # วินาที (0.25 ≈ 4 ครั้ง/วิ/เครื่อง) — ปรับได้สดจาก config
 _LAST_SCREENCAP_TS = {}
+
+# ── เพดานรวมทั้งระบบ: แคปจอพร้อมกันได้กี่จอ ────────────────────────────
+# throttle ข้างบนเป็น "ต่อจอ" — เปิด 72 จอก็ยังยิงพร้อมกันได้ 72 สาย
+# 1 เฟรม = raw RGBA ไม่บีบอัด (540x960 ≈ 2 MB) วิ่งผ่าน adb server process เดียว
+# → burst พร้อมกันเยอะๆ ทำให้ adb server ตอบไม่ทัน จอโดน mark เป็น offline
+# ตัวนี้คุมให้แคปพร้อมกันได้ไม่เกิน N จอ ที่เหลือรอคิว (ปกติรอไม่ถึงวินาที)
+class _DynamicGate:
+    """จำกัดจำนวนงานที่วิ่งพร้อมกัน — ปรับเพดานได้สดๆ ระหว่างรัน
+    (threading.Semaphore ปกติเปลี่ยนค่าไม่ได้ เลยทำเอง)  limit <= 0 = ไม่จำกัด"""
+    def __init__(self, limit):
+        self._cv = threading.Condition()
+        self._limit = int(limit)
+        self._active = 0
+
+    def set_limit(self, limit):
+        limit = int(limit)
+        with self._cv:
+            if limit != self._limit:
+                self._limit = limit
+                self._cv.notify_all()
+
+    def acquire(self, timeout=20.0):
+        """คืน True ถ้าจองคิวได้ (ต้อง release), False ถ้ารอนานเกิน timeout
+        (รอนานเกิน = ปล่อยผ่านไปเลย ดีกว่าให้บอททั้งตัวค้าง)"""
+        deadline = time.time() + timeout
+        with self._cv:
+            if self._limit <= 0:
+                return False   # ไม่จำกัด → ไม่ต้องนับ ไม่ต้อง release
+            while self._active >= self._limit:
+                remain = deadline - time.time()
+                if remain <= 0:
+                    return False
+                self._cv.wait(remain)
+            self._active += 1
+            return True
+
+    def release(self):
+        with self._cv:
+            if self._active > 0:
+                self._active -= 1
+            self._cv.notify()
+
+_SCREENCAP_GATE = _DynamicGate(SCREENCAP_MAX_CONCURRENT)
 
 # Launch cooldown: ห้าม cold-start เกมถี่เกินไป/เครื่อง — cold-start คือคำสั่งที่หนัก
 # ที่สุดสำหรับ MuMu (โหลด asset + init 3D ใหม่) ถ้า relaunch ซ้อนถี่ๆ → ANR
@@ -2312,6 +2573,7 @@ def fast_screencap(device):
 
 def _fast_screencap_raw(device):
     # ── per-device throttle ──
+    # (นอนรอ "นอกคิว" — ไม่งั้นจะกินโควตาเพดานรวมทั้งที่ยังไม่ได้ทำอะไร)
     serial = device.serial
     last = _LAST_SCREENCAP_TS.get(serial, 0.0)
     wait = _MIN_SCREENCAP_INTERVAL - (time.time() - last)
@@ -2319,6 +2581,16 @@ def _fast_screencap_raw(device):
         time.sleep(wait)
     _LAST_SCREENCAP_TS[serial] = time.time()
 
+    # ── เพดานรวมทั้งระบบ: จองคิวก่อนคุยกับ adb จริง ──
+    _gate_held = _SCREENCAP_GATE.acquire()
+    try:
+        return _screencap_io(device)
+    finally:
+        if _gate_held:
+            _SCREENCAP_GATE.release()
+
+def _screencap_io(device):
+    """ส่วนที่คุยกับ adb จริง (ถูกคุมด้วย _SCREENCAP_GATE จากตัวเรียก)"""
     conn = None
     try:
         conn = device.client.create_connection(timeout=device.client.timeout)
@@ -5218,10 +5490,31 @@ def process_device_login(device):
             #              (2) เริ่มทำงาน/ย้ายไฟล์มั่วบนเครื่องที่ offline/ค้าง
             # ยังไม่ได้ pick file (original_name=None) → continue ปลอดภัย ไม่มีไฟล์ค้าง
             if not is_device_online(device):
-                gui_log(serial, "⚠️ Device OFFLINE — reconnecting & waiting...", step="Offline", status="stuck")
+                off_since = DEVICE_OFFLINE_SINCE.setdefault(serial, time.time())
+                off_for   = time.time() - off_since
+                gui_log(serial, f"⚠️ Device OFFLINE — reconnecting & waiting... ({off_for:.0f}s)",
+                        step="Offline", status="stuck")
                 try_reconnect_device(serial)
+
+                # reconnect ติดเลย → กลับไปทำงานต่อ ไม่ต้องรีสตาร์ทอะไร
+                if is_device_online(device):
+                    DEVICE_OFFLINE_SINCE.pop(serial, None)
+                    gui_log(serial, "✅ กลับมา online แล้ว — เริ่ม cycle ใหม่", step="Online", status="working")
+                    continue
+
+                # offline ติดกันนานเกินกำหนด = adb connect ไม่ช่วยแล้ว (instance ค้าง/ดับไปเอง)
+                # → ปิด-เปิด MuMu "เฉพาะเครื่องนี้ตัวเดียว" แล้วเริ่มกระบวนการใหม่ตั้งแต่ต้น
+                if AUTO_RESTART_OFFLINE and off_for >= OFFLINE_RESTART_AFTER:
+                    if restart_mumu_instance(serial):
+                        DEVICE_OFFLINE_SINCE.pop(serial, None)
+                        continue   # กลับไปต้น while → เช็ค online → เริ่ม cycle ใหม่ตามปกติ
+
                 time.sleep(10)
                 continue
+
+            # online อยู่ — ถ้าเพิ่งฟื้นจาก offline ให้ล้างตัวจับเวลาทิ้ง
+            if DEVICE_OFFLINE_SINCE.pop(serial, None) is not None:
+                gui_log(serial, "✅ กลับมา online แล้ว", step="Online", status="working")
 
             gui_log(serial, "--- Starting New Cycle ---", step="New Cycle", status="working")
 
@@ -7552,7 +7845,7 @@ def _disable_console_quickedit():
 def apply_config_now(reason=""):
     """โหลด config.py ใหม่แล้วอัปเดตตัวแปร runtime ทันที (ใช้ได้ทุกที่ ทุกเวลา)
     คืน True ถ้าสำเร็จ — ตัวนี้คือหัวใจของ 'แก้ config ปุ๊บ มีผลปั๊บ'"""
-    global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA, NEW_GACHA_SWIPE, GACHA_LOOP_LIMIT, GACHA500, COIN_GACHA_THRESHOLD, ONE_GACHA500, HERO_LIST, HERO_LIST_FREE, EXTAR_FIND, EXTAR_FIND_THRESHOLD
+    global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA, NEW_GACHA_SWIPE, GACHA_LOOP_LIMIT, GACHA500, COIN_GACHA_THRESHOLD, ONE_GACHA500, HERO_LIST, HERO_LIST_FREE, EXTAR_FIND, EXTAR_FIND_THRESHOLD, AUTO_RESTART_OFFLINE, OFFLINE_RESTART_AFTER, OFFLINE_BOOT_WAIT, OFFLINE_RESTART_COOLDOWN, SCREENCAP_MAX_CONCURRENT, SCREENCAP_INTERVAL, _MIN_SCREENCAP_INTERVAL
     try:
         import importlib
         import config as cfg
@@ -7592,6 +7885,16 @@ def apply_config_now(reason=""):
         # EXTAR_FIND (ยืนยันด้วยรูป) — แก้ใน config แล้วมีผลทันทีเหมือนกัน
         EXTAR_FIND = getattr(cfg, 'EXTAR_FIND', getattr(cfg, 'extar_find', {})) or {}
         EXTAR_FIND_THRESHOLD = getattr(cfg, 'EXTAR_FIND_THRESHOLD', 0.8)
+        # Auto restart เครื่องที่ adb หลุด
+        AUTO_RESTART_OFFLINE = getattr(cfg, 'AUTO_RESTART_OFFLINE', 1)
+        OFFLINE_RESTART_AFTER = getattr(cfg, 'OFFLINE_RESTART_AFTER', 90)
+        OFFLINE_BOOT_WAIT = getattr(cfg, 'OFFLINE_BOOT_WAIT', 240)
+        OFFLINE_RESTART_COOLDOWN = getattr(cfg, 'OFFLINE_RESTART_COOLDOWN', 600)
+        # โหลดที่ยิงใส่ adb — ปรับได้สดๆ ระหว่างบอทวิ่ง (ไม่ต้องรีสตาร์ท)
+        SCREENCAP_MAX_CONCURRENT = getattr(cfg, 'SCREENCAP_MAX_CONCURRENT', 12)
+        SCREENCAP_INTERVAL = getattr(cfg, 'SCREENCAP_INTERVAL', 0.25)
+        _MIN_SCREENCAP_INTERVAL = SCREENCAP_INTERVAL
+        _SCREENCAP_GATE.set_limit(SCREENCAP_MAX_CONCURRENT)
         # TIMEOUT_ENABLE / TIMEOUT_MINUTES ไม่ต้องเก็บเป็น global —
         # check_device_reset อ่านสดจาก config ทุกครั้งอยู่แล้ว
         return True
@@ -7683,6 +7986,7 @@ def main():
         global bot_running
         bot_running = True
         start_cpu_balancer()   # เกลี่ย CPU ของ MuMu ข้าม socket (กันโหลดกอง group เดียวจนค้าง)
+        refresh_serial_index_map()   # จำ serial -> MuMu index ไว้ตอนทุกเครื่องยังปกติ (ไว้สั่ง restart ตอนหลุด)
         client = AdbClient(host="127.0.0.1", port=5037)
         for i, serial in enumerate(devices):
             device = client.device(serial)
