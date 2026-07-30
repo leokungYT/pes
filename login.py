@@ -6694,7 +6694,8 @@ def process_device_login(device):
                     time.sleep(1)
                 gui_log(serial, "box3 not seen for 5s, moving to box4", step="box3-done")
 
-                # box4
+                # box4 — เจอแล้ว "กดซ้ำไปเรื่อยๆ จนกว่า box4 จะหายไปจริง" ค่อยไปทำ gacha
+                #        (เดิมกดครั้งเดียวแล้วไปต่อเลย → box4 ยังค้างอยู่ แต่ไปเริ่ม gacha แล้ว)
                 gui_log(serial, "Waiting box4.bmp...", step="box4")
                 while True:
                     check_device_reset(serial, cycle_start)
@@ -6703,7 +6704,11 @@ def process_device_login(device):
                         pts = img_search(img, os.path.join(IMG_DIR, "box4.bmp"))
                         if pts:
                             x, y = pts[0]
-                            device.shell(f"input swipe {x} {y} {x} {y} 100")
+                            # ค้างเกิน 3 วิ กดซ้ำ วนจนหาย (90s ยังไม่หาย → log แล้วไปต่อ กันค้างทั้งรอบ)
+                            if click_img_until_gone(device, cycle_start, serial,
+                                                    os.path.join(IMG_DIR, "box4.bmp"),
+                                                    x, y, stuck_secs=3.0, timeout=90.0, tag="box4"):
+                                gui_log(serial, "box4.bmp หายแล้ว → ไปทำ gacha ต่อ", step="box4 OK")
                             time.sleep(4)
                             break
                     time.sleep(1)
