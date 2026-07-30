@@ -119,7 +119,7 @@ list_find_hero = [
     "Ramedhan Saifullah",
     "Chrigor",
     "Lamine=x2",
-    "Mbappe",
+    "Mbappe=x2",
     "Joan Garcia",
     "Martin Odegaard",
     "Atep",
@@ -168,7 +168,11 @@ list_find_hero = [
     "Luka Modric",
     "Manuel Neuer",
     "Cristiano Ronaldo",
-    ""
+    "Jude Bellingham",
+    "Ayyoub Bouaddi",
+    "Michael Olise",
+    "Enzo Fernandez",
+    "Johan Manzambi"
 ]
 
 # แชร์ list เดียวกัน — แก้ที่ list_find_hero อย่างเดียวพอ
