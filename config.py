@@ -16,12 +16,12 @@ DO_BOX = 1
 # ── Gacha Sequence (login.py) ──────────────────────
 # 1 = สุ่มกาชา (ต่อจากจบ box4)
 # 0 = ไม่สุ่มกาชา (จบงานปกติ)
-DO_GACHA = 1
+DO_GACHA = 0
 
 # ── New Gacha Sequence (login.py) ──────────────────
 # 1 = เปิดการทำงาน new-gacha1 -> เลื่อนหา new-gacha1 -> ข้ามไป gacha4.bmp
 # 0 = ปิด
-NEW_GACHA = 1
+NEW_GACHA = 0
 
 # ── New Gacha Swipe (เลื่อนหน้าจอ) ──────────────────
 # 1 = เปิดการเลื่อนหน้าจอ (swipe 144,243 -> 699,233) ตอนหา new-gacha1
@@ -48,14 +48,14 @@ GACHA_LOOP_LIMIT = 0
 #              → gacha500 → gacha500v1 → nocions (Back 1 ครั้ง) / checkpointgacha (กด next จนหาย)
 #              เจอ out900 เมื่อไหร่ = ข้าม step ที่เหลือทันที
 # 0 = ปิด → สุ่ม loop แบบปกติ (ไม่เช็ค coin / ไม่หา gacha500)
-GACHA500 = 1
+GACHA500 = 0
 # เกณฑ์ coin ที่จะ "เก็บ" (>= ค่านี้เก็บ, < ค่านี้สุ่มต่อ) — ชื่อโฟลเดอร์จะเป็น coin<ค่านี้>+
 COIN_GACHA_THRESHOLD = 800
 
 # ── One Gacha500: ทำ v2/gacha500 "รอบเดียวพอ" แล้วจบเลย ──
 # 1 = ทำ step v2/gacha500 รอบเดียว → จบลูปสุ่มทันที (ไม่วนไปทำ gacha4 ต่อ)
 # 0 = ทำ v2/gacha500 รอบเดียว แล้ววน gacha4 ต่อจนครบ GACHA_LOOP_LIMIT (ค่าเดิม)
-ONE_GACHA500 = 1
+ONE_GACHA500 = 0
 
 # ── Gacha + Check Mode ──────────────────────────────
 # 1 = สุ่มกาชาเสร็จแล้วกด backhome ต่อด้วยค้นหาฮีโร่ทันที
@@ -86,7 +86,7 @@ LOGIN_SUCCESS_DIR = "login-success"
 # ── Find Hero Sequence ─────────────────────────────
 # 1 = ทำงาน fin1-fin8 และค้นหาฮีโร่ตามภาพ
 # 0 = ข้าม
-FIND_HERO = 1
+FIND_HERO = 0
 
 # แมพไฟล์ภาพฮีโร่เข้ากับชื่อฮีโร่
 HERO_IMG_MAP = {
@@ -98,7 +98,7 @@ HERO_IMG_MAP = {
 # ── Gacha Free Sequence ───────────────────────────
 # 1 = ทำ gacha free หลังจบ box (gacha1 → gacha2 → เลื่อนหา gachafree1)
 # 0 = ข้าม
-GACHA_FREE = 0
+GACHA_FREE = 1
 
 # จำนวนลูปย่อยที่ต้องการสุ่มกาชาฟรี (เช่น 2, 3, 5)
 GACHA_FREE_LOOPS = 10
