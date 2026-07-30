@@ -4715,6 +4715,27 @@ def click_next_until_gone(device, cycle_start, serial, x, y, stuck_secs=5.0, tim
                                 os.path.join(IMG_DIR, "next.bmp"), x, y,
                                 stuck_secs=stuck_secs, timeout=timeout, tag=tag)
 
+def find_and_click_optional(device, cycle_start, serial, img_name, secs=5.0,
+                            threshold=0.8, tag="Optional", settle=1.0):
+    """แวะหารูปนี้ภายใน `secs` วิ — เจอ → กด แล้วไปต่อ | ไม่เจอ → ข้ามไปต่อตามปกติ (ไม่ถือว่าผิด)
+    ใช้กับ popup ที่ "บางทีก็โผล่ บางทีก็ไม่โผล่". คืน True ถ้าเจอและกดแล้ว"""
+    gui_log(serial, f"แวะหา {img_name} ({secs:.0f}s)...", step=f"{tag} Wait")
+    deadline = time.time() + secs
+    while time.time() < deadline:
+        check_device_reset(serial, cycle_start)
+        img = get_screen_capture(device)
+        if img is not None:
+            pts = img_search(img, os.path.join(IMG_DIR, img_name), threshold=threshold)
+            if pts:
+                x, y = pts[0]
+                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                gui_log(serial, f"Clicked {img_name} at ({x},{y})", step=f"{tag} Click")
+                time.sleep(settle)
+                return True
+        time.sleep(0.3)
+    gui_log(serial, f"{img_name} ไม่เจอใน {secs:.0f}s — ข้าม ไปต่อ", step=f"{tag} Skip")
+    return False
+
 def _g500_checkpoint_then_next(device, cycle_start, serial, cp_secs=30, next_secs=20, tag="G500"):
     """หา checkpointgacha.bmp → เจอแล้วหา next.bmp → กด (ใช้ปิดหน้าผลสุ่มก่อนไป step ต่อไป)
     คืน True ถ้ากด next สำเร็จ / False ถ้าไม่เจอ checkpointgacha หรือ next"""
@@ -4944,6 +4965,9 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path, coin_
                         click_img_until_gone(device, cycle_start, serial,
                                              os.path.join(IMG_DIR, name),
                                              x, y, stuck_secs=3.0, timeout=60.0, tag="gacha2")
+                        # หลัง gacha2 → แวะหา ad-rewardfix1 5 วิ (ไม่เจอ = ข้ามไปต่อ ไม่เป็นไร)
+                        find_and_click_optional(device, cycle_start, serial,
+                                                "ad-rewardfix1.bmp", secs=5.0, tag="ad-reward")
                     else:
                         device.shell(f"input swipe {x} {y} {x} {y} 100")
                     time.sleep(1.2)
@@ -6964,6 +6988,9 @@ def process_device_login(device):
                                                 click_img_until_gone(device, cycle_start, serial,
                                                                      os.path.join(IMG_DIR, name),
                                                                      x, y, stuck_secs=3.0, timeout=60.0, tag="gacha2")
+                                                # หลัง gacha2 → แวะหา ad-rewardfix1 5 วิ (ไม่เจอ = ข้ามไปต่อ ไม่เป็นไร)
+                                                find_and_click_optional(device, cycle_start, serial,
+                                                                        "ad-rewardfix1.bmp", secs=5.0, tag="ad-reward")
                                             else:
                                                 device.shell(f"input swipe {x} {y} {x} {y} 100")
                                             time.sleep(4)
