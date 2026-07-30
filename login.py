@@ -4939,7 +4939,13 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path, coin_
                 pts = img_search(img, os.path.join(IMG_DIR, name))
                 if pts:
                     x, y = pts[0]
-                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                    if i == 2:
+                        # gacha2 — กดซ้ำไปเรื่อยๆ จนกว่าจะหายไปจริง ค่อยไปต่อ
+                        click_img_until_gone(device, cycle_start, serial,
+                                             os.path.join(IMG_DIR, name),
+                                             x, y, stuck_secs=3.0, timeout=60.0, tag="gacha2")
+                    else:
+                        device.shell(f"input swipe {x} {y} {x} {y} 100")
                     time.sleep(1.2)
                     break
             time.sleep(0.3)
@@ -6953,7 +6959,13 @@ def process_device_login(device):
                                         pts = img_search(img, os.path.join(IMG_DIR, name))
                                         if pts:
                                             x, y = pts[0]
-                                            device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                            if i == 2:
+                                                # gacha2 — กดซ้ำไปเรื่อยๆ จนกว่าจะหายไปจริง ค่อยไปต่อ
+                                                click_img_until_gone(device, cycle_start, serial,
+                                                                     os.path.join(IMG_DIR, name),
+                                                                     x, y, stuck_secs=3.0, timeout=60.0, tag="gacha2")
+                                            else:
+                                                device.shell(f"input swipe {x} {y} {x} {y} 100")
                                             time.sleep(4)
                                             break
                                     time.sleep(1)
