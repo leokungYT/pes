@@ -3831,6 +3831,42 @@ def _safe_copy(src, dest):
         os.makedirs(d, exist_ok=True)
     shutil.copy2(src, dest)
 
+def extract_user_code(dat_path):
+    """อ่าน "user_code" จากข้างในไฟล์ .dat (JSON) เช่น {"user_code":"ASCV659902699",...}
+    คืน None ถ้าอ่านไม่ได้ (ให้ตัวเรียกไป fallback ใช้ชื่อไฟล์เดิม)"""
+    import json
+    try:
+        with open(dat_path, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read().strip()
+        s, e = content.find("{"), content.rfind("}")
+        if s != -1 and e != -1:
+            uc = json.loads(content[s:e + 1]).get("user_code")
+            if uc:
+                return str(uc).strip()
+    except Exception:
+        pass
+    return None
+
+def export_base_name(file_path, original_name, strip_dash=False):
+    """ชื่อไฟล์ที่จะใช้ตอน export — ดึง user_code "จากข้างในไฟล์" มาเป็นชื่อ
+    เพราะชื่อไฟล์ขาเข้าอาจไม่ตรงกับ user_code จริงของบัญชีนั้น
+    (เก็บ coin tag -[เลข] ที่ติดมากับชื่อเดิมไว้ด้วย)
+
+    อ่าน user_code ไม่ได้ → fallback ตัด prefix จากชื่อเดิมแบบเดิมเป๊ะๆ
+    strip_dash: ตัดหลัง '-' ด้วยไหม (บาง flow ตัด, flow ของ find_hero ไม่ตัดเพราะต้องเก็บ coin tag)
+    """
+    uc = extract_user_code(file_path) if file_path else None
+    if uc:
+        import re as _re_ex
+        m = _re_ex.search(r"-\[\d+\]", os.path.splitext(original_name or "")[0])
+        return f"{uc}{m.group(0) if m else ''}.dat"
+    clean = original_name
+    if "+" in clean:
+        clean = clean.split("+")[-1]
+    elif strip_dash and "-" in clean:
+        clean = clean.split("-")[-1]
+    return clean
+
 _NET_TIME_OFFSET   = 0.0     # วินาที = (เวลาโลกจริง) - (เวลาเครื่อง)
 _NET_TIME_SYNCED   = False
 _net_time_last_sync = 0.0
@@ -4488,11 +4524,9 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
     device.shell("am force-stop jp.konami.pesam")
     time.sleep(1)
 
-    clean_orig = original_name
-    # ตัด hero/coin prefix (Hero+ID หรือ [เลข]+ID -> ID) แต่ "เก็บ" coin tag -[เลข] ในชื่อเดิมไว้
-    #   เช่น  Aubameyang+ASPZ...-[30].dat -> ASPZ...-[30].dat ,  ASPZ...-[30].dat -> คงเดิม
-    if "+" in clean_orig:
-        clean_orig = clean_orig.split("+")[-1]
+    # ชื่อไฟล์ตอน export = user_code จริงที่อ่านจากข้างในไฟล์ .dat (เก็บ coin tag -[เลข] ไว้)
+    #   อ่านไม่ได้ → fallback ตัด hero/coin prefix จากชื่อเดิม (Hero+ID -> ID) แบบเดิม
+    clean_orig = export_base_name(file_path, original_name)
 
     if found_heroes:
         num_heroes = len(found_heroes)
@@ -5329,9 +5363,8 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path, coin_
     device.shell("am force-stop jp.konami.pesam")
     time.sleep(1)
 
-    clean_orig = original_name
-    if "+" in clean_orig: clean_orig = clean_orig.split("+")[-1]
-    elif "-" in clean_orig: clean_orig = clean_orig.split("-")[-1]
+    # ชื่อไฟล์ตอน export = user_code จริงจากข้างในไฟล์ .dat (อ่านไม่ได้ → ใช้ชื่อเดิมแบบเดิม)
+    clean_orig = export_base_name(file_path, original_name, strip_dash=True)
 
     # ถ้า NOSCAN=1 → ส่งไป fast-random/ เสมอ
     if NOSCAN == 1:
@@ -6588,9 +6621,8 @@ def process_device_login(device):
                     device.shell("am force-stop jp.konami.pesam")
                     time.sleep(1)
 
-                    clean_orig = original_name
-                    if "+" in clean_orig: clean_orig = clean_orig.split("+")[-1]
-                    elif "-" in clean_orig: clean_orig = clean_orig.split("-")[-1]
+                    # ชื่อไฟล์ตอน export = user_code จริงจากข้างในไฟล์ .dat
+                    clean_orig = export_base_name(file_path, original_name, strip_dash=True)
 
                     dest_dir = LOGIN_SUCCESS_DIR
                     dest = os.path.join(dest_dir, clean_orig)
@@ -7732,9 +7764,8 @@ def process_device_login(device):
             device.shell("am force-stop jp.konami.pesam")
             time.sleep(1)
 
-            clean_orig = original_name
-            if "+" in clean_orig: clean_orig = clean_orig.split("+")[-1]
-            elif "-" in clean_orig: clean_orig = clean_orig.split("-")[-1]
+            # ชื่อไฟล์ตอน export = user_code จริงจากข้างในไฟล์ .dat
+            clean_orig = export_base_name(file_path, original_name, strip_dash=True)
 
             if DO_GACHA == 1:
                 if NOSCAN == 1:
