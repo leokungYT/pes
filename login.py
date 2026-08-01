@@ -126,6 +126,15 @@ try:
     from config import SCREENCAP_INTERVAL
 except ImportError:
     SCREENCAP_INTERVAL = 0.25
+# ── ROI cache: จำตำแหน่งปุ่ม ไม่ต้องกวาดทั้งจอทุกรอบ ──
+try:
+    from config import IMG_ROI_CACHE
+except ImportError:
+    IMG_ROI_CACHE = 1
+try:
+    from config import IMG_ROI_PAD
+except ImportError:
+    IMG_ROI_PAD = 40
 try:
     from config import AUTORUN
 except ImportError:
@@ -3470,11 +3479,66 @@ def _match_single(gray_img, find_path, threshold):
     inv = 1.0 / SCREENCAP_SCALE if SCREENCAP_SCALE != 1.0 else 1.0
     return [(int((x + tw // 2) * inv), int((y + th // 2) * inv)) for x, y, tw, th in rects]
 
+# ── ROI cache: จำตำแหน่งที่ "เจอรูปนั้นล่าสุด" แล้วรอบถัดไปเทียบเฉพาะบริเวณนั้นก่อน ──
+# กวาดเต็มจอ 1 เทมเพลต ≈ 12 ms / เทียบเฉพาะ ROI ≈ 0.3 ms (เร็วขึ้น ~40 เท่า)
+# get_screen_capture ยิงหา popup 12-18 เทมเพลตทุกเฟรม → ตรงนี้คือตัวกิน CPU อันดับ 1 ของบอท
+#
+# เก็บแยกต่อเธรด (= แยกต่อเครื่อง เพราะ 1 worker = 1 จอ) → ไม่ต้องแก้ signature ที่เรียก ~200 จุด
+_ROI_TLS = threading.local()
+
+# เทมเพลตที่ตัวเรียก "นับจำนวนจุดที่เจอ" (เช่น len(pts) >= 2) — ห้ามใช้ ROI
+# เพราะ ROI คืนจุดเดียวเสมอ จะทำให้การนับผิด
+_ROI_CACHE_EXCLUDE = {"verify.png", "verify.bmp"}
+
+def _roi_cache():
+    c = getattr(_ROI_TLS, "cache", None)
+    if c is None:
+        c = {}
+        _ROI_TLS.cache = c
+    return c
+
+def _match_in_roi(gray_img, find_path, threshold, hint):
+    """เทียบเทมเพลตเฉพาะกรอบเล็กๆ รอบพิกัดที่จำไว้
+    คืน [] ถ้าไม่เจอ → ให้ตัวเรียกถอยไปกวาดเต็มจอตามเดิม
+
+    หมายเหตุ: TM_CCOEFF_NORMED ให้คะแนนเท่าเดิมไม่ว่าจะครอปหรือไม่
+    (คะแนนขึ้นกับ template กับ patch ที่ทับอยู่เท่านั้น) → ผลลัพธ์ตรงกับการกวาดเต็มจอ"""
+    tmpl = load_template(find_path)
+    if tmpl is None:
+        return []
+    th, tw = tmpl.shape
+    H, W = gray_img.shape[0], gray_img.shape[1]
+    scale = SCREENCAP_SCALE if SCREENCAP_SCALE != 1.0 else 1.0
+    cx, cy = int(hint[0] * scale), int(hint[1] * scale)   # hint เป็นพิกัดจอจริง → กลับเป็นพิกัดในภาพ
+    pad = IMG_ROI_PAD
+    x0 = max(0, cx - tw // 2 - pad); x1 = min(W, cx + tw // 2 + pad)
+    y0 = max(0, cy - th // 2 - pad); y1 = min(H, cy + th // 2 + pad)
+    if (x1 - x0) < tw or (y1 - y0) < th:
+        return []
+    res = cv2.matchTemplate(gray_img[y0:y1, x0:x1], tmpl, cv2.TM_CCOEFF_NORMED)
+    _mn, mx, _ml, mloc = cv2.minMaxLoc(res)
+    if mx < threshold:
+        return []
+    inv = 1.0 / scale
+    return [(int((x0 + mloc[0] + tw // 2) * inv), int((y0 + mloc[1] + th // 2) * inv))]
+
 def img_search(gray_img, find_path, threshold=0.8):
     """Returns list of (cx, cy) match centers in DEVICE coordinates.
     Tries .bmp first, then .png (or vice versa) automatically."""
     if gray_img is None:
         return []
+
+    use_roi = (IMG_ROI_CACHE and os.path.basename(find_path) not in _ROI_CACHE_EXCLUDE)
+    key = (find_path, threshold)
+    if use_roi:
+        cache = _roi_cache()
+        hint = cache.get(key)
+        if hint is not None:
+            pts = _match_in_roi(gray_img, find_path, threshold, hint)
+            if pts:
+                return pts          # เจอที่เดิม → จบ ไม่ต้องกวาดทั้งจอ
+            cache.pop(key, None)    # ไม่เจอที่เดิม → ลืมทิ้ง แล้วกวาดเต็มจอต่อข้างล่าง
+
     points = _match_single(gray_img, find_path, threshold)
     if not points:
         base, ext = os.path.splitext(find_path)
@@ -3482,6 +3546,8 @@ def img_search(gray_img, find_path, threshold=0.8):
         alt_path = base + alt_ext
         if os.path.exists(alt_path):
             points = _match_single(gray_img, alt_path, threshold)
+    if use_roi and points:
+        _roi_cache()[key] = points[0]   # จำตำแหน่งไว้ใช้รอบหน้า
     return points
 
 
@@ -7920,7 +7986,7 @@ def _disable_console_quickedit():
 def apply_config_now(reason=""):
     """โหลด config.py ใหม่แล้วอัปเดตตัวแปร runtime ทันที (ใช้ได้ทุกที่ ทุกเวลา)
     คืน True ถ้าสำเร็จ — ตัวนี้คือหัวใจของ 'แก้ config ปุ๊บ มีผลปั๊บ'"""
-    global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA, NEW_GACHA_SWIPE, GACHA_LOOP_LIMIT, GACHA500, COIN_GACHA_THRESHOLD, ONE_GACHA500, HERO_LIST, HERO_LIST_FREE, EXTAR_FIND, EXTAR_FIND_THRESHOLD, AUTO_RESTART_OFFLINE, OFFLINE_RESTART_AFTER, OFFLINE_BOOT_WAIT, OFFLINE_RESTART_COOLDOWN, SCREENCAP_MAX_CONCURRENT, SCREENCAP_INTERVAL, _MIN_SCREENCAP_INTERVAL
+    global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA, NEW_GACHA_SWIPE, GACHA_LOOP_LIMIT, GACHA500, COIN_GACHA_THRESHOLD, ONE_GACHA500, HERO_LIST, HERO_LIST_FREE, EXTAR_FIND, EXTAR_FIND_THRESHOLD, AUTO_RESTART_OFFLINE, OFFLINE_RESTART_AFTER, OFFLINE_BOOT_WAIT, OFFLINE_RESTART_COOLDOWN, SCREENCAP_MAX_CONCURRENT, SCREENCAP_INTERVAL, _MIN_SCREENCAP_INTERVAL, IMG_ROI_CACHE, IMG_ROI_PAD
     try:
         import importlib
         import config as cfg
@@ -7970,6 +8036,8 @@ def apply_config_now(reason=""):
         SCREENCAP_INTERVAL = getattr(cfg, 'SCREENCAP_INTERVAL', 0.25)
         _MIN_SCREENCAP_INTERVAL = SCREENCAP_INTERVAL
         _SCREENCAP_GATE.set_limit(SCREENCAP_MAX_CONCURRENT)
+        IMG_ROI_CACHE = getattr(cfg, 'IMG_ROI_CACHE', 1)
+        IMG_ROI_PAD = getattr(cfg, 'IMG_ROI_PAD', 40)
         # TIMEOUT_ENABLE / TIMEOUT_MINUTES ไม่ต้องเก็บเป็น global —
         # check_device_reset อ่านสดจาก config ทุกครั้งอยู่แล้ว
         return True
