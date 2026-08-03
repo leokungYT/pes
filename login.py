@@ -4808,15 +4808,18 @@ def _read_coin_from_img(img, serial):
 
 def click_img_until_gone(device, cycle_start, serial, img_path, x, y,
                          stuck_secs=3.0, timeout=60.0, tag="Click", threshold=0.8,
-                         label=None, settle=1.5):
+                         label=None, settle=1.5, gone_secs=0.0):
     """กดรูปที่ (x,y) แล้วเฝ้าดู — ถ้ารูปยัง "ค้าง" อยู่เกิน `stuck_secs` วิ ให้กดซ้ำ
     วนจนกว่ารูปจะหายไป (หรือครบ timeout กันค้าง). คืน True ถ้าหายแล้ว
-    timeout=None → ไม่ยอมแพ้ กดซ้ำจนกว่ารูปจะหายไปจริงๆ"""
+    timeout=None → ไม่ยอมแพ้ กดซ้ำจนกว่ารูปจะหายไปจริงๆ
+    gone_secs → ต้องหาไม่เจอ "ติดต่อกันครบ gone_secs วิ" ถึงจะถือว่าหายจริง
+                (กัน false-negative จาก animation/กระพริบเฟรมเดียว) — 0 = หายเฟรมเดียวก็ไปต่อ"""
     name = label or os.path.basename(img_path)
     device.shell(f"input swipe {x} {y} {x} {y} 100")
     gui_log(serial, f"กด {name} ({x},{y})", step=tag)
     time.sleep(settle)
     last_click = time.time()
+    gone_since = None
     deadline = None if timeout is None else time.time() + timeout
     while deadline is None or time.time() < deadline:
         check_device_reset(serial, cycle_start)
@@ -4824,8 +4827,18 @@ def click_img_until_gone(device, cycle_start, serial, img_path, x, y,
         if img_c is not None:
             pts_c = img_search(img_c, img_path, threshold=threshold)
             if not pts_c:
-                return True   # รูปหายแล้ว → ไปต่อ
-            # ยังเจออยู่ — ค้างเกิน stuck_secs → กดซ้ำ
+                # ไม่เจอรูป — ยืนยันว่าหายจริงเมื่อหาไม่เจอครบ gone_secs วิ
+                if gone_secs <= 0:
+                    return True   # รูปหายแล้ว → ไปต่อ
+                if gone_since is None:
+                    gone_since = time.time()
+                elif time.time() - gone_since >= gone_secs:
+                    gui_log(serial, f"{name} หายครบ {gone_secs:.0f}s — ไปต่อ", step=f"{tag} Gone")
+                    return True
+                time.sleep(0.3)
+                continue
+            # ยังเจออยู่ — รีเซ็ตตัวจับเวลา "หาย" + ค้างเกิน stuck_secs → กดซ้ำ
+            gone_since = None
             if time.time() - last_click >= stuck_secs:
                 x_c, y_c = pts_c[0]
                 device.shell(f"input swipe {x_c} {y_c} {x_c} {y_c} 100")
@@ -5095,10 +5108,12 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path, coin_
                         find_and_click_optional(device, cycle_start, serial,
                                                 "ad-rewardfix1.bmp", secs=5.0, tag="ad-reward")
                     else:
-                        # gacha1 — กดซ้ำไปเรื่อยๆ จนกว่าจะหายไปจริง ค่อยไปหา gacha2
+                        # gacha1 — กดซ้ำไปเรื่อยๆ จนกว่าจะหายไป "จริง" (ยืนยันหายครบ 2.5s
+                        # กัน animation กระพริบทำให้เผลอไป gacha2 ทั้งที่ยังอยู่) ค่อยไปหา gacha2
                         click_img_until_gone(device, cycle_start, serial,
                                              os.path.join(IMG_DIR, name),
-                                             x, y, stuck_secs=3.0, timeout=60.0, tag="gacha1")
+                                             x, y, stuck_secs=3.0, timeout=60.0,
+                                             tag="gacha1", gone_secs=2.5)
                     time.sleep(1.2)
                     break
             time.sleep(0.3)
