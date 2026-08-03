@@ -87,6 +87,54 @@ try:
     from config import list_find_hero
 except ImportError:
     list_find_hero = HERO_LIST
+# EXTAR_FIND — ฮีโร่ที่ต้องยืนยันด้วยรูปซ้ำอีกชั้น (รับชื่อตัวเล็ก extar_find ด้วย เผื่อพิมพ์คนละแบบ)
+try:
+    from config import EXTAR_FIND
+except ImportError:
+    try:
+        from config import extar_find as EXTAR_FIND
+    except ImportError:
+        EXTAR_FIND = {}
+try:
+    from config import EXTAR_FIND_THRESHOLD
+except ImportError:
+    EXTAR_FIND_THRESHOLD = 0.8
+EXTAR_SUBDIR = "extar"   # โฟลเดอร์รูปของ EXTAR_FIND → img/extar/
+# ── Auto restart เครื่องที่ adb หลุด (offline ค้าง) ──
+try:
+    from config import AUTO_RESTART_OFFLINE
+except ImportError:
+    AUTO_RESTART_OFFLINE = 1
+try:
+    from config import OFFLINE_RESTART_AFTER
+except ImportError:
+    OFFLINE_RESTART_AFTER = 90
+try:
+    from config import OFFLINE_BOOT_WAIT
+except ImportError:
+    OFFLINE_BOOT_WAIT = 240
+try:
+    from config import OFFLINE_RESTART_COOLDOWN
+except ImportError:
+    OFFLINE_RESTART_COOLDOWN = 600
+# ── โหลดที่ยิงใส่ adb (กัน adb server ล้นจนจอหลุด) ──
+try:
+    from config import SCREENCAP_MAX_CONCURRENT
+except ImportError:
+    SCREENCAP_MAX_CONCURRENT = 12
+try:
+    from config import SCREENCAP_INTERVAL
+except ImportError:
+    SCREENCAP_INTERVAL = 0.25
+# ── ROI cache: จำตำแหน่งปุ่ม ไม่ต้องกวาดทั้งจอทุกรอบ ──
+try:
+    from config import IMG_ROI_CACHE
+except ImportError:
+    IMG_ROI_CACHE = 1
+try:
+    from config import IMG_ROI_PAD
+except ImportError:
+    IMG_ROI_PAD = 40
 try:
     from config import AUTORUN
 except ImportError:
@@ -212,6 +260,7 @@ DEVICE_FIXOUT_CANCEL_DONE = {}  # serial -> True เมื่อ fixout→Back s
 DEVICE_DISABLE_FIXOUT = {}      # serial -> True = ปิด floating fixout check (ตั้งตอนเข้า sequence กาชา — หน้ากาชามีปุ่มคล้าย fixout จับผิดบ่อย)
 _FIXOUT_LAST_DONE = {}          # serial -> เวลาที่ fixout→cancel ทำงานล่าสุด (cooldown กันกดซ้ำรัวๆ — กดรอบเดียวแล้วเว้น)
 FIXOUT_COOLDOWN = 60            # วินาที — หลัง fixout→cancel สำเร็จ 1 ครั้ง ห้ามยิงซ้ำภายในเวลานี้
+DEVICE_OFFLINE_SINCE = {}       # serial -> เวลาที่เริ่ม offline (นานเกินกำหนด → restart MuMu เฉพาะเครื่องนั้น)
 
 # ── Performance ───────────────────────────────────────────────────────────────
 SCREENCAP_SCALE = 1.0  # 1.0 = full resolution (ป้องกัน template quality loss)
@@ -1596,6 +1645,7 @@ if GUI_ENABLED:
 
             client = AdbClient(host="127.0.0.1", port=5037)
             start_cpu_balancer()   # เกลี่ย CPU ของ MuMu ข้าม socket (กันโหลดกอง group เดียวจนค้าง)
+            refresh_serial_index_map()   # จำ serial -> MuMu index ไว้ตอนทุกเครื่องยังปกติ (ไว้สั่ง restart ตอนหลุด)
             self.log(f"Starting threads for {len(devices)} devices...")
 
             def launch_device(index):
@@ -2107,6 +2157,196 @@ def mumu_set_root(index, on):
     _mumu(["setting", "-v", str(index), "-k", "root_permission",
            "-val", "true" if on else "false"])
 
+# ── Auto restart MuMu instance ที่ adb หลุด (offline ค้าง) ────────────────
+_MUMU_RESTART_LOCK  = threading.Lock()   # รีสตาร์ททีละเครื่อง — กันหลายตัวบูตพร้อมกันจนโฮสต์แขวน
+_MUMU_LAST_RESTART  = {}                 # serial -> เวลาที่สั่ง restart ล่าสุด (cooldown)
+_MUMU_LAST_BOOT_TS  = [0.0]              # เวลาที่ instance ล่าสุดถูกสั่งบูต (เว้นระยะระหว่างเครื่อง)
+_MUMU_COOLDOWN_LOGGED = {}               # serial -> เวลา restart ที่เคย log cooldown ไปแล้ว (กัน log ซ้ำทุก 10 วิ)
+_MIN_RESTART_GAP    = 30.0               # วินาที — เว้นระยะขั้นต่ำระหว่างการบูต instance แต่ละตัว
+
+def mumu_running_indexes():
+    """คืน list ของ index ที่ instance กำลังรันอยู่ (อ่านจาก MuMuManager info -v all)"""
+    import json
+    r = _mumu(["info", "-v", "all"])
+    if r is None:
+        return []
+    try:
+        data = json.loads((r.stdout or "").strip())
+    except Exception:
+        return []
+    if "index" in data and not any(isinstance(v, dict) for v in data.values()):
+        data = {str(data.get("index", "0")): data}
+    out = []
+    for key, inf in data.items():
+        if isinstance(inf, dict) and inf.get("is_android_started"):
+            out.append(str(inf.get("index", key)))
+    return out
+
+def mumu_adb_endpoint(index):
+    """ถาม MuMuManager ตรงๆ ว่า instance นี้ใช้ adb host:port ไหน (สั่ง connect ให้ในตัวด้วย)
+    แม่นกว่าอ่านจาก info เพราะบาง version ไม่ใส่ adb_port มาใน info"""
+    import json
+    r = _mumu(["adb", "-v", str(index), "-c", "connect"], timeout=25)
+    if r is None:
+        return None
+    try:
+        data = json.loads((r.stdout or "").strip())
+        if isinstance(data, dict):
+            if data.get("adb_port"):
+                return f"{data.get('adb_host', '127.0.0.1')}:{data['adb_port']}"
+            for v in data.values():   # เผื่อคืนเป็น dict ซ้อนราย index
+                if isinstance(v, dict) and v.get("adb_port"):
+                    return f"{v.get('adb_host', '127.0.0.1')}:{v['adb_port']}"
+    except Exception:
+        pass
+    return None
+
+def refresh_serial_index_map(force=False):
+    """สร้างแมพ serial -> MuMu index — เรียกตอนบอทเริ่ม (ตอนที่ทุกเครื่องยังปกติ)
+
+    ทำไมต้องทำล่วงหน้า: instance ที่ "ดับไปแล้ว" จะไม่มี adb port ให้ถามอีก
+    → ถ้าไม่มีแมพไว้ก่อน จะสั่ง restart ไม่ได้ (และห้ามเดา เดี๋ยวไปดับจอที่ยังดีอยู่)
+
+    ทำไมต้องจับคู่ด้วย boot_id: instance เดียวกันมองเห็นได้หลาย port
+    (เช่น 127.0.0.1:5557 กับ 127.0.0.1:16416 = เครื่องเดียวกัน) — บอทใช้ port 55xx
+    แต่ MuMuManager รายงานอีก port หนึ่ง เทียบ string ตรงๆ จะไม่เจอกัน
+    """
+    try:
+        # 1) ทางลัด — info ใส่ adb_port มาให้เลย (MuMu บาง version)
+        idx_ep = {}
+        try:
+            for idx, s in get_mumu_instances():
+                idx_ep[str(idx)] = s
+                if force or s not in SERIAL_TO_INDEX:
+                    SERIAL_TO_INDEX[s] = str(idx)
+        except Exception:
+            pass
+
+        # 2) index ที่รันอยู่แต่ยังไม่รู้ port → ถาม MuMuManager ตรงๆ (ขนานกัน)
+        missing = [i for i in mumu_running_indexes() if i not in idx_ep]
+        if missing:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+                for idx, ep in zip(missing, ex.map(mumu_adb_endpoint, missing)):
+                    if ep:
+                        idx_ep[str(idx)] = ep
+                        if force or ep not in SERIAL_TO_INDEX:
+                            SERIAL_TO_INDEX[ep] = str(idx)
+
+        # 3) serial ที่บอทใช้จริงอาจเป็นคนละ port กับที่ MuMuManager บอก → จับคู่ด้วย boot_id
+        serials = [s for s in get_connected_devices() if force or s not in SERIAL_TO_INDEX]
+        if serials and idx_ep:
+            idx_list = list(idx_ep.keys())
+            with concurrent.futures.ThreadPoolExecutor(max_workers=16) as ex:
+                ep_boot  = list(ex.map(_device_boot_id, [idx_ep[i] for i in idx_list]))
+                ser_boot = list(ex.map(_device_boot_id, serials))
+            boot_to_idx = {b: i for i, b in zip(idx_list, ep_boot) if b}
+            for s, b in zip(serials, ser_boot):
+                if b and b in boot_to_idx:
+                    SERIAL_TO_INDEX[s] = boot_to_idx[b]
+    except Exception as e:
+        cprint(f"{Fore.YELLOW}[MuMu] สร้างแมพ serial→index ไม่สำเร็จ: {e}{Style.RESET_ALL}")
+    return SERIAL_TO_INDEX
+
+def mumu_index_for_serial(serial):
+    """หา MuMu index ของ serial นี้ — ต้องรู้ index จริงเท่านั้น (ไม่เดาจากเลข port)
+    หาไม่เจอ → None เพื่อกัน 'รีสตาร์ทผิดเครื่อง' ไปดับจอที่ยังทำงานดีอยู่"""
+    idx = SERIAL_TO_INDEX.get(serial)
+    if idx is not None:
+        return idx
+    refresh_serial_index_map()
+    return SERIAL_TO_INDEX.get(serial)
+
+def mumu_control(index, action, timeout=120):
+    """สั่ง MuMuManager control -v <index> <action>   (launch / shutdown / restart)
+    คืน (ok, ข้อความ)"""
+    r = _mumu(["control", "-v", str(index), action], timeout=timeout)
+    if r is None:
+        return False, "เรียก MuMuManager ไม่ได้"
+    out = ((r.stdout or "") + " " + (r.stderr or "")).strip()
+    return (r.returncode == 0), out
+
+def wait_device_online(serial, timeout=240, poll=3.0, mumu_index=None):
+    """รอจนเครื่องกลับมา online จริง (adb get-state = device + sys.boot_completed = 1)
+    ระหว่างรอจะ adb connect ให้เป็นระยะ — ถ้าส่ง mumu_index มาด้วย จะให้ MuMuManager
+    สั่ง connect ฝั่งตัวมันเองเป็นระยะด้วย (เผื่อ adb ฝั่งเราต่อไม่ติดหลังบูตใหม่)"""
+    kwargs = {'creationflags': 0x08000000} if os.name == 'nt' else {}
+    deadline = time.time() + timeout
+    rounds = 0
+    while time.time() < deadline:
+        try_reconnect_device(serial)
+        rounds += 1
+        if mumu_index is not None and rounds % 5 == 1:
+            try:
+                mumu_adb_endpoint(mumu_index)
+            except Exception:
+                pass
+        try:
+            r = subprocess.run([adb_path, "-s", serial, "get-state"],
+                               capture_output=True, text=True, timeout=5, **kwargs)
+            if r.stdout.strip() == "device":
+                b = subprocess.run([adb_path, "-s", serial, "shell", "getprop sys.boot_completed"],
+                                   capture_output=True, text=True, timeout=8, **kwargs)
+                if b.stdout.strip() == "1":
+                    return True
+        except Exception:
+            pass
+        time.sleep(poll)
+    return False
+
+def restart_mumu_instance(serial):
+    """MuMu instance ของ serial นี้ค้าง/ดับไปเอง → สั่งปิด-เปิด "เฉพาะตัวนี้ตัวเดียว"
+    แล้วรอจนบูตกลับมา online (เครื่องอื่นไม่โดนแตะ)
+
+    คืน True = กลับมาใช้งานได้แล้ว (ให้ worker เริ่ม cycle ใหม่ตั้งแต่ต้นได้เลย)
+    """
+    now = time.time()
+    last = _MUMU_LAST_RESTART.get(serial, 0.0)
+    if now - last < OFFLINE_RESTART_COOLDOWN:
+        # log ครั้งเดียวต่อรอบ cooldown (ไม่งั้นจะขึ้นซ้ำทุก 10 วิ)
+        if _MUMU_COOLDOWN_LOGGED.get(serial) != last:
+            _MUMU_COOLDOWN_LOGGED[serial] = last
+            gui_log(serial, f"รีสตาร์ทไปแล้วแต่ยังไม่กลับมา — รอ cooldown "
+                            f"{OFFLINE_RESTART_COOLDOWN}s ก่อนสั่งใหม่", step="Restart Cooldown")
+        return False
+
+    idx = mumu_index_for_serial(serial)
+    if idx is None:
+        gui_log(serial, "❌ หา MuMu index ของเครื่องนี้ไม่เจอ — ไม่สั่ง restart "
+                        "(กันรีสตาร์ทผิดเครื่อง) เช็ค MuMuManager info -v all",
+                step="Restart Fail", status="error")
+        return False
+
+    with _MUMU_RESTART_LOCK:
+        gap = _MIN_RESTART_GAP - (time.time() - _MUMU_LAST_BOOT_TS[0])
+        if gap > 0:
+            time.sleep(gap)   # เว้นระยะจากเครื่องก่อนหน้า — กันบูตพร้อมกันจนโฮสต์แขวน
+        _MUMU_LAST_RESTART[serial] = time.time()
+        _MUMU_LAST_BOOT_TS[0] = time.time()
+
+        gui_log(serial, f"🔄 offline นานเกิน {OFFLINE_RESTART_AFTER}s → restart MuMu idx={idx} "
+                        f"(เฉพาะเครื่องนี้)...", step="MuMu Restart", status="stuck")
+        ok_s, out_s = mumu_control(idx, "shutdown")
+        gui_log(serial, f"  shutdown → {out_s[:120] if out_s else ('ok' if ok_s else 'fail')}", step="MuMu Restart")
+        time.sleep(10)   # ให้ instance ปิดสนิทก่อนเปิดใหม่
+        ok_l, out_l = mumu_control(idx, "launch")
+        gui_log(serial, f"  launch → {out_l[:120] if out_l else ('ok' if ok_l else 'fail')}", step="MuMu Restart")
+
+    gui_log(serial, f"⏳ รอ {serial} บูตกลับมา (สูงสุด {OFFLINE_BOOT_WAIT}s)...", step="MuMu Boot")
+    if not wait_device_online(serial, timeout=OFFLINE_BOOT_WAIT, mumu_index=idx):
+        gui_log(serial, "❌ บูตกลับไม่สำเร็จภายในเวลา — จะลองใหม่รอบหน้า", step="MuMu Boot Fail", status="error")
+        return False
+
+    # บูตใหม่แล้ว root_permission อาจกลับเป็นค่าเดิม → เปิด root ให้ก่อนเริ่มงาน
+    try:
+        if USE_MUMU_ROOT:
+            mumu_set_root(idx, True)
+            time.sleep(2)
+    except Exception:
+        pass
+
+    gui_log(serial, "✅ MuMu กลับมาแล้ว — เริ่มกระบวนการใหม่ตั้งแต่ต้น", step="MuMu Boot OK", status="working")
+    return True
+
 def su_wrap(cmd):
     """wrap คำสั่ง shell ด้วย su -c ถ้าตั้ง USE_SU"""
     return f"su -c '{cmd}'" if USE_SU else cmd
@@ -2257,8 +2497,51 @@ def check_and_click_fixback(device, img, serial, check_g1=True):
 # ═════════════════════════════════════════════════════════════════════════════
 # Throttle: จำกัดความถี่ screencap ต่อเครื่อง — กัน loop ที่เรียกถี่เกินไปยิงใส่ MuMu
 # จนค้าง (ANR). ไม่ว่าจะเรียกถี่แค่ไหน แต่ละเครื่องจะถูกแคปไม่เกิน ~1/_MIN_SCREENCAP_INTERVAL ครั้ง/วิ
-_MIN_SCREENCAP_INTERVAL = 0.25          # วินาที (≈ 4 ครั้ง/วิ/เครื่อง)
+_MIN_SCREENCAP_INTERVAL = SCREENCAP_INTERVAL   # วินาที (0.25 ≈ 4 ครั้ง/วิ/เครื่อง) — ปรับได้สดจาก config
 _LAST_SCREENCAP_TS = {}
+
+# ── เพดานรวมทั้งระบบ: แคปจอพร้อมกันได้กี่จอ ────────────────────────────
+# throttle ข้างบนเป็น "ต่อจอ" — เปิด 72 จอก็ยังยิงพร้อมกันได้ 72 สาย
+# 1 เฟรม = raw RGBA ไม่บีบอัด (540x960 ≈ 2 MB) วิ่งผ่าน adb server process เดียว
+# → burst พร้อมกันเยอะๆ ทำให้ adb server ตอบไม่ทัน จอโดน mark เป็น offline
+# ตัวนี้คุมให้แคปพร้อมกันได้ไม่เกิน N จอ ที่เหลือรอคิว (ปกติรอไม่ถึงวินาที)
+class _DynamicGate:
+    """จำกัดจำนวนงานที่วิ่งพร้อมกัน — ปรับเพดานได้สดๆ ระหว่างรัน
+    (threading.Semaphore ปกติเปลี่ยนค่าไม่ได้ เลยทำเอง)  limit <= 0 = ไม่จำกัด"""
+    def __init__(self, limit):
+        self._cv = threading.Condition()
+        self._limit = int(limit)
+        self._active = 0
+
+    def set_limit(self, limit):
+        limit = int(limit)
+        with self._cv:
+            if limit != self._limit:
+                self._limit = limit
+                self._cv.notify_all()
+
+    def acquire(self, timeout=20.0):
+        """คืน True ถ้าจองคิวได้ (ต้อง release), False ถ้ารอนานเกิน timeout
+        (รอนานเกิน = ปล่อยผ่านไปเลย ดีกว่าให้บอททั้งตัวค้าง)"""
+        deadline = time.time() + timeout
+        with self._cv:
+            if self._limit <= 0:
+                return False   # ไม่จำกัด → ไม่ต้องนับ ไม่ต้อง release
+            while self._active >= self._limit:
+                remain = deadline - time.time()
+                if remain <= 0:
+                    return False
+                self._cv.wait(remain)
+            self._active += 1
+            return True
+
+    def release(self):
+        with self._cv:
+            if self._active > 0:
+                self._active -= 1
+            self._cv.notify()
+
+_SCREENCAP_GATE = _DynamicGate(SCREENCAP_MAX_CONCURRENT)
 
 # Launch cooldown: ห้าม cold-start เกมถี่เกินไป/เครื่อง — cold-start คือคำสั่งที่หนัก
 # ที่สุดสำหรับ MuMu (โหลด asset + init 3D ใหม่) ถ้า relaunch ซ้อนถี่ๆ → ANR
@@ -2299,6 +2582,7 @@ def fast_screencap(device):
 
 def _fast_screencap_raw(device):
     # ── per-device throttle ──
+    # (นอนรอ "นอกคิว" — ไม่งั้นจะกินโควตาเพดานรวมทั้งที่ยังไม่ได้ทำอะไร)
     serial = device.serial
     last = _LAST_SCREENCAP_TS.get(serial, 0.0)
     wait = _MIN_SCREENCAP_INTERVAL - (time.time() - last)
@@ -2306,6 +2590,16 @@ def _fast_screencap_raw(device):
         time.sleep(wait)
     _LAST_SCREENCAP_TS[serial] = time.time()
 
+    # ── เพดานรวมทั้งระบบ: จองคิวก่อนคุยกับ adb จริง ──
+    _gate_held = _SCREENCAP_GATE.acquire()
+    try:
+        return _screencap_io(device)
+    finally:
+        if _gate_held:
+            _SCREENCAP_GATE.release()
+
+def _screencap_io(device):
+    """ส่วนที่คุยกับ adb จริง (ถูกคุมด้วย _SCREENCAP_GATE จากตัวเรียก)"""
     conn = None
     try:
         conn = device.client.create_connection(timeout=device.client.timeout)
@@ -3212,11 +3506,66 @@ def _match_single(gray_img, find_path, threshold):
     inv = 1.0 / SCREENCAP_SCALE if SCREENCAP_SCALE != 1.0 else 1.0
     return [(int((x + tw // 2) * inv), int((y + th // 2) * inv)) for x, y, tw, th in rects]
 
+# ── ROI cache: จำตำแหน่งที่ "เจอรูปนั้นล่าสุด" แล้วรอบถัดไปเทียบเฉพาะบริเวณนั้นก่อน ──
+# กวาดเต็มจอ 1 เทมเพลต ≈ 12 ms / เทียบเฉพาะ ROI ≈ 0.3 ms (เร็วขึ้น ~40 เท่า)
+# get_screen_capture ยิงหา popup 12-18 เทมเพลตทุกเฟรม → ตรงนี้คือตัวกิน CPU อันดับ 1 ของบอท
+#
+# เก็บแยกต่อเธรด (= แยกต่อเครื่อง เพราะ 1 worker = 1 จอ) → ไม่ต้องแก้ signature ที่เรียก ~200 จุด
+_ROI_TLS = threading.local()
+
+# เทมเพลตที่ตัวเรียก "นับจำนวนจุดที่เจอ" (เช่น len(pts) >= 2) — ห้ามใช้ ROI
+# เพราะ ROI คืนจุดเดียวเสมอ จะทำให้การนับผิด
+_ROI_CACHE_EXCLUDE = {"verify.png", "verify.bmp"}
+
+def _roi_cache():
+    c = getattr(_ROI_TLS, "cache", None)
+    if c is None:
+        c = {}
+        _ROI_TLS.cache = c
+    return c
+
+def _match_in_roi(gray_img, find_path, threshold, hint):
+    """เทียบเทมเพลตเฉพาะกรอบเล็กๆ รอบพิกัดที่จำไว้
+    คืน [] ถ้าไม่เจอ → ให้ตัวเรียกถอยไปกวาดเต็มจอตามเดิม
+
+    หมายเหตุ: TM_CCOEFF_NORMED ให้คะแนนเท่าเดิมไม่ว่าจะครอปหรือไม่
+    (คะแนนขึ้นกับ template กับ patch ที่ทับอยู่เท่านั้น) → ผลลัพธ์ตรงกับการกวาดเต็มจอ"""
+    tmpl = load_template(find_path)
+    if tmpl is None:
+        return []
+    th, tw = tmpl.shape
+    H, W = gray_img.shape[0], gray_img.shape[1]
+    scale = SCREENCAP_SCALE if SCREENCAP_SCALE != 1.0 else 1.0
+    cx, cy = int(hint[0] * scale), int(hint[1] * scale)   # hint เป็นพิกัดจอจริง → กลับเป็นพิกัดในภาพ
+    pad = IMG_ROI_PAD
+    x0 = max(0, cx - tw // 2 - pad); x1 = min(W, cx + tw // 2 + pad)
+    y0 = max(0, cy - th // 2 - pad); y1 = min(H, cy + th // 2 + pad)
+    if (x1 - x0) < tw or (y1 - y0) < th:
+        return []
+    res = cv2.matchTemplate(gray_img[y0:y1, x0:x1], tmpl, cv2.TM_CCOEFF_NORMED)
+    _mn, mx, _ml, mloc = cv2.minMaxLoc(res)
+    if mx < threshold:
+        return []
+    inv = 1.0 / scale
+    return [(int((x0 + mloc[0] + tw // 2) * inv), int((y0 + mloc[1] + th // 2) * inv))]
+
 def img_search(gray_img, find_path, threshold=0.8):
     """Returns list of (cx, cy) match centers in DEVICE coordinates.
     Tries .bmp first, then .png (or vice versa) automatically."""
     if gray_img is None:
         return []
+
+    use_roi = (IMG_ROI_CACHE and os.path.basename(find_path) not in _ROI_CACHE_EXCLUDE)
+    key = (find_path, threshold)
+    if use_roi:
+        cache = _roi_cache()
+        hint = cache.get(key)
+        if hint is not None:
+            pts = _match_in_roi(gray_img, find_path, threshold, hint)
+            if pts:
+                return pts          # เจอที่เดิม → จบ ไม่ต้องกวาดทั้งจอ
+            cache.pop(key, None)    # ไม่เจอที่เดิม → ลืมทิ้ง แล้วกวาดเต็มจอต่อข้างล่าง
+
     points = _match_single(gray_img, find_path, threshold)
     if not points:
         base, ext = os.path.splitext(find_path)
@@ -3224,6 +3573,8 @@ def img_search(gray_img, find_path, threshold=0.8):
         alt_path = base + alt_ext
         if os.path.exists(alt_path):
             points = _match_single(gray_img, alt_path, threshold)
+    if use_roi and points:
+        _roi_cache()[key] = points[0]   # จำตำแหน่งไว้ใช้รอบหน้า
     return points
 
 
@@ -3431,6 +3782,53 @@ def is_hero_match(hero_name, ocr_text):
 
     return False
 
+def _extar_file_for(hero_name):
+    """หาชื่อไฟล์รูปของ EXTAR_FIND จากชื่อฮีโร่ (ไม่สนตัวพิมพ์ใหญ่-เล็ก / ช่องว่างหัวท้าย)
+    ไม่ได้อยู่ในลิสต์ → None"""
+    if not EXTAR_FIND:
+        return None
+    key = str(hero_name).strip().lower()
+    for k, v in EXTAR_FIND.items():
+        if str(k).strip().lower() == key and v:
+            return str(v).strip()
+    return None
+
+def extar_img_confirm(img, hero_name, serial, step_tag="Extar", cache=None):
+    """EXTAR_FIND — ฮีโร่บางคนต้อง "OCR เจอชื่อ" + "เจอรูปในจอ" ถึงจะนับว่าเจอจริง
+    (กัน OCR อ่านผิดแล้วนับเกิน)
+
+      - ชื่อไม่ได้อยู่ใน EXTAR_FIND   → True (ใช้ OCR อย่างเดียวเหมือนเดิม)
+      - อยู่ในลิสต์ + เจอรูป          → True
+      - อยู่ในลิสต์ + ไม่เจอรูป       → False (ไม่นับว่าเจอ)
+      - ไฟล์รูปหาย                   → True + log เตือน (ไม่บล็อกการทำงาน)
+
+    cache: dict ว่างๆ ส่งเข้ามาได้ — เฟรมเดียวกันเทียบรูปเดิมซ้ำหลาย lock จะใช้ผลเดิม
+    """
+    fname = _extar_file_for(hero_name)
+    if not fname:
+        return True
+    if img is None:
+        return True
+
+    if cache is not None and fname in cache:
+        return cache[fname]
+
+    path = os.path.join(IMG_DIR, EXTAR_SUBDIR, fname)
+    base, _ext = os.path.splitext(path)
+    if not (os.path.exists(path) or os.path.exists(base + ".png") or os.path.exists(base + ".bmp")):
+        gui_log(serial, f"⚠️ EXTAR_FIND: ไม่พบไฟล์รูป {path} — ใช้ผล OCR อย่างเดียว", step=f"{step_tag} No Img")
+        return True   # ไม่ cache — เผื่อเพิ่งวางไฟล์รูปทีหลัง
+
+    pts = img_search(img, path, threshold=EXTAR_FIND_THRESHOLD)
+    ok = bool(pts)
+    if ok:
+        gui_log(serial, f"EXTAR ✅ {hero_name}: OCR เจอ + รูป {fname} match ที่ {pts[0]}", step=f"{step_tag} OK")
+    else:
+        gui_log(serial, f"EXTAR ❌ {hero_name}: OCR เจอ แต่ไม่เจอรูป {fname} → ไม่นับว่าเจอ", step=f"{step_tag} Reject")
+    if cache is not None:
+        cache[fname] = ok
+    return ok
+
 def parse_hero_config(config_list):
     """
     Parses a list of hero configurations.
@@ -3525,6 +3923,42 @@ def _safe_copy(src, dest):
     if d:
         os.makedirs(d, exist_ok=True)
     shutil.copy2(src, dest)
+
+def extract_user_code(dat_path):
+    """อ่าน "user_code" จากข้างในไฟล์ .dat (JSON) เช่น {"user_code":"ASCV659902699",...}
+    คืน None ถ้าอ่านไม่ได้ (ให้ตัวเรียกไป fallback ใช้ชื่อไฟล์เดิม)"""
+    import json
+    try:
+        with open(dat_path, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read().strip()
+        s, e = content.find("{"), content.rfind("}")
+        if s != -1 and e != -1:
+            uc = json.loads(content[s:e + 1]).get("user_code")
+            if uc:
+                return str(uc).strip()
+    except Exception:
+        pass
+    return None
+
+def export_base_name(file_path, original_name, strip_dash=False):
+    """ชื่อไฟล์ที่จะใช้ตอน export — ดึง user_code "จากข้างในไฟล์" มาเป็นชื่อ
+    เพราะชื่อไฟล์ขาเข้าอาจไม่ตรงกับ user_code จริงของบัญชีนั้น
+    (เก็บ coin tag -[เลข] ที่ติดมากับชื่อเดิมไว้ด้วย)
+
+    อ่าน user_code ไม่ได้ → fallback ตัด prefix จากชื่อเดิมแบบเดิมเป๊ะๆ
+    strip_dash: ตัดหลัง '-' ด้วยไหม (บาง flow ตัด, flow ของ find_hero ไม่ตัดเพราะต้องเก็บ coin tag)
+    """
+    uc = extract_user_code(file_path) if file_path else None
+    if uc:
+        import re as _re_ex
+        m = _re_ex.search(r"-\[\d+\]", os.path.splitext(original_name or "")[0])
+        return f"{uc}{m.group(0) if m else ''}.dat"
+    clean = original_name
+    if "+" in clean:
+        clean = clean.split("+")[-1]
+    elif strip_dash and "-" in clean:
+        clean = clean.split("-")[-1]
+    return clean
 
 _NET_TIME_OFFSET   = 0.0     # วินาที = (เวลาโลกจริง) - (เวลาเครื่อง)
 _NET_TIME_SYNCED   = False
@@ -3682,7 +4116,12 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
                  ไว้หน้าชื่อไฟล์ตอน export.
     """
     gui_log(serial, "Find Hero sequence started...", step="Find Hero", status="working")
-    
+
+    # ปิด floating fixout ตลอด sequence fin (fin1..fin13)
+    # — หน้า fin มีปุ่มคล้าย fixout จับผิดแล้ว Back spam มั่ว หลุด sequence
+    #   (เปิดกลับอัตโนมัติตอนเริ่ม cycle ใหม่ — find_hero_mode จบรอบเสมอ)
+    DEVICE_DISABLE_FIXOUT[serial] = True
+
     def _check_fixteam(img_current):
         pts_team = img_search(img_current, os.path.join(IMG_DIR, "fixteam.bmp"), threshold=0.95)
         if pts_team:
@@ -4111,6 +4550,8 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
             lock1_matches = set()
             lock2_matches = set()
             lock3_matches = set()
+            # เฟรมเดียวกันทั้ง 3 lock → เทียบรูป EXTAR_FIND ครั้งเดียวพอ (ใช้ผลซ้ำ)
+            extar_cache = {}
 
             # Lock 1 Scanning
             lock1_region = Region(154, 134, 679, 39)
@@ -4119,6 +4560,9 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
             gui_log(serial, f"Lock 1 OCR: {lock1_text if lock1_text else '<EMPTY>'}", step="Scan Lock 1")
             for h in target_heroes:
                 if is_hero_match(h, lock1_text):
+                    # อยู่ใน EXTAR_FIND → ต้องเจอรูปในจอด้วย ถึงจะนับ
+                    if not extar_img_confirm(img, h, serial, step_tag="Extar L1", cache=extar_cache):
+                        continue
                     lock1_matches.add(h)
                     gui_log(serial, f"Lock 1 Match: {h}", step=f"⭐ {h}")
 
@@ -4129,6 +4573,8 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
             gui_log(serial, f"Lock 2 OCR: {lock2_text if lock2_text else '<EMPTY>'}", step="Scan Lock 2")
             for h in target_heroes:
                 if is_hero_match(h, lock2_text):
+                    if not extar_img_confirm(img, h, serial, step_tag="Extar L2", cache=extar_cache):
+                        continue
                     lock2_matches.add(h)
                     gui_log(serial, f"Lock 2 Match: {h}", step=f"⭐ {h}")
 
@@ -4139,6 +4585,8 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
             gui_log(serial, f"Lock 3 OCR: {lock3_text if lock3_text else '<EMPTY>'}", step="Scan Lock 3")
             for h in target_heroes:
                 if is_hero_match(h, lock3_text):
+                    if not extar_img_confirm(img, h, serial, step_tag="Extar L3", cache=extar_cache):
+                        continue
                     lock3_matches.add(h)
                     gui_log(serial, f"Lock 3 Match: {h}", step=f"⭐ {h}")
 
@@ -4169,11 +4617,9 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
     device.shell("am force-stop jp.konami.pesam")
     time.sleep(1)
 
-    clean_orig = original_name
-    # ตัด hero/coin prefix (Hero+ID หรือ [เลข]+ID -> ID) แต่ "เก็บ" coin tag -[เลข] ในชื่อเดิมไว้
-    #   เช่น  Aubameyang+ASPZ...-[30].dat -> ASPZ...-[30].dat ,  ASPZ...-[30].dat -> คงเดิม
-    if "+" in clean_orig:
-        clean_orig = clean_orig.split("+")[-1]
+    # ชื่อไฟล์ตอน export = user_code จริงที่อ่านจากข้างในไฟล์ .dat (เก็บ coin tag -[เลข] ไว้)
+    #   อ่านไม่ได้ → fallback ตัด hero/coin prefix จากชื่อเดิม (Hero+ID -> ID) แบบเดิม
+    clean_orig = export_base_name(file_path, original_name)
 
     if found_heroes:
         num_heroes = len(found_heroes)
@@ -4390,11 +4836,32 @@ def click_img_until_gone(device, cycle_start, serial, img_path, x, y,
     gui_log(serial, f"{name} ยังไม่หายใน {timeout:.0f}s — ไปต่อ", step=f"{tag} Timeout")
     return False
 
-def click_next_until_gone(device, cycle_start, serial, x, y, stuck_secs=8.0, timeout=60.0, tag="Next"):
-    """กด next.bmp — ค้างเกิน 8 วิ กดซ้ำจนหาย (wrapper ของ click_img_until_gone)"""
+def click_next_until_gone(device, cycle_start, serial, x, y, stuck_secs=5.0, timeout=60.0, tag="Next"):
+    """กด next.bmp — ค้างเกิน 5 วิ กดซ้ำจนหาย (wrapper ของ click_img_until_gone)"""
     return click_img_until_gone(device, cycle_start, serial,
                                 os.path.join(IMG_DIR, "next.bmp"), x, y,
                                 stuck_secs=stuck_secs, timeout=timeout, tag=tag)
+
+def find_and_click_optional(device, cycle_start, serial, img_name, secs=5.0,
+                            threshold=0.8, tag="Optional", settle=1.0):
+    """แวะหารูปนี้ภายใน `secs` วิ — เจอ → กด แล้วไปต่อ | ไม่เจอ → ข้ามไปต่อตามปกติ (ไม่ถือว่าผิด)
+    ใช้กับ popup ที่ "บางทีก็โผล่ บางทีก็ไม่โผล่". คืน True ถ้าเจอและกดแล้ว"""
+    gui_log(serial, f"แวะหา {img_name} ({secs:.0f}s)...", step=f"{tag} Wait")
+    deadline = time.time() + secs
+    while time.time() < deadline:
+        check_device_reset(serial, cycle_start)
+        img = get_screen_capture(device)
+        if img is not None:
+            pts = img_search(img, os.path.join(IMG_DIR, img_name), threshold=threshold)
+            if pts:
+                x, y = pts[0]
+                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                gui_log(serial, f"Clicked {img_name} at ({x},{y})", step=f"{tag} Click")
+                time.sleep(settle)
+                return True
+        time.sleep(0.3)
+    gui_log(serial, f"{img_name} ไม่เจอใน {secs:.0f}s — ข้าม ไปต่อ", step=f"{tag} Skip")
+    return False
 
 def _g500_checkpoint_then_next(device, cycle_start, serial, cp_secs=30, next_secs=20, tag="G500"):
     """หา checkpointgacha.bmp → เจอแล้วหา next.bmp → กด (ใช้ปิดหน้าผลสุ่มก่อนไป step ต่อไป)
@@ -4620,7 +5087,16 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path, coin_
                 pts = img_search(img, os.path.join(IMG_DIR, name))
                 if pts:
                     x, y = pts[0]
-                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                    if i == 2:
+                        # gacha2 — กดซ้ำไปเรื่อยๆ จนกว่าจะหายไปจริง ค่อยไปต่อ
+                        click_img_until_gone(device, cycle_start, serial,
+                                             os.path.join(IMG_DIR, name),
+                                             x, y, stuck_secs=3.0, timeout=60.0, tag="gacha2")
+                        # หลัง gacha2 → แวะหา ad-rewardfix1 5 วิ (ไม่เจอ = ข้ามไปต่อ ไม่เป็นไร)
+                        find_and_click_optional(device, cycle_start, serial,
+                                                "ad-rewardfix1.bmp", secs=5.0, tag="ad-reward")
+                    else:
+                        device.shell(f"input swipe {x} {y} {x} {y} 100")
                     time.sleep(1.2)
                     break
             time.sleep(0.3)
@@ -4726,7 +5202,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path, coin_
                     break
             miss_count += 1
             gui_log(serial, f"[Loop {loop_num}] gachafree1 not here, swiping... ({miss_count}/{max_miss})", step="Swipe")
-            device.shell("input swipe 618 308 54 306 3500")
+            device.shell("input swipe 618 308 54 306 6000")
             time.sleep(2.0)
 
         if not found_free:
@@ -4980,9 +5456,8 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path, coin_
     device.shell("am force-stop jp.konami.pesam")
     time.sleep(1)
 
-    clean_orig = original_name
-    if "+" in clean_orig: clean_orig = clean_orig.split("+")[-1]
-    elif "-" in clean_orig: clean_orig = clean_orig.split("-")[-1]
+    # ชื่อไฟล์ตอน export = user_code จริงจากข้างในไฟล์ .dat (อ่านไม่ได้ → ใช้ชื่อเดิมแบบเดิม)
+    clean_orig = export_base_name(file_path, original_name, strip_dash=True)
 
     # ถ้า NOSCAN=1 → ส่งไป fast-random/ เสมอ
     if NOSCAN == 1:
@@ -5171,10 +5646,31 @@ def process_device_login(device):
             #              (2) เริ่มทำงาน/ย้ายไฟล์มั่วบนเครื่องที่ offline/ค้าง
             # ยังไม่ได้ pick file (original_name=None) → continue ปลอดภัย ไม่มีไฟล์ค้าง
             if not is_device_online(device):
-                gui_log(serial, "⚠️ Device OFFLINE — reconnecting & waiting...", step="Offline", status="stuck")
+                off_since = DEVICE_OFFLINE_SINCE.setdefault(serial, time.time())
+                off_for   = time.time() - off_since
+                gui_log(serial, f"⚠️ Device OFFLINE — reconnecting & waiting... ({off_for:.0f}s)",
+                        step="Offline", status="stuck")
                 try_reconnect_device(serial)
+
+                # reconnect ติดเลย → กลับไปทำงานต่อ ไม่ต้องรีสตาร์ทอะไร
+                if is_device_online(device):
+                    DEVICE_OFFLINE_SINCE.pop(serial, None)
+                    gui_log(serial, "✅ กลับมา online แล้ว — เริ่ม cycle ใหม่", step="Online", status="working")
+                    continue
+
+                # offline ติดกันนานเกินกำหนด = adb connect ไม่ช่วยแล้ว (instance ค้าง/ดับไปเอง)
+                # → ปิด-เปิด MuMu "เฉพาะเครื่องนี้ตัวเดียว" แล้วเริ่มกระบวนการใหม่ตั้งแต่ต้น
+                if AUTO_RESTART_OFFLINE and off_for >= OFFLINE_RESTART_AFTER:
+                    if restart_mumu_instance(serial):
+                        DEVICE_OFFLINE_SINCE.pop(serial, None)
+                        continue   # กลับไปต้น while → เช็ค online → เริ่ม cycle ใหม่ตามปกติ
+
                 time.sleep(10)
                 continue
+
+            # online อยู่ — ถ้าเพิ่งฟื้นจาก offline ให้ล้างตัวจับเวลาทิ้ง
+            if DEVICE_OFFLINE_SINCE.pop(serial, None) is not None:
+                gui_log(serial, "✅ กลับมา online แล้ว", step="Online", status="working")
 
             gui_log(serial, "--- Starting New Cycle ---", step="New Cycle", status="working")
 
@@ -6218,9 +6714,8 @@ def process_device_login(device):
                     device.shell("am force-stop jp.konami.pesam")
                     time.sleep(1)
 
-                    clean_orig = original_name
-                    if "+" in clean_orig: clean_orig = clean_orig.split("+")[-1]
-                    elif "-" in clean_orig: clean_orig = clean_orig.split("-")[-1]
+                    # ชื่อไฟล์ตอน export = user_code จริงจากข้างในไฟล์ .dat
+                    clean_orig = export_base_name(file_path, original_name, strip_dash=True)
 
                     dest_dir = LOGIN_SUCCESS_DIR
                     dest = os.path.join(dest_dir, clean_orig)
@@ -6354,7 +6849,8 @@ def process_device_login(device):
                     time.sleep(1)
                 gui_log(serial, "box3 not seen for 5s, moving to box4", step="box3-done")
 
-                # box4
+                # box4 — เจอแล้ว "กดซ้ำไปเรื่อยๆ จนกว่า box4 จะหายไปจริง" ค่อยไปทำ gacha
+                #        (เดิมกดครั้งเดียวแล้วไปต่อเลย → box4 ยังค้างอยู่ แต่ไปเริ่ม gacha แล้ว)
                 gui_log(serial, "Waiting box4.bmp...", step="box4")
                 while True:
                     check_device_reset(serial, cycle_start)
@@ -6363,7 +6859,11 @@ def process_device_login(device):
                         pts = img_search(img, os.path.join(IMG_DIR, "box4.bmp"))
                         if pts:
                             x, y = pts[0]
-                            device.shell(f"input swipe {x} {y} {x} {y} 100")
+                            # ค้างเกิน 3 วิ กดซ้ำ วนจนหาย (90s ยังไม่หาย → log แล้วไปต่อ กันค้างทั้งรอบ)
+                            if click_img_until_gone(device, cycle_start, serial,
+                                                    os.path.join(IMG_DIR, "box4.bmp"),
+                                                    x, y, stuck_secs=3.0, timeout=90.0, tag="box4"):
+                                gui_log(serial, "box4.bmp หายแล้ว → ไปทำ gacha ต่อ", step="box4 OK")
                             time.sleep(4)
                             break
                     time.sleep(1)
@@ -6608,7 +7108,16 @@ def process_device_login(device):
                                         pts = img_search(img, os.path.join(IMG_DIR, name))
                                         if pts:
                                             x, y = pts[0]
-                                            device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                            if i == 2:
+                                                # gacha2 — กดซ้ำไปเรื่อยๆ จนกว่าจะหายไปจริง ค่อยไปต่อ
+                                                click_img_until_gone(device, cycle_start, serial,
+                                                                     os.path.join(IMG_DIR, name),
+                                                                     x, y, stuck_secs=3.0, timeout=60.0, tag="gacha2")
+                                                # หลัง gacha2 → แวะหา ad-rewardfix1 5 วิ (ไม่เจอ = ข้ามไปต่อ ไม่เป็นไร)
+                                                find_and_click_optional(device, cycle_start, serial,
+                                                                        "ad-rewardfix1.bmp", secs=5.0, tag="ad-reward")
+                                            else:
+                                                device.shell(f"input swipe {x} {y} {x} {y} 100")
                                             time.sleep(4)
                                             break
                                     time.sleep(1)
@@ -6710,12 +7219,12 @@ def process_device_login(device):
                                                              os.path.join(IMG_DIR, "gacha4v2.bmp"),
                                                              x_4v2, y_4v2, stuck_secs=3.0, timeout=None, tag="G4v2-Click")
 
-                                        # หา gacha5v2 — วนจนกว่าจะเจอ (ทางออกอื่น: เจอ out900 / รอเกิน 150 วิ)
+                                        # หา gacha5v2 — วนจนกว่าจะเจอ (ทางออกอื่น: เจอ out900 / รอเกิน 70 วิ)
                                         #   แวะหา next.bmp ด้วย — หน้าผลสุ่มค้างอยู่จะบัง gacha5v2 ไว้
                                         clicked_g5v2 = False
                                         g5v2_wait_start = time.time()
                                         g5v2_last_log = 0.0
-                                        G5V2_MAX_WAIT = 150   # รอเกินนี้ = ข้ามไปทำ gacha500 ต่อเลย
+                                        G5V2_MAX_WAIT = 70    # รอเกินนี้ = ข้ามไปทำ gacha500 ต่อเลย
                                         while True:
                                             check_device_reset(serial, cycle_start)
                                             img = get_screen_capture(device)
@@ -7348,9 +7857,8 @@ def process_device_login(device):
             device.shell("am force-stop jp.konami.pesam")
             time.sleep(1)
 
-            clean_orig = original_name
-            if "+" in clean_orig: clean_orig = clean_orig.split("+")[-1]
-            elif "-" in clean_orig: clean_orig = clean_orig.split("-")[-1]
+            # ชื่อไฟล์ตอน export = user_code จริงจากข้างในไฟล์ .dat
+            clean_orig = export_base_name(file_path, original_name, strip_dash=True)
 
             if DO_GACHA == 1:
                 if NOSCAN == 1:
@@ -7505,7 +8013,7 @@ def _disable_console_quickedit():
 def apply_config_now(reason=""):
     """โหลด config.py ใหม่แล้วอัปเดตตัวแปร runtime ทันที (ใช้ได้ทุกที่ ทุกเวลา)
     คืน True ถ้าสำเร็จ — ตัวนี้คือหัวใจของ 'แก้ config ปุ๊บ มีผลปั๊บ'"""
-    global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA, NEW_GACHA_SWIPE, GACHA_LOOP_LIMIT, GACHA500, COIN_GACHA_THRESHOLD, ONE_GACHA500, HERO_LIST, HERO_LIST_FREE
+    global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA, NEW_GACHA_SWIPE, GACHA_LOOP_LIMIT, GACHA500, COIN_GACHA_THRESHOLD, ONE_GACHA500, HERO_LIST, HERO_LIST_FREE, EXTAR_FIND, EXTAR_FIND_THRESHOLD, AUTO_RESTART_OFFLINE, OFFLINE_RESTART_AFTER, OFFLINE_BOOT_WAIT, OFFLINE_RESTART_COOLDOWN, SCREENCAP_MAX_CONCURRENT, SCREENCAP_INTERVAL, _MIN_SCREENCAP_INTERVAL, IMG_ROI_CACHE, IMG_ROI_PAD
     try:
         import importlib
         import config as cfg
@@ -7542,6 +8050,21 @@ def apply_config_now(reason=""):
         # รายชื่อฮีโร่ก็อัปเดตสดด้วย (แก้ list ใน config แล้วมีผลทันที)
         HERO_LIST = getattr(cfg, 'HERO_LIST', HERO_LIST)
         HERO_LIST_FREE = getattr(cfg, 'HERO_LIST_FREE', HERO_LIST_FREE)
+        # EXTAR_FIND (ยืนยันด้วยรูป) — แก้ใน config แล้วมีผลทันทีเหมือนกัน
+        EXTAR_FIND = getattr(cfg, 'EXTAR_FIND', getattr(cfg, 'extar_find', {})) or {}
+        EXTAR_FIND_THRESHOLD = getattr(cfg, 'EXTAR_FIND_THRESHOLD', 0.8)
+        # Auto restart เครื่องที่ adb หลุด
+        AUTO_RESTART_OFFLINE = getattr(cfg, 'AUTO_RESTART_OFFLINE', 1)
+        OFFLINE_RESTART_AFTER = getattr(cfg, 'OFFLINE_RESTART_AFTER', 90)
+        OFFLINE_BOOT_WAIT = getattr(cfg, 'OFFLINE_BOOT_WAIT', 240)
+        OFFLINE_RESTART_COOLDOWN = getattr(cfg, 'OFFLINE_RESTART_COOLDOWN', 600)
+        # โหลดที่ยิงใส่ adb — ปรับได้สดๆ ระหว่างบอทวิ่ง (ไม่ต้องรีสตาร์ท)
+        SCREENCAP_MAX_CONCURRENT = getattr(cfg, 'SCREENCAP_MAX_CONCURRENT', 12)
+        SCREENCAP_INTERVAL = getattr(cfg, 'SCREENCAP_INTERVAL', 0.25)
+        _MIN_SCREENCAP_INTERVAL = SCREENCAP_INTERVAL
+        _SCREENCAP_GATE.set_limit(SCREENCAP_MAX_CONCURRENT)
+        IMG_ROI_CACHE = getattr(cfg, 'IMG_ROI_CACHE', 1)
+        IMG_ROI_PAD = getattr(cfg, 'IMG_ROI_PAD', 40)
         # TIMEOUT_ENABLE / TIMEOUT_MINUTES ไม่ต้องเก็บเป็น global —
         # check_device_reset อ่านสดจาก config ทุกครั้งอยู่แล้ว
         return True
@@ -7633,6 +8156,7 @@ def main():
         global bot_running
         bot_running = True
         start_cpu_balancer()   # เกลี่ย CPU ของ MuMu ข้าม socket (กันโหลดกอง group เดียวจนค้าง)
+        refresh_serial_index_map()   # จำ serial -> MuMu index ไว้ตอนทุกเครื่องยังปกติ (ไว้สั่ง restart ตอนหลุด)
         client = AdbClient(host="127.0.0.1", port=5037)
         for i, serial in enumerate(devices):
             device = client.device(serial)
