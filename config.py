@@ -239,15 +239,15 @@ LOGIN_FAST = 0
 
 # ── Timeout ───────────────────────────────────────
 # 1 = Enable, 0 = Disable
-TIMEOUT_ENABLE = 0
+TIMEOUT_ENABLE = 1
 
 # Timeout duration in minutes
-TIMEOUT_MINUTES = 10
+TIMEOUT_MINUTES = 30
 
 # ── Autorun on Launch ──────────────────────────────
 # 1 = เปิดโปรแกรมแล้วสแกนและรันบอทอัตโนมัติทันที
 # 0 = ปิดการทำงานอัตโนมัติ (ต้องกดปุ่ม START เอง)
-AUTORUN = 0
+AUTORUN = 1
 
 # ── Silent Update Mode ─────────────────────────────
 # 'keep'  = สั่งอัปเดตแบบไม่ลบไฟล์เดิม (รักษาข้อมูลรหัสไอดีและฮีโร่ทั้งหมด)
