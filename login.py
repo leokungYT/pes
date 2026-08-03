@@ -2668,6 +2668,23 @@ def get_screen_capture(device):
                 if img_fn1re is not None:
                     img = img_fn1re
 
+            # === fixneterror floating check ===
+            # เจอ fixneterror (เน็ตเออเรอร์) → ปิดแอพแล้วเข้าใหม่ไฟล์เดิมเฉยๆ (แค่นั้น)
+            if img_search(img, os.path.join(IMG_DIR, "fixneterror.bmp")):
+                time.sleep(1.5)   # กันจังหวะ popup กำลังปิดตัวเองพอดี → เช็คซ้ำให้ชัวร์ก่อน
+                img_nere = fast_screencap(device)
+                if img_nere is not None and img_search(img_nere, os.path.join(IMG_DIR, "fixneterror.bmp")):
+                    serial_ne = device.serial
+                    original_name = DEVICE_FILE_ASSIGNMENTS.get(serial_ne)
+                    gui_log(serial_ne, "fixneterror detected! Closing app & re-entering (same file)...", step="Fix Net Error")
+                    if original_name:
+                        trigger_restart_from_play8(device, serial_ne, original_name, reason="fixneterror")
+                    device.shell("am force-stop jp.konami.pesam")
+                    time.sleep(1)
+                    raise DeviceResetException("fixneterror detected (no file)")
+                if img_nere is not None:
+                    img = img_nere
+
             # === fixtip floating check ===
             pts1 = img_search(img, os.path.join(GETQUEST_IMG_DIR, "fixtip1.bmp")) if GETQUEST == 1 else None
             if pts1:
@@ -2752,7 +2769,17 @@ def get_screen_capture(device):
                 gui_log(device.serial, "Floating: download.bmp found! Clicking...", step="Floating")
                 x, y = dl_pts[0]
                 device.shell(f"input swipe {x} {y} {x} {y} 100")
-            
+
+            # === download-new floating check (เช็คตลอดทุกเฟรม) ===
+            #   เจอ download-new1 (popup ดาวน์โหลด/อัปเดต) → กดปุ่ม download-new2
+            if img_search(img, os.path.join(IMG_DIR, "download-new1.bmp")):
+                dn2_pts = img_search(img, os.path.join(IMG_DIR, "download-new2.bmp"))
+                if dn2_pts:
+                    x, y = dn2_pts[0]
+                    device.shell(f"input swipe {x} {y} {x} {y} 100")
+                    gui_log(device.serial, f"download-new1 found! Clicked download-new2 at ({x},{y})", step="Download New")
+                    time.sleep(1)
+
             fg_pts = img_search(img, os.path.join(IMG_DIR, "fixgoogle.bmp"))
             if fg_pts:
                 gui_log(device.serial, "Floating: fixgoogle.bmp found! Clicking...", step="Floating")
