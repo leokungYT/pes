@@ -4994,9 +4994,8 @@ def check_unlock_hero_before_next(device, cycle_start, serial, loop_num):
         if img_unlock is not None:
             pts_unlock = img_search(img_unlock, os.path.join(IMG_DIR, "unlock-hero1.bmp"))
             if pts_unlock:
-                x_un, y_un = pts_unlock[0]
-                device.shell(f"input swipe {x_un} {y_un} {x_un} {y_un} 100")
-                gui_log(serial, f"[Loop {loop_num}] unlock-hero1.bmp found! Clicked.", step="Unlock-Hero")
+                device.shell("input keyevent 4")
+                gui_log(serial, f"[Loop {loop_num}] unlock-hero1.bmp found! Pressed back (once).", step="Unlock-Hero")
                 time.sleep(2)
                 return True
         time.sleep(0.5)
@@ -7606,10 +7605,9 @@ def process_device_login(device):
                                                 if img_unlock is not None:
                                                     pts_unlock = img_search(img_unlock, os.path.join(IMG_DIR, "unlock-hero1.bmp"))
                                                     if pts_unlock:
-                                                        x_un, y_un = pts_unlock[0]
-                                                        device.shell(f"input swipe {x_un} {y_un} {x_un} {y_un} 100")
-                                                        gui_log(serial, "unlock-hero1.bmp found! Clicking it.", step="Unlock-Hero")
-                                                        print(f"[{serial}] unlock-hero1.bmp found! Clicking it.")
+                                                        device.shell("input keyevent 4")
+                                                        gui_log(serial, "unlock-hero1.bmp found! Pressed back (once).", step="Unlock-Hero")
+                                                        print(f"[{serial}] unlock-hero1.bmp found! Pressed back (once).")
                                                         time.sleep(2)
                                                         break
                                                 time.sleep(0.5)
