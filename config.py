@@ -60,7 +60,7 @@ ONE_GACHA500 = 0
 # ── Gacha + Check Mode ──────────────────────────────
 # 1 = สุ่มกาชาเสร็จแล้วกด backhome ต่อด้วยค้นหาฮีโร่ทันที
 # 0 = ข้าม
-GACHA_CHECK = 0
+GACHA_CHECK = 1
 
 # ── Gacha + Find Mode (DO_GACHA) ────────────────────
 # 1 = สุ่มกาชาแบบเสียเงิน (DO_GACHA) เสร็จแล้ว "ไม่ต้อง clear app"
@@ -86,7 +86,7 @@ LOGIN_SUCCESS_DIR = "login-success"
 # ── Find Hero Sequence ─────────────────────────────
 # 1 = ทำงาน fin1-fin8 และค้นหาฮีโร่ตามภาพ
 # 0 = ข้าม
-FIND_HERO = 0
+FIND_HERO = 1
 
 # แมพไฟล์ภาพฮีโร่เข้ากับชื่อฮีโร่
 HERO_IMG_MAP = {
@@ -98,7 +98,7 @@ HERO_IMG_MAP = {
 # ── Gacha Free Sequence ───────────────────────────
 # 1 = ทำ gacha free หลังจบ box (gacha1 → gacha2 → เลื่อนหา gachafree1)
 # 0 = ข้าม
-GACHA_FREE = 1
+GACHA_FREE = 0
 
 # จำนวนลูปย่อยที่ต้องการสุ่มกาชาฟรี (เช่น 2, 3, 5)
 GACHA_FREE_LOOPS = 10
@@ -247,7 +247,7 @@ TIMEOUT_MINUTES = 10
 # ── Autorun on Launch ──────────────────────────────
 # 1 = เปิดโปรแกรมแล้วสแกนและรันบอทอัตโนมัติทันที
 # 0 = ปิดการทำงานอัตโนมัติ (ต้องกดปุ่ม START เอง)
-AUTORUN = 1
+AUTORUN = 0
 
 # ── Silent Update Mode ─────────────────────────────
 # 'keep'  = สั่งอัปเดตแบบไม่ลบไฟล์เดิม (รักษาข้อมูลรหัสไอดีและฮีโร่ทั้งหมด)

@@ -3890,20 +3890,60 @@ def pick_next_file():
     Thread-safe: pick ONE .dat from input-id that is NOT already in use.
     หมายเหตุ: ไม่ข้ามไฟล์ที่ชื่อซ้ำกับโฟลเดอร์ done อีกแล้ว → ประมวลผลซ้ำได้
     (ผลลัพธ์จะทับไฟล์เดิมที่ชื่อเดียวกัน + อัปเวลาเป็นปัจจุบัน)
+    ไม่มีไฟล์เหลือใน input-id → ดึงไฟล์จาก timeout/ กลับมาใส่ input-id แล้วสแกนซ้ำอีกรอบ
     Returns (full_path, basename) or (None, None).
     """
     with file_pick_lock:
-        for f in sorted(glob.glob(os.path.join(INPUT_DIR, "*.dat"))):
-            name = os.path.basename(f)
-            if name in in_use_files:          # กำลัง process อยู่ในรอบนี้ → ข้าม (กันแย่งไฟล์)
-                continue
-            in_use_files.add(name)
-            try:
-                _safe_copy(f, os.path.join(RUN_FILE_DIR, name))
-            except Exception:
-                pass
-            return f, name
+        for attempt in (0, 1):
+            for f in sorted(glob.glob(os.path.join(INPUT_DIR, "*.dat"))):
+                name = os.path.basename(f)
+                if name in in_use_files:          # กำลัง process อยู่ในรอบนี้ → ข้าม (กันแย่งไฟล์)
+                    continue
+                in_use_files.add(name)
+                try:
+                    _safe_copy(f, os.path.join(RUN_FILE_DIR, name))
+                except Exception:
+                    pass
+                return f, name
+            # รอบแรกไม่เจอไฟล์ว่าง → รีไซเคิลไฟล์จาก timeout/ แล้ววนหาใหม่อีกรอบ
+            if attempt == 0:
+                moved = move_timeout_to_input()
+                if not moved:
+                    break
+                cprint(f"♻️ input-id หมด → ย้าย {moved} ไฟล์จาก {TIMEOUT_DIR}/ กลับเข้า {INPUT_DIR}/")
+                if gui_instance:
+                    try:
+                        gui_instance.log(f"♻️ input-id หมด → ย้าย {moved} ไฟล์จาก {TIMEOUT_DIR}/ กลับเข้า {INPUT_DIR}/")
+                    except Exception:
+                        pass
         return None, None
+
+def move_timeout_to_input():
+    """ย้ายไฟล์ทั้งหมดจาก timeout/ → input-id/ (คืนจำนวนไฟล์ที่ย้าย)
+    ใช้ตอน input-id หมด → เอาไฟล์ที่ timeout ไปกลับมาลองใหม่ ไม่ให้ค้างทิ้งไว้เฉยๆ
+    *** ต้องเรียกใต้ file_pick_lock เท่านั้น (แตะ in_use_files) ***"""
+    moved = 0
+    base = os.path.dirname(os.path.abspath(__file__))
+    src_dir = os.path.join(base, TIMEOUT_DIR)
+    dst_dir = os.path.join(base, INPUT_DIR)
+    if not os.path.isdir(src_dir):
+        return 0
+    os.makedirs(dst_dir, exist_ok=True)
+    for f in sorted(glob.glob(os.path.join(src_dir, "*.dat"))):
+        if not os.path.isfile(f):
+            continue
+        name = os.path.basename(f)
+        if name in in_use_files:      # เครื่องอื่นกำลัง process ชื่อนี้อยู่ → ไม่แตะ
+            continue
+        dest = os.path.join(dst_dir, name)
+        try:
+            if os.path.exists(dest):
+                os.remove(dest)
+            shutil.move(f, dest)
+            moved += 1
+        except Exception:
+            pass
+    return moved
 
 def release_file(name):
     """ปล่อยไฟล์ออกจาก in-use set และลบออกจาก run-file."""
@@ -5136,15 +5176,26 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path, coin_
         max_miss = 10
         next_first_seen = None  # ติดตาม next.bmp ค้าง
         endswip_first_seen = None  # ติดตาม endswip.bmp ค้าง
+        nocoin_free_handled = False  # กด Back ปิด no-coingachafree1 ไปแล้วหรือยัง (กดรอบเดียว)
 
         while miss_count < max_miss:
             check_device_reset(serial, cycle_start)
-            
+
             img = get_screen_capture(device)
             if img is not None:
                 if _check_fixgachafree(img, cycle_start):
                     miss_count = 0  # รีเซ็ตการนับเผื่อให้มันหา gachafree1 ต่อได้โดยไม่หลุด loop
                     continue
+                # === Priority: เช็ค no-coingachafree1.bmp (coin ไม่พอ) → กด Back 1 ครั้ง แล้วเลื่อนหาต่อปกติ ===
+                if img_search(img, os.path.join(IMG_DIR, "no-coingachafree1.bmp"), threshold=0.95):
+                    if not nocoin_free_handled:
+                        device.shell("input keyevent 4")   # Back 1 ครั้ง
+                        gui_log(serial, f"[Loop {loop_num}] เจอ no-coingachafree1 → กด Back 1 ครั้ง แล้วเลื่อนหาต่อ", step="NoCoin Free")
+                        nocoin_free_handled = True
+                        time.sleep(1.5)
+                        continue
+                else:
+                    nocoin_free_handled = False   # หายแล้ว → เจอใหม่ค่อยกด Back อีกรอบ
                 # === Priority: เช็ค endswip.bmp ===
                 pts_es = img_search(img, os.path.join(IMG_DIR, "endswip.bmp"))
                 if pts_es:
@@ -5229,14 +5280,23 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path, coin_
             continue  # ข้ามไป loop ถัดไป (หรือจบถ้า loop 2)
 
         # 2b. รอ gachafree2.bmp → กดจนกว่าจะหายไป (timeout 15s → file-error)
+        #     แวะหา no-coingachafree1 ด้วย — เจอ = กด Back 1 ครั้ง แล้วกลับไปเลื่อนหาใหม่ (ไม่ใช่ file-error)
         gui_log(serial, f"[Loop {loop_num}] Waiting gachafree2.bmp...", step="gachafree2")
         deadline_gf2 = time.time() + 15
         clicked_gf2 = False
+        nocoin_free_gf2 = False
         while time.time() < deadline_gf2:
             check_device_reset(serial, cycle_start)
             _check_fixcoin()  # priority #1
             img = get_screen_capture(device)
             if img is not None:
+                # coin ไม่พอ → กด Back 1 ครั้ง แล้วเลิกรอ gachafree2 (ไปเลื่อนหา gachafree1 ใหม่)
+                if not clicked_gf2 and img_search(img, os.path.join(IMG_DIR, "no-coingachafree1.bmp"), threshold=0.95):
+                    device.shell("input keyevent 4")   # Back 1 ครั้ง
+                    gui_log(serial, f"[Loop {loop_num}] เจอ no-coingachafree1 (ตอนรอ gachafree2) → กด Back 1 ครั้ง → เลื่อนหาใหม่", step="NoCoin Free")
+                    time.sleep(1.5)
+                    nocoin_free_gf2 = True
+                    break
                 pts = img_search(img, os.path.join(IMG_DIR, "gachafree2.bmp"), threshold=0.95)
                 if pts:
                     x, y = pts[0]
@@ -5248,6 +5308,10 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path, coin_
                 elif clicked_gf2:
                     break  # เคยกดแล้ว + หายไปแล้ว → ไปต่อ
             time.sleep(0.3)
+
+        # เจอ no-coingachafree1 → ข้าม loop นี้ ไปเลื่อนหา gachafree1 ใหม่ (ไม่ส่ง file-error)
+        if nocoin_free_gf2:
+            continue
 
         # ถ้าไม่เจอ gachafree2 เลย → file-error แล้วไปไฟล์ใหม่
         if not clicked_gf2:
