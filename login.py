@@ -5095,7 +5095,10 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path, coin_
                         find_and_click_optional(device, cycle_start, serial,
                                                 "ad-rewardfix1.bmp", secs=5.0, tag="ad-reward")
                     else:
-                        device.shell(f"input swipe {x} {y} {x} {y} 100")
+                        # gacha1 — กดซ้ำไปเรื่อยๆ จนกว่าจะหายไปจริง ค่อยไปหา gacha2
+                        click_img_until_gone(device, cycle_start, serial,
+                                             os.path.join(IMG_DIR, name),
+                                             x, y, stuck_secs=3.0, timeout=60.0, tag="gacha1")
                     time.sleep(1.2)
                     break
             time.sleep(0.3)
