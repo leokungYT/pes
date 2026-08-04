@@ -4731,11 +4731,10 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
     release_file(original_name)
     return True
 
-def navigate_home_then_find_hero(device, cycle_start, serial, original_name, file_path, coin_prefix=None):
+def navigate_home(device, cycle_start, serial):
     """
-    Navigate to Home (backhome -> backhome1) แล้วต่อด้วย find_hero_mode ทันที (ไม่ clear app).
-    ใช้ร่วมกันระหว่าง GachaFree+Check (GACHA_CHECK) และ Gacha+Find (GACHA_FIND)
-    เพื่อให้ทั้งสองโหมดทำงานเหมือนกันเป๊ะ.
+    กลับหน้า Home: รอ backhome.bmp → คลิก → รอ backhome1.bmp → คลิกจนหาย (ไม่ clear app).
+    คืนค่า True ถ้ากด backhome ได้ (ใช้ทั้งตอนไปหาตัวต่อ และตอนสแกนเหรียญก่อนส่งไฟล์ออก).
     """
     # 1. Wait for backhome.bmp with a 45-second timeout to prevent infinite hanging
     clicked_home = False
@@ -4776,6 +4775,17 @@ def navigate_home_then_find_hero(device, cycle_start, serial, original_name, fil
                         gui_log(serial, "backhome1.bmp is gone!", step="Back Home 1 Gone")
                         break
             time.sleep(1.0)
+
+    return clicked_home
+
+
+def navigate_home_then_find_hero(device, cycle_start, serial, original_name, file_path, coin_prefix=None):
+    """
+    Navigate to Home (backhome -> backhome1) แล้วต่อด้วย find_hero_mode ทันที (ไม่ clear app).
+    ใช้ร่วมกันระหว่าง GachaFree+Check (GACHA_CHECK) และ Gacha+Find (GACHA_FIND)
+    เพื่อให้ทั้งสองโหมดทำงานเหมือนกันเป๊ะ.
+    """
+    navigate_home(device, cycle_start, serial)
 
     # 1c. สแกนเหรียญใหม่อีกรอบก่อนทำ fin (อัปเดตเลขหลังสุ่มไปแล้ว เพราะเหรียญลดลง)
     if CHECK_COIN == 1:
@@ -5163,9 +5173,18 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path, coin_
     target_heroes = list(target_config.keys())
     raw_found_heroes = []  # เก็บชื่อฮีโร่ที่เจอจากทุก loop
     end_swip_detected = False
+    end_gachafree_detected = False  # เจอ endgachafree1 → จบ Gacha Free ทันที
+
+    # ── เลือกว่าจะหา popup ตัวไหน ──────────────────────────────
+    #   เปิด GACHA_FREE=1 + FIND_HERO=1 (เปิดหาตัว) → หา no-coingachafree1.bmp
+    #        (coin ไม่พอ → กด Back 1 ครั้ง แล้วเลื่อนหาต่อ ไม่จบรอบ)
+    #   ไม่เปิดหาตัว → ไม่ต้องหา no-coin เลย ใช้ endgachafree1.bmp แทน (เจอ = จบ Gacha Free ทันที)
+    check_nocoin_free = (GACHA_FREE == 1 and FIND_HERO == 1)
+    gui_log(serial, f"GachaFree popup mode: {'no-coingachafree1 (find=1)' if check_nocoin_free else 'endgachafree1 (find=0)'}",
+            step="Free Mode")
 
     for loop_num in range(1, GACHA_FREE_LOOPS + 1):
-        if end_swip_detected:
+        if end_swip_detected or end_gachafree_detected:
             break
         gui_log(serial, f"=== Gacha Free Loop {loop_num}/{GACHA_FREE_LOOPS} ===", step=f"Loop {loop_num}")
 
@@ -5186,16 +5205,23 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path, coin_
                 if _check_fixgachafree(img, cycle_start):
                     miss_count = 0  # รีเซ็ตการนับเผื่อให้มันหา gachafree1 ต่อได้โดยไม่หลุด loop
                     continue
+                # === Priority: เช็ค endgachafree1.bmp → จบ Gacha Free ทันที ===
+                if img_search(img, os.path.join(IMG_DIR, "endgachafree1.bmp"), threshold=0.95):
+                    gui_log(serial, f"[Loop {loop_num}] 🛑 เจอ endgachafree1 → จบ Gacha Free ทันที", step="End GachaFree")
+                    end_gachafree_detected = True
+                    break
                 # === Priority: เช็ค no-coingachafree1.bmp (coin ไม่พอ) → กด Back 1 ครั้ง แล้วเลื่อนหาต่อปกติ ===
-                if img_search(img, os.path.join(IMG_DIR, "no-coingachafree1.bmp"), threshold=0.95):
-                    if not nocoin_free_handled:
-                        device.shell("input keyevent 4")   # Back 1 ครั้ง
-                        gui_log(serial, f"[Loop {loop_num}] เจอ no-coingachafree1 → กด Back 1 ครั้ง แล้วเลื่อนหาต่อ", step="NoCoin Free")
-                        nocoin_free_handled = True
-                        time.sleep(1.5)
-                        continue
-                else:
-                    nocoin_free_handled = False   # หายแล้ว → เจอใหม่ค่อยกด Back อีกรอบ
+                #     หาเฉพาะตอนเปิดหาตัว (GACHA_FREE=1 + FIND_HERO=1) เท่านั้น
+                if check_nocoin_free:
+                    if img_search(img, os.path.join(IMG_DIR, "no-coingachafree1.bmp"), threshold=0.95):
+                        if not nocoin_free_handled:
+                            device.shell("input keyevent 4")   # Back 1 ครั้ง
+                            gui_log(serial, f"[Loop {loop_num}] เจอ no-coingachafree1 → กด Back 1 ครั้ง แล้วเลื่อนหาต่อ", step="NoCoin Free")
+                            nocoin_free_handled = True
+                            time.sleep(1.5)
+                            continue
+                    else:
+                        nocoin_free_handled = False   # หายแล้ว → เจอใหม่ค่อยกด Back อีกรอบ
                 # === Priority: เช็ค endswip.bmp ===
                 pts_es = img_search(img, os.path.join(IMG_DIR, "endswip.bmp"))
                 if pts_es:
@@ -5274,7 +5300,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path, coin_
             time.sleep(2.0)
 
         if not found_free:
-            if end_swip_detected:
+            if end_swip_detected or end_gachafree_detected:
                 break
             gui_log(serial, f"[Loop {loop_num}] gachafree1 not found after {max_miss} swipes, skipping loop", step="Skip")
             continue  # ข้ามไป loop ถัดไป (หรือจบถ้า loop 2)
@@ -5290,8 +5316,13 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path, coin_
             _check_fixcoin()  # priority #1
             img = get_screen_capture(device)
             if img is not None:
-                # coin ไม่พอ → กด Back 1 ครั้ง แล้วเลิกรอ gachafree2 (ไปเลื่อนหา gachafree1 ใหม่)
-                if not clicked_gf2 and img_search(img, os.path.join(IMG_DIR, "no-coingachafree1.bmp"), threshold=0.95):
+                # เจอ endgachafree1 → จบ Gacha Free ทันที (ไม่ส่ง file-error)
+                if img_search(img, os.path.join(IMG_DIR, "endgachafree1.bmp"), threshold=0.95):
+                    gui_log(serial, f"[Loop {loop_num}] 🛑 เจอ endgachafree1 (ตอนรอ gachafree2) → จบ Gacha Free ทันที", step="End GachaFree")
+                    end_gachafree_detected = True
+                    break
+                # coin ไม่พอ (เฉพาะเปิดหาตัว) → กด Back 1 ครั้ง แล้วเลิกรอ gachafree2 (ไปเลื่อนหา gachafree1 ใหม่)
+                if check_nocoin_free and not clicked_gf2 and img_search(img, os.path.join(IMG_DIR, "no-coingachafree1.bmp"), threshold=0.95):
                     device.shell("input keyevent 4")   # Back 1 ครั้ง
                     gui_log(serial, f"[Loop {loop_num}] เจอ no-coingachafree1 (ตอนรอ gachafree2) → กด Back 1 ครั้ง → เลื่อนหาใหม่", step="NoCoin Free")
                     time.sleep(1.5)
@@ -5308,6 +5339,10 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path, coin_
                 elif clicked_gf2:
                     break  # เคยกดแล้ว + หายไปแล้ว → ไปต่อ
             time.sleep(0.3)
+
+        # เจอ endgachafree1 → จบลูปสุ่มฟรีทั้งหมด ไปขั้นตอนจบรอบ (ต้องเช็คก่อน file-error)
+        if end_gachafree_detected:
+            break
 
         # เจอ no-coingachafree1 → ข้าม loop นี้ ไปเลื่อนหา gachafree1 ใหม่ (ไม่ส่ง file-error)
         if nocoin_free_gf2:
@@ -5534,6 +5569,22 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path, coin_
         gui_log(serial, "GachaFree finished. Gacha+Check mode active: waiting for backhome...", step="GachaFree Done")
         return navigate_home_then_find_hero(device, cycle_start, serial, original_name, file_path, coin_prefix=coin_prefix)
 
+    # ── เปิด Check Coin → กลับหน้า Home แล้วสแกนเหรียญ "ก่อน" ส่งไฟล์ออก ──
+    #    (เหรียญเปลี่ยนไปหลังสุ่มฟรี → ต้องอ่านค่าล่าสุด แล้วค่อยแนบเลขไปกับชื่อไฟล์ตอน export)
+    if CHECK_COIN == 1:
+        gui_log(serial, "CheckCoin → กลับหน้า Home เพื่อสแกนเหรียญก่อนส่งไฟล์ออก...", step="Coin Before Export", status="working")
+        # จบเพราะ endgachafree1 และ popup ยังค้างอยู่ → กด Back ปิดก่อน ไม่งั้นหา backhome ไม่เจอ
+        if end_gachafree_detected:
+            img_end = get_screen_capture(device)
+            if img_end is not None and img_search(img_end, os.path.join(IMG_DIR, "endgachafree1.bmp"), threshold=0.95):
+                device.shell("input keyevent 4")
+                gui_log(serial, "ปิด popup endgachafree1 ก่อนกลับหน้า Home", step="Close Popup")
+                time.sleep(1.5)
+        navigate_home(device, cycle_start, serial)
+        new_coin = scan_coin_number(device, cycle_start, serial)
+        if new_coin is not None:
+            coin_prefix = new_coin
+
     device.shell("am force-stop jp.konami.pesam")
     time.sleep(1)
 
@@ -5576,6 +5627,20 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path, coin_
             dest_dir = RANDOM_FAIL_DIR
             final_name = clean_orig
             gui_log(serial, "GachaFree: No hero matched (required counts not met)", step="No Match")
+    else:
+        # สแกน OCR แล้วแต่ไม่เจอชื่อฮีโร่เลยสักรอบ → random-fail (กันตัวแปรไม่ถูกเซ็ต)
+        dest_dir = RANDOM_FAIL_DIR
+        final_name = clean_orig
+        gui_log(serial, "GachaFree: No hero found in any loop", step="No Match")
+
+    # แนบเลขเหรียญ "ไว้หน้าชื่อไฟล์" แบบเดียวกับโหมด Check Coin (เฉพาะตอนเปิด CHECK_COIN)
+    #   เช่น  ASCV610367086.dat -> [500]+ASCV610367086.dat
+    if coin_prefix:
+        import re as _re_gf
+        _base = _re_gf.sub(r"^\[\d+\]\+", "", final_name)   # กัน [เลข]+ ซ้อนถ้าชื่อมีอยู่แล้ว
+        _base = _re_gf.sub(r"-\[\d+\]", "", _base)          # กันเลขแบบต่อท้ายเก่าปนมาด้วย
+        final_name = f"[{coin_prefix}]+{_base}"
+        gui_log(serial, f"🪙 Coins: {coin_prefix} -> {final_name}", step="Coin Match")
 
     dest = os.path.join(dest_dir, final_name)
     if os.path.exists(file_path):
@@ -6964,7 +7029,10 @@ def process_device_login(device):
             # 7.4 Check Coin Sequence (Optional)
             #     ข้าม standalone check-coin ถ้าเปิด Gacha+Find (สแกนเหรียญรวมในเส้นทางนั้นแล้ว)
             #     และข้ามถ้าเปิด FindHero ด้วย (เคสนั้นไปทำในบล็อก 7.3.5 CheckCoin+Find แทน)
-            if CHECK_COIN == 1 and GACHA_FIND != 1 and FIND_HERO != 1:
+            #     และข้ามถ้าเปิด Gacha Free (GACHA_FREE/GACHA_CHECK) — ไปสแกนเหรียญ "ตอนจบ gacha free"
+            #     ก่อน export แทน ไม่งั้นจะจบรอบตั้งแต่ยังไม่ได้สุ่มฟรีเลย
+            if (CHECK_COIN == 1 and GACHA_FIND != 1 and FIND_HERO != 1
+                    and GACHA_FREE != 1 and GACHA_CHECK != 1):
                 if check_coin_mode(device, cycle_start, serial, original_name, file_path, coin_prefix=coin_prefix):
                     continue  # Start next file immediately
 
