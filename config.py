@@ -210,7 +210,7 @@ DEBUG_CONSOLE = 0
 # ── Check Coin Sequence ───────────────────────────
 # 1 = ทำงานสแกนเหรียญ (หา checkpointcoin.bmp → OCR สแกนหาเลขเหรียญที่ Region(52, 10, 106, 41) → บันทึกลง check-coin)
 # 0 = ข้าม
-CHECK_COIN = 1
+CHECK_COIN = 0
 
 # ── Min Coin to Gacha (ใช้ร่วมกับ Check Coin) ──────
 # เลขเหรียญขั้นต่ำที่จะ "สุ่ม" — ถ้าสแกนเหรียญได้ "น้อยกว่า" ค่านี้:
