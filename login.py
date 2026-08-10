@@ -248,6 +248,7 @@ _image_cache_lock    = threading.Lock()
 DEVICE_RESET_FLAGS   = {}
 DEVICE_FILE_ASSIGNMENTS = {}
 DEVICE_DISABLE_FIXEVENT = {}
+DEVICE_IN_GACHA      = {}     # serial -> True ระหว่างอยู่ใน sequence กาชา → เปิดหา ad-rewardfix1 แบบลอยๆ ทุกเฟรม
 DEVICE_LAST_GAME_CHECK  = {}  # throttle: เช็คเกมออนทุก 30 วิ
 DEVICE_REENTER_FILE  = {}     # serial -> (file_path, original_name) ไฟล์ที่ต้อง "เข้าใหม่" (fixclear)
 DEVICE_REENTER_COUNT = {}     # serial -> (original_name, count) นับจำนวนครั้งที่ re-enter
@@ -3410,6 +3411,18 @@ def get_screen_capture(device):
                         gui_log(device.serial, f"questfive: {os.path.basename(_cur_path)} ค้าง 15s → กดซ้ำ", step="QuestFive")
                         # loop จะวนกลับไปคลิกอีกรอบอัตโนมัติ
 
+            # === ad-rewardfix1 floating check (เฉพาะช่วง sequence กาชา) ===
+            #     ป็อปอัพรับรางวัลโฆษณาเด้งมาตอนไหนก็กดปิดทันที — หาแบบลอยๆ ทุกเฟรม
+            #     ไม่มีการรอ/ไม่บล็อกขั้นตอน ไม่เจอก็ผ่านไปเฉยๆ
+            if DEVICE_IN_GACHA.get(device.serial, False) and img is not None:
+                pts_adr = img_search(img, os.path.join(IMG_DIR, "ad-rewardfix1.bmp"))
+                if pts_adr:
+                    x_adr, y_adr = pts_adr[0]
+                    device.shell(f"input swipe {x_adr} {y_adr} {x_adr} {y_adr} 100")
+                    gui_log(device.serial, f"Floating: ad-rewardfix1 found! Clicked ({x_adr},{y_adr})", step="Ad Reward")
+                    time.sleep(1.5)
+                    img = fast_screencap(device)
+
             # === fixgachanew1 -> fixgachanew2 floating check ===
             if in_new_gacha_loop and img is not None:
                 pts_fg1 = img_search(img, os.path.join(IMG_DIR, "fixgachanew1.bmp"))
@@ -5780,6 +5793,7 @@ def process_device_login(device):
         try:
             DEVICE_DISABLE_FIXEVENT[serial] = False
             DEVICE_DISABLE_FIXOUT[serial] = False   # เริ่ม cycle ใหม่ → เปิด fixout check กลับ (ช่วง login ต้องใช้)
+            DEVICE_IN_GACHA[serial] = False         # เริ่ม cycle ใหม่ → ยังไม่เข้ากาชา (กันค้างจากรอบก่อนที่หลุด exception)
             check_device_reset(serial)
 
             # ── Reload config ต้น cycle (ปกติ config watcher โหลดให้ realtime อยู่แล้ว
@@ -7031,8 +7045,11 @@ def process_device_login(device):
             #     และข้ามถ้าเปิด FindHero ด้วย (เคสนั้นไปทำในบล็อก 7.3.5 CheckCoin+Find แทน)
             #     และข้ามถ้าเปิด Gacha Free (GACHA_FREE/GACHA_CHECK) — ไปสแกนเหรียญ "ตอนจบ gacha free"
             #     ก่อน export แทน ไม่งั้นจะจบรอบตั้งแต่ยังไม่ได้สุ่มฟรีเลย
+            #     และข้ามถ้าเปิดกาชาปกติ (DO_GACHA/NEW_GACHA) — ไปสแกนเหรียญ "ตอนจบสุ่ม" ก่อน export
+            #     (บล็อก 9) เหตุผลเดียวกัน: ไม่งั้นเช็คเหรียญเสร็จแล้วปัดไฟล์ทิ้งตั้งแต่ยังไม่ได้สุ่ม
             if (CHECK_COIN == 1 and GACHA_FIND != 1 and FIND_HERO != 1
-                    and GACHA_FREE != 1 and GACHA_CHECK != 1):
+                    and GACHA_FREE != 1 and GACHA_CHECK != 1
+                    and DO_GACHA != 1 and NEW_GACHA != 1):
                 if check_coin_mode(device, cycle_start, serial, original_name, file_path, coin_prefix=coin_prefix):
                     continue  # Start next file immediately
 
@@ -7082,6 +7099,8 @@ def process_device_login(device):
                 # ปิด floating fixout ตลอด sequence กาชา (new-g1/gacha4/gacha5/OCR ทั้งหมด)
                 # — หน้ากาชามีปุ่มคล้าย fixout จับผิดแล้ว Back spam มั่ว (เปิดกลับอัตโนมัติตอนเริ่ม cycle ใหม่)
                 DEVICE_DISABLE_FIXOUT[serial] = True
+                # เปิดหา ad-rewardfix1 แบบลอยๆ ตลอด sequence กาชา — เจอเมื่อไหร่กดปิดทันที
+                DEVICE_IN_GACHA[serial] = True
                 
                 while True:
                     try:
@@ -7990,6 +8009,10 @@ def process_device_login(device):
                         gui_log(serial, f'Resetting Gacha sequence: {str(e)}', step='ResetGacha')
                         time.sleep(1)
                         continue
+
+                # จบ sequence กาชาแล้ว → ปิดการหา ad-rewardfix1 แบบลอยๆ
+                DEVICE_IN_GACHA[serial] = False
+
             # 8.5 Gacha + Find Hero (Optional) — หลังสุ่มกาชาเสร็จ "ไม่ clear app"
             #      next → กด Back รัวๆจนเจอ cancel → คลิก → แล้วค่อยค้นหา fin1
             #      ทำงานเมื่อ: เปิด GACHA_FIND  หรือ  เปิด FIND_HERO (find=1) คู่กับกาชา
@@ -8002,6 +8025,16 @@ def process_device_login(device):
                     continue  # find_hero_mode จัดการปิดแอป + ย้ายไฟล์ + จบรอบให้แล้ว
 
             # 9. Done & File Sorting
+            # ── เปิด Check Coin คู่กับกาชา → กลับหน้า Home สแกนเหรียญ "ก่อน" ปิดแอป/ส่งไฟล์ออก ──
+            #    (เหรียญเปลี่ยนไปหลังสุ่ม → ต้องอ่านค่าล่าสุด แล้วค่อยแนบเลขไปกับชื่อไฟล์)
+            if CHECK_COIN == 1 and (DO_GACHA == 1 or NEW_GACHA == 1):
+                gui_log(serial, "CheckCoin → กลับหน้า Home เพื่อสแกนเหรียญก่อนส่งไฟล์ออก...",
+                        step="Coin Before Export", status="working")
+                navigate_home(device, cycle_start, serial)
+                new_coin = scan_coin_number(device, cycle_start, serial)
+                if new_coin is not None:
+                    coin_prefix = new_coin
+
             device.shell("am force-stop jp.konami.pesam")
             time.sleep(1)
 
@@ -8026,6 +8059,14 @@ def process_device_login(device):
             else:
                 dest_dir = LOGIN_SUCCESS_DIR
                 final_name = clean_orig
+
+            # แนบเลขเหรียญไว้ "หน้าชื่อไฟล์" แบบเดียวกับโหมด Check Coin → [420]+ชื่อเดิม.dat
+            if CHECK_COIN == 1 and coin_prefix:
+                import re as _re_cc
+                _base = _re_cc.sub(r"^\[\d+\]\+", "", final_name)   # กัน [เลข]+ ซ้อน
+                _base = _re_cc.sub(r"-\[\d+\]", "", _base)          # กันเลขแบบต่อท้ายเก่าปนมา
+                final_name = f"[{coin_prefix}]+{_base}"
+                gui_log(serial, f"🪙 Coins: {coin_prefix} -> {final_name}", step="Coin Match")
 
             dest = os.path.join(dest_dir, final_name)
             if os.path.exists(file_path):
