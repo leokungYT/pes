@@ -6022,8 +6022,6 @@ def process_device_login(device):
             gui_log(serial, "Waiting checkpointlogin (clicking play8)...", step="play8/Check")
             play8_miss = 0   # นับรอบที่ play8 หาย + ยังไม่เจอ checkpoint (ไว้ทำ fallback กันค้าง)
             play8_click_count = 0   # นับจำนวนครั้งที่กด play8 ติดกัน — ครบ 7 → พัก 8 วิ แล้วเช็คใหม่
-            play8_stop_logged = False   # เอาไว้ log stopplay8 แค่ครั้งแรก (กัน log ถี่)
-            play8_stop_until = 0.0      # ห้ามกด play8 จนถึงเวลานี้ — ต่ออายุทุกครั้งที่เห็น stopplay8 (กันภาพกระพริบ/จับพลาดบางเฟรมแล้วเผลอกดต่อ)
             play8_pause_until = 0.0     # ช่วงพักหลังกดครบ 5 ครั้ง (พักแบบไม่หลับ — ลูปยังเช็ค checkpointlogin ตลอด)
             DEVICE_FIXOUT_CANCEL_DONE.pop(serial, None)   # ล้าง flag ค้างจากรอบ/เฟสก่อน กัน break มั่ว
             p8_cancel_done = False      # True = หลุดลูปด้วยทาง fixout→cancel (ข้ามขั้น event/Back spam ได้เลย)
@@ -6058,25 +6056,16 @@ def process_device_login(device):
                         time.sleep(4)
                         break
 
-                    # --- 1.5 เจอ stopplay8 → หยุดกด play8 ชั่วคราว รอจนกว่าจะหายไปเอง ---
-                    #     (ยังเช็ค checkpointlogin ทุกรอบตามข้อ 1 อยู่ — แค่ไม่กด play8/กลางจอซ้ำ)
-                    if img_search(img, os.path.join(IMG_DIR, "stopplay8.bmp")):
-                        play8_stop_until = time.time() + 5   # เห็นอยู่ → ห้ามกดต่ออีกอย่างน้อย 5 วิ นับจากตอนนี้
-                        if not play8_stop_logged:
-                            gui_log(serial, "stopplay8 detected — stop clicking play8, waiting...", step="play8 Stop")
-                            play8_stop_logged = True
-                        play8_miss = 0          # กัน fallback กดกลางจอทำงานระหว่างนี้
-                        play8_click_count = 0
-                        time.sleep(0.5)
-                        continue
-
-                    # เฟรมนี้ไม่เห็น stopplay8 แต่เพิ่งเห็นไปไม่เกิน 5 วิ → ยังห้ามกดอยู่
-                    # (กันเคสภาพกระพริบ/template จับพลาดบางเฟรม แล้วบอทเผลอกลับไปกด play8 ทันที)
-                    if time.time() < play8_stop_until:
+                    # --- 1.5 เจอ checkponit-play8 (หน้า Terms of Use) → "หยุดกด play8"
+                    #         แล้วไปทำลำดับ ☐ ติ๊ก → Consent → Confirm ให้จบ ค่อยกลับมากด play8 ต่อ
+                    #     *** ตัวเดียวที่ให้หยุดกด play8 ได้คือหน้านี้เท่านั้น ***
+                    #     (stopplay8 เดิมที่หยุดกดชั่วคราว 5 วิ ถูกเอาออกแล้ว — ให้กด play8 ตามปกติไปเรื่อยๆ)
+                    if img_search(img, os.path.join(IMG_DIR, "checkponit-play8.bmp"), threshold=0.9):
+                        gui_log(serial, "เจอ checkponit-play8 — หยุดกด play8 ไปทำ Consent/Confirm ก่อน", step="play8 Stop")
+                        run_new_stage_play8(device, serial, cycle_start)
                         play8_miss = 0
-                        time.sleep(0.5)
+                        play8_click_count = 0
                         continue
-                    play8_stop_logged = False
 
                     # --- 1.7 หา fixout ลอยๆ "ทุกเฟรม" (popup บังจอ เช่น Terms of Use) ---
                     #     เจอ → กด Back รัวๆ จนเจอ cancel.bmp แล้วคลิก → break ไปทำ step ถัดไปเลย
