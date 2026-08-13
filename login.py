@@ -6039,6 +6039,13 @@ def process_device_login(device):
                 if img is not None:
                     # --- 1. เช็ค checkpointlogin — เจอเท่านั้นถึงจะหลุดลูปไปเฟสต่อไป ---
                     pts_cp = img_search(img, os.path.join(IMG_DIR, "checkpointlogin.bmp"))
+                    # กันจับพลาด: checkpointlogin เป็นไอคอนกลมเล็ก (29x31) ส่วนหน้า title มีฟองกลมสีชมพู
+                    # ทรงเหมือนกัน — เทียบแบบ grayscale ได้ถึง 0.97 (ผ่านเกณฑ์) ทำให้บอทนึกว่า login เสร็จ
+                    # แล้วลัดไป Back spam/Find Hero ทั้งที่ยังอยู่หน้า title
+                    # → ถ้ายังเห็นวงกลม play8/play8fix อยู่บนจอ = ยังอยู่หน้า title แน่นอน ไม่ใช่ของจริง
+                    if pts_cp and (img_search(img, os.path.join(IMG_DIR, "play8.bmp"))
+                                   or img_search(img, os.path.join(IMG_DIR, "play8fix.bmp"))):
+                        pts_cp = None
                     if pts_cp:
                         if LOGIN_FAST:
                             gui_log(serial, "LOGIN_FAST: checkpointlogin found — clearing app and moving to next file.", step="Fast Done", status="working")
@@ -6087,12 +6094,6 @@ def process_device_login(device):
                     if pts_8:
                         play8_miss = 0   # เจอ play8 แล้ว รีเซ็ตตัวนับ
 
-                        # อยู่ช่วง "พักหลังกดครบ 5" → ไม่กด play8 แต่ลูปยังหมุนเช็ค checkpointlogin
-                        # ทุก ~0.3 วิ (เจอเมื่อไหร่ไปสเต็ปต่อไปทันที ไม่ต้องรอครบ 8 วิ)
-                        if time.time() < play8_pause_until:
-                            time.sleep(0.3)
-                            continue
-
                         # Prioritize fixlg3
                         pts_lg3 = img_search(img, os.path.join(IMG_DIR, "fixlg3.bmp"))
                         if pts_lg3:
@@ -6102,17 +6103,14 @@ def process_device_login(device):
                             time.sleep(1.0)
                             continue
 
+                        # เจอ play8 = กดเลย แล้วกดไปเรื่อยๆ ไม่มีพัก
+                        # (ออกจากลูปได้ทางเดียวคือเจอ checkpointlogin หรือ checkponit-play8 ซึ่งเช็คทุกเฟรมข้างบน)
                         x, y = pts_8[0]
                         device.shell(f"input swipe {x} {y} {x} {y} 100")
                         play8_click_count += 1
-                        gui_log(serial, f"Found {matched_name}! Clicked. ({play8_click_count}/5)", step="play8")
-                        if play8_click_count >= 5:
-                            # กดครบ 5 ครั้ง → พัก 8 วิ "แบบไม่หลับ" (ลูปยังเช็ค checkpointlogin ตลอด)
-                            gui_log(serial, "กด play8 ครบ 5 ครั้ง → พัก 8 วิ แล้วเช็คใหม่...", step="play8 Wait")
-                            play8_click_count = 0
-                            play8_pause_until = time.time() + 8
-                        else:
-                            time.sleep(0.5)
+                        if play8_click_count % 5 == 1:   # log ทุก 5 ครั้ง กัน log ถี่เกิน
+                            gui_log(serial, f"Found {matched_name}! Clicked. (ครั้งที่ {play8_click_count})", step="play8")
+                        time.sleep(0.5)
                         continue
 
                     # --- 3. play8/play8fix หายแล้วแต่ยังไม่เจอ checkpoint → รอเฉยๆ วนเช็คต่อ ---
