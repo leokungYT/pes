@@ -249,6 +249,8 @@ DEVICE_RESET_FLAGS   = {}
 DEVICE_FILE_ASSIGNMENTS = {}
 DEVICE_DISABLE_FIXEVENT = {}
 DEVICE_IN_GACHA      = {}     # serial -> True ระหว่างอยู่ใน sequence กาชา → เปิดหา ad-rewardfix1 แบบลอยๆ ทุกเฟรม
+DEVICE_IN_NEWSTAGE   = {}     # serial -> True ระหว่างทำ new-stageplay8 อยู่ (กัน floating check เรียกซ้ำซ้อนตัวเอง)
+DEVICE_NEWSTAGE_DONE = {}     # serial -> True ถ้าอีเวนต์ new stage ถูกจัดการไปแล้วใน cycle นี้ (ข้ามการรอซ้ำ)
 DEVICE_LAST_GAME_CHECK  = {}  # throttle: เช็คเกมออนทุก 30 วิ
 DEVICE_REENTER_FILE  = {}     # serial -> (file_path, original_name) ไฟล์ที่ต้อง "เข้าใหม่" (fixclear)
 DEVICE_REENTER_COUNT = {}     # serial -> (original_name, count) นับจำนวนครั้งที่ re-enter
@@ -3334,43 +3336,17 @@ def get_screen_capture(device):
                     else:
                         gui_log(device.serial, "fixout gone on confirm — skip", step="Fix Out")
 
-            # fixalert1.bmp floating check — เจอ fixalert1 (หาทุกเฟรมอยู่แล้ว) → กด fixalert2 แล้วไปต่อ
-            # (ไม่คลิก fixalert1 เอง — fixalert1 เป็นแค่ตัวชี้ว่ามี alert, ปุ่มที่ต้องกดคือ fixalert2)
-            fa_pts = img_search(img, _P['fixalert1'], threshold=0.7)
-            if fa_pts:
-                gui_log(device.serial, "Floating: fixalert1.bmp found! หา/กด fixalert2...", step="Fix Alert")
-                clicked_fa2 = False
-                while True:                              # ไม่มี timeout — fixalert2 โผล่แน่นอน วนหาจนเจอแล้วกด
-                    check_device_reset(device.serial)    # ทางออกเดียว = กดปุ่ม ↺ reset เอง (ไม่ใช่ timeout)
-                    img_fa2 = fast_screencap(device)
-                    if img_fa2 is not None:
-                        pts_fa2 = img_search(img_fa2, _P['fixalert2'], threshold=0.7)
-                        if pts_fa2:
-                            x, y = pts_fa2[0]
-                            device.shell(f"input swipe {x} {y} {x} {y} 100")
-                            gui_log(device.serial, "Clicked fixalert2.bmp", step="Fix Alert")
-                            time.sleep(1.5)
-                            clicked_fa2 = True
-                            break
-                    time.sleep(0.3)
-
-                # ถ้ามี fixalert3 ตามมา ให้กดด้วย (สั้น ๆ ไม่บังคับ)
-                if clicked_fa2:
-                    deadline_fa3 = time.time() + 6
-                    while time.time() < deadline_fa3:
-                        img_fa3 = fast_screencap(device)
-                        if img_fa3 is not None:
-                            pts_fa3 = img_search(img_fa3, _P['fixalert3'], threshold=0.7)
-                            if pts_fa3:
-                                x, y = pts_fa3[0]
-                                device.shell(f"input swipe {x} {y} {x} {y} 100")
-                                gui_log(device.serial, "Clicked fixalert3.bmp", step="Fix Alert")
-                                time.sleep(1.5)
-                                break
-                        time.sleep(0.3)
-
-                # Re-capture after fixing → ทำงานต่อปกติ
-                img = fast_screencap(device)
+            # checkponit-play8.bmp floating check — เจอหน้าอีเวนต์ new stage ตอนไหนก็จัดการทันที
+            # *** แทนที่ fixalert1/2/3 เดิม ***
+            #     ของเดิมพอเจอ fixalert1 จะวนหา fixalert2 แบบ "ไม่มี timeout" ถ้า fixalert2 ไม่โผล่
+            #     = เครื่องนั้นค้างยาวจนกว่าจะกด reset เอง
+            # เจอ checkponit-play8 → กด new-stageplay8-1 → -2 → -3 (กดรัวจนแต่ละตัวหายไปจริง)
+            if not DEVICE_IN_NEWSTAGE.get(device.serial, False):
+                cp8_pts = img_search(img, os.path.join(IMG_DIR, "checkponit-play8.bmp"))
+                if cp8_pts:
+                    gui_log(device.serial, "Floating: checkponit-play8 found! เริ่ม new-stageplay8...", step="NewStage")
+                    run_new_stage_play8(device, device.serial)
+                    img = fast_screencap(device)
 
             # questfive1-14 floating check — click ทุกรูปจนกว่าจะหายไปทั้งหมด (เฉพาะเมื่อ GETQUEST=1)
             _qf_hit_path = next((p for p in _QUESTFIVE_PATHS if img_search(img, p)), None) if GETQUEST == 1 else None
@@ -4912,6 +4888,49 @@ def click_img_until_gone(device, cycle_start, serial, img_path, x, y,
     gui_log(serial, f"{name} ยังไม่หายใน {timeout:.0f}s — ไปต่อ", step=f"{tag} Timeout")
     return False
 
+def run_new_stage_play8(device, serial, cycle_start=None):
+    """อีเวนต์ new stage: กด new-stageplay8-1 → -2 → -3 ทีละตัว
+    แต่ละตัว "กดรัวๆ จนกว่ารูปจะหายไปจริง" (กดรอบเดียวมักไม่ติด) ค่อยไปตัวถัดไป
+    ไม่เจอตัวไหนใน 15 วิ → ข้ามไปตัวถัดไป ไม่ค้าง
+
+    เรียกได้ 2 ทาง: หลังกด play8 (ขั้นตอนหลัก) และจาก floating check ตอนเจอ
+    checkponit-play8 ลอยๆ — มีธง DEVICE_IN_NEWSTAGE กันเรียกซ้อนตัวเอง
+    (click_img_until_gone ข้างในเรียก get_screen_capture ซึ่งมี floating check ตัวนี้อยู่)"""
+    if DEVICE_IN_NEWSTAGE.get(serial, False):
+        return False
+    DEVICE_IN_NEWSTAGE[serial] = True
+    try:
+        for _ns in (1, 2, 3):
+            _ns_name = f"new-stageplay8-{_ns}.bmp"
+            _ns_path = os.path.join(IMG_DIR, _ns_name)
+            gui_log(serial, f"Waiting {_ns_name}...", step=f"NewStage {_ns}")
+            _ns_found = False
+            _ns_deadline = time.time() + 15
+            while time.time() < _ns_deadline:
+                if cycle_start is not None:
+                    check_device_reset(serial, cycle_start)
+                img_ns = fast_screencap(device)
+                if img_ns is not None:
+                    pts_ns = img_search(img_ns, _ns_path)
+                    if pts_ns:
+                        x_ns, y_ns = pts_ns[0]
+                        # กดรัวๆ ~2 ครั้ง/วิ จนกว่ารูปจะหายไปจริง
+                        # (gone_secs=1.0 = ต้องหายติดต่อกัน 1 วิ กัน animation กระพริบ)
+                        click_img_until_gone(device, cycle_start, serial, _ns_path,
+                                             x_ns, y_ns, stuck_secs=0.5, settle=0.35,
+                                             timeout=60.0, tag=f"NewStage {_ns}", gone_secs=1.0)
+                        _ns_found = True
+                        break
+                time.sleep(0.4)
+            if not _ns_found:
+                gui_log(serial, f"{_ns_name} ไม่เจอใน 15 วิ — ข้ามไปตัวถัดไป", step=f"NewStage {_ns} Skip")
+        gui_log(serial, "new-stageplay8 ครบทั้ง 3 ตัวแล้ว → ไปต่อ", step="NewStage Done")
+        DEVICE_NEWSTAGE_DONE[serial] = True
+        return True
+    finally:
+        DEVICE_IN_NEWSTAGE[serial] = False
+
+
 def click_next_until_gone(device, cycle_start, serial, x, y, stuck_secs=5.0, timeout=60.0, tag="Next"):
     """กด next.bmp — ค้างเกิน 5 วิ กดซ้ำจนหาย (wrapper ของ click_img_until_gone)"""
     return click_img_until_gone(device, cycle_start, serial,
@@ -5794,6 +5813,8 @@ def process_device_login(device):
             DEVICE_DISABLE_FIXEVENT[serial] = False
             DEVICE_DISABLE_FIXOUT[serial] = False   # เริ่ม cycle ใหม่ → เปิด fixout check กลับ (ช่วง login ต้องใช้)
             DEVICE_IN_GACHA[serial] = False         # เริ่ม cycle ใหม่ → ยังไม่เข้ากาชา (กันค้างจากรอบก่อนที่หลุด exception)
+            DEVICE_IN_NEWSTAGE[serial] = False      # เริ่ม cycle ใหม่ → เคลียร์ธงกัน new-stage ซ้อน
+            DEVICE_NEWSTAGE_DONE[serial] = False    # ไฟล์ใหม่ = ยังไม่ได้ทำอีเวนต์ new stage ของรอบนี้
             check_device_reset(serial)
 
             # ── Reload config ต้น cycle (ปกติ config watcher โหลดให้ realtime อยู่แล้ว
@@ -6075,13 +6096,16 @@ def process_device_login(device):
             #                แต่ละตัว "กดซ้ำไปเรื่อยๆ จนกว่ารูปจะหายไปจริง" ค่อยไปตัวถัดไป
             #       ไม่เจอ → ไม่มีอีเวนต์ ข้ามไป step ถัดไปตามปกติ (ไม่ถือว่าพัง)
             #     (หลุดลูปทาง fixout→cancel = อยู่หน้าเมนูหลักแล้ว → ข้ามขั้นนี้)
-            if not p8_cancel_done:
+            if not p8_cancel_done and not DEVICE_NEWSTAGE_DONE.get(serial, False):
                 gui_log(serial, "Checking checkponit-play8 (new stage event, 10s)...", step="NewStage")
                 found_cp8 = False
                 deadline_cp8 = time.time() + 10
                 while time.time() < deadline_cp8:
                     check_device_reset(serial, cycle_start)
                     img = get_screen_capture(device)
+                    # floating check อาจจัดการอีเวนต์ให้เสร็จไปแล้วระหว่างแคปจอ → ไม่ต้องรอต่อ
+                    if DEVICE_NEWSTAGE_DONE.get(serial, False):
+                        break
                     if img is not None and img_search(img, os.path.join(IMG_DIR, "checkponit-play8.bmp")):
                         found_cp8 = True
                         gui_log(serial, "checkponit-play8 found! เริ่มขั้นตอน new-stageplay8...", step="NewStage")
@@ -6089,32 +6113,8 @@ def process_device_login(device):
                     time.sleep(0.5)
 
                 if found_cp8:
-                    for _ns in (1, 2, 3):
-                        _ns_name = f"new-stageplay8-{_ns}.bmp"
-                        gui_log(serial, f"Waiting {_ns_name}...", step=f"NewStage {_ns}")
-                        _ns_found = False
-                        _ns_deadline = time.time() + 15
-                        while time.time() < _ns_deadline:
-                            check_device_reset(serial, cycle_start)
-                            img = get_screen_capture(device)
-                            if img is not None:
-                                pts_ns = img_search(img, os.path.join(IMG_DIR, _ns_name))
-                                if pts_ns:
-                                    x_ns, y_ns = pts_ns[0]
-                                    # กดรัวๆ ~2 ครั้ง/วิ จนกว่ารูปจะหายไปจริง (กดรอบเดียวมักไม่ติด)
-                                    # stuck_secs=0.5 + settle=0.35 = ยังเห็นรูปอยู่ก็กดซ้ำแทบจะทันที
-                                    # gone_secs=1.0 = ต้องหายติดต่อกัน 1 วิ ถึงนับว่าหายจริง (กัน animation กระพริบ)
-                                    click_img_until_gone(device, cycle_start, serial,
-                                                         os.path.join(IMG_DIR, _ns_name),
-                                                         x_ns, y_ns, stuck_secs=0.5, settle=0.35,
-                                                         timeout=60.0, tag=f"NewStage {_ns}", gone_secs=1.0)
-                                    _ns_found = True
-                                    break
-                            time.sleep(0.4)
-                        if not _ns_found:
-                            gui_log(serial, f"{_ns_name} ไม่เจอใน 15 วิ — ข้ามไปตัวถัดไป", step=f"NewStage {_ns} Skip")
-                    gui_log(serial, "new-stageplay8 ครบทั้ง 3 ตัวแล้ว → ไป step ถัดไป", step="NewStage Done")
-                else:
+                    run_new_stage_play8(device, serial, cycle_start)
+                elif not DEVICE_NEWSTAGE_DONE.get(serial, False):
                     gui_log(serial, "ไม่เจอ checkponit-play8 — ไม่มีอีเวนต์ new stage ข้ามไปเลย", step="NewStage Skip")
 
             # 6. Event sequence — พฤติกรรมขึ้นกับ EVENT_IMG
