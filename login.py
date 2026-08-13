@@ -4965,25 +4965,38 @@ def run_new_stage_play8(device, serial, cycle_start=None):
         for _ns in (1, 2, 3):
             _ns_name = f"new-stageplay8-{_ns}.bmp"
             _ns_path = os.path.join(IMG_DIR, _ns_name)
+            # รูปของ step ถัดไป (ตัวที่ 3 ไม่มีถัดไป)
+            _nx_name = f"new-stageplay8-{_ns + 1}.bmp" if _ns < 3 else None
+            _nx_path = os.path.join(IMG_DIR, _nx_name) if _nx_name else None
 
-            # 1) รอจนเจอตัวนี้จริงๆ (ไม่มี timeout — ห้ามข้ามไปตัวถัดไปเด็ดขาด)
+            # 1) รอจนเจอตัวนี้ (ไม่มี timeout — หาไปเรื่อยๆ จนกว่าจะเจอ ห้ามยอมแพ้)
             #    เฉพาะตัวที่ 1: แวะเช็ค checkponit-play8 ด้วย (ตัวยืนยันว่าอยู่หน้าอีเวนต์แล้ว)
             #    พอเจอ new-stageplay8-1 แล้ว = เลิกเช็ค checkpoint ที่เหลือไล่ตามลำดับอย่างเดียว
-            gui_log(serial, f"รอ {_ns_name} (ไม่มี timeout)...", step=f"NewStage {_ns}")
+            #    ถ้าเจอ "ตัวถัดไป" ก่อน = ตัวนี้ผ่านไปแล้ว → ไปทำตัวถัดไปทันที (ไม่รอเก้อ)
+            gui_log(serial, f"หา {_ns_name} (หาไปเรื่อยๆ จนกว่าจะเจอ)...", step=f"NewStage {_ns}")
             _cp8_logged = False
+            _skip_to_next = False
             while True:
                 check_device_reset(serial, cycle_start)
                 img_ns = fast_screencap(device)
                 if img_ns is not None:
                     if img_search(img_ns, _ns_path):
                         break
+                    if _nx_path and img_search(img_ns, _nx_path):
+                        gui_log(serial, f"เจอ {_nx_name} ก่อน — {_ns_name} ผ่านไปแล้ว ไปตัวถัดไปทันที",
+                                step=f"NewStage {_ns}")
+                        _skip_to_next = True
+                        break
                     if _ns == 1 and not _cp8_logged and img_search(img_ns, os.path.join(IMG_DIR, "checkponit-play8.bmp")):
                         gui_log(serial, "เจอ checkponit-play8 — อยู่หน้าอีเวนต์แล้ว รอ new-stageplay8-1...", step="NewStage")
                         _cp8_logged = True
                 time.sleep(0.4)
+            if _skip_to_next:
+                continue
 
-            # 2) กดรัวๆ (~2 ครั้ง/วิ) จนกว่ารูปจะหายไปจริง — ยืนยันหายครบ 1 วิ กัน animation กระพริบ
-            gui_log(serial, f"เจอ {_ns_name} — กดรัวจนกว่าจะหาย", step=f"NewStage {_ns}")
+            # 2) กดรัวๆ (~2 ครั้ง/วิ) — "เจอตัวถัดไปเมื่อไหร่ ไปหาตัวถัดไปทันที"
+            #    ไม่ต้องรอให้ตัวนี้หายก่อน (ตัวที่ 3 ไม่มีถัดไป → กดจนหายจริง ยืนยันหายครบ 1 วิ)
+            gui_log(serial, f"เจอ {_ns_name} — กดรัวๆ", step=f"NewStage {_ns}")
             _click_n = 0
             _last_click = 0.0
             _gone_since = None
@@ -4993,6 +5006,11 @@ def run_new_stage_play8(device, serial, cycle_start=None):
                 if img_ns is None:
                     time.sleep(0.3)
                     continue
+                # ตัวถัดไปโผล่แล้ว → ไปต่อทันที ไม่ต้องรออะไรอีก
+                if _nx_path and img_search(img_ns, _nx_path):
+                    gui_log(serial, f"กด {_ns_name} ไป {_click_n} ครั้ง → เจอ {_nx_name} แล้ว ไปต่อทันที",
+                            step=f"NewStage {_ns} → {_ns + 1}")
+                    break
                 pts_ns = img_search(img_ns, _ns_path)
                 if pts_ns:
                     _gone_since = None
@@ -5007,7 +5025,7 @@ def run_new_stage_play8(device, serial, cycle_start=None):
                     if _gone_since is None:
                         _gone_since = time.time()
                     elif time.time() - _gone_since >= 1.0:
-                        gui_log(serial, f"{_ns_name} หายแล้ว (กดไป {_click_n} ครั้ง) → ไปตัวถัดไป",
+                        gui_log(serial, f"{_ns_name} หายแล้ว (กดไป {_click_n} ครั้ง) → ไปหาตัวถัดไป",
                                 step=f"NewStage {_ns} Gone")
                         break
                 time.sleep(0.25)
