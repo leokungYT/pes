@@ -251,6 +251,7 @@ DEVICE_DISABLE_FIXEVENT = {}
 DEVICE_IN_GACHA      = {}     # serial -> True ระหว่างอยู่ใน sequence กาชา → เปิดหา ad-rewardfix1 แบบลอยๆ ทุกเฟรม
 DEVICE_IN_NEWSTAGE   = {}     # serial -> True ระหว่างทำ new-stageplay8 อยู่ (กัน floating check เรียกซ้ำซ้อนตัวเอง)
 DEVICE_NEWSTAGE_DONE = {}     # serial -> True ถ้าอีเวนต์ new stage ถูกจัดการไปแล้วใน cycle นี้ (ข้ามการรอซ้ำ)
+DEVICE_CYCLE_START   = {}     # serial -> เวลาเริ่ม cycle ปัจจุบัน (ให้ floating check ใช้เช็ค timeout รวมได้)
 DEVICE_LAST_GAME_CHECK  = {}  # throttle: เช็คเกมออนทุก 30 วิ
 DEVICE_REENTER_FILE  = {}     # serial -> (file_path, original_name) ไฟล์ที่ต้อง "เข้าใหม่" (fixclear)
 DEVICE_REENTER_COUNT = {}     # serial -> (original_name, count) นับจำนวนครั้งที่ re-enter
@@ -4940,46 +4941,76 @@ def click_img_until_gone(device, cycle_start, serial, img_path, x, y,
     return False
 
 def run_new_stage_play8(device, serial, cycle_start=None):
-    """อีเวนต์ new stage: กด new-stageplay8-1 → -2 → -3 ทีละตัว
-    แต่ละตัว "กดรัวๆ จนกว่ารูปจะหายไปจริง" (กดรอบเดียวมักไม่ติด) ค่อยไปตัวถัดไป
-    ไม่เจอตัวไหนใน 15 วิ → ข้ามไปตัวถัดไป ไม่ค้าง
+    """อีเวนต์ new stage: กด new-stageplay8-1 → -2 → -3 "เรียงตามลำดับเท่านั้น"
+
+    กติกาของขั้นตอนนี้:
+      • ไม่มี timeout รายตัว — รอตัวปัจจุบันจนกว่าจะเจอจริง แล้วกดรัวจนหายไปจริง
+        ค่อยขยับไปตัวถัดไป (ห้ามข้ามลำดับ ห้ามยอมแพ้กลางคัน)
+      • ห้ามมีตัวอื่นมากดแทรกระหว่างนี้ โดยเฉพาะ fixout → Back spam → กด cancel
+        จึงใช้ fast_screencap ล้วน (ไม่เรียก get_screen_capture ที่มี floating fixer อยู่)
+        และปิดธง fixout ไว้ตลอดช่วงนี้ด้วยกันโดนยิงจากทางอื่น
+      • ทางออกถ้าเกมค้างจริง = ปุ่ม ↺ reset หรือ timeout รวมของทั้ง cycle (TIMEOUT_MINUTES)
 
     เรียกได้ 2 ทาง: หลังกด play8 (ขั้นตอนหลัก) และจาก floating check ตอนเจอ
-    checkponit-play8 ลอยๆ — มีธง DEVICE_IN_NEWSTAGE กันเรียกซ้อนตัวเอง
-    (click_img_until_gone ข้างในเรียก get_screen_capture ซึ่งมี floating check ตัวนี้อยู่)"""
+    checkponit-play8 ลอยๆ — ธง DEVICE_IN_NEWSTAGE กันเรียกซ้อนตัวเอง"""
     if DEVICE_IN_NEWSTAGE.get(serial, False):
         return False
+    if cycle_start is None:
+        cycle_start = DEVICE_CYCLE_START.get(serial)   # เผื่อ timeout รวมของ cycle ยังทำงานได้
+
     DEVICE_IN_NEWSTAGE[serial] = True
+    _prev_fixout = DEVICE_DISABLE_FIXOUT.get(serial, False)
+    DEVICE_DISABLE_FIXOUT[serial] = True   # ห้าม Back spam / กด cancel แทรกระหว่างขั้นตอนนี้
     try:
         for _ns in (1, 2, 3):
             _ns_name = f"new-stageplay8-{_ns}.bmp"
             _ns_path = os.path.join(IMG_DIR, _ns_name)
-            gui_log(serial, f"Waiting {_ns_name}...", step=f"NewStage {_ns}")
-            _ns_found = False
-            _ns_deadline = time.time() + 15
-            while time.time() < _ns_deadline:
-                if cycle_start is not None:
-                    check_device_reset(serial, cycle_start)
+
+            # 1) รอจนเจอตัวนี้จริงๆ (ไม่มี timeout — ห้ามข้ามไปตัวถัดไปเด็ดขาด)
+            gui_log(serial, f"รอ {_ns_name} (ไม่มี timeout)...", step=f"NewStage {_ns}")
+            while True:
+                check_device_reset(serial, cycle_start)
                 img_ns = fast_screencap(device)
-                if img_ns is not None:
-                    pts_ns = img_search(img_ns, _ns_path)
-                    if pts_ns:
-                        x_ns, y_ns = pts_ns[0]
-                        # กดรัวๆ ~2 ครั้ง/วิ จนกว่ารูปจะหายไปจริง
-                        # (gone_secs=1.0 = ต้องหายติดต่อกัน 1 วิ กัน animation กระพริบ)
-                        click_img_until_gone(device, cycle_start, serial, _ns_path,
-                                             x_ns, y_ns, stuck_secs=0.5, settle=0.35,
-                                             timeout=60.0, tag=f"NewStage {_ns}", gone_secs=1.0)
-                        _ns_found = True
-                        break
+                if img_ns is not None and img_search(img_ns, _ns_path):
+                    break
                 time.sleep(0.4)
-            if not _ns_found:
-                gui_log(serial, f"{_ns_name} ไม่เจอใน 15 วิ — ข้ามไปตัวถัดไป", step=f"NewStage {_ns} Skip")
-        gui_log(serial, "new-stageplay8 ครบทั้ง 3 ตัวแล้ว → ไปต่อ", step="NewStage Done")
+
+            # 2) กดรัวๆ (~2 ครั้ง/วิ) จนกว่ารูปจะหายไปจริง — ยืนยันหายครบ 1 วิ กัน animation กระพริบ
+            gui_log(serial, f"เจอ {_ns_name} — กดรัวจนกว่าจะหาย", step=f"NewStage {_ns}")
+            _click_n = 0
+            _last_click = 0.0
+            _gone_since = None
+            while True:
+                check_device_reset(serial, cycle_start)
+                img_ns = fast_screencap(device)
+                if img_ns is None:
+                    time.sleep(0.3)
+                    continue
+                pts_ns = img_search(img_ns, _ns_path)
+                if pts_ns:
+                    _gone_since = None
+                    if time.time() - _last_click >= 0.5:
+                        x_ns, y_ns = pts_ns[0]
+                        device.shell(f"input swipe {x_ns} {y_ns} {x_ns} {y_ns} 100")
+                        _last_click = time.time()
+                        _click_n += 1
+                        if _click_n % 5 == 1:
+                            gui_log(serial, f"กด {_ns_name} ({x_ns},{y_ns}) ครั้งที่ {_click_n}", step=f"NewStage {_ns}")
+                else:
+                    if _gone_since is None:
+                        _gone_since = time.time()
+                    elif time.time() - _gone_since >= 1.0:
+                        gui_log(serial, f"{_ns_name} หายแล้ว (กดไป {_click_n} ครั้ง) → ไปตัวถัดไป",
+                                step=f"NewStage {_ns} Gone")
+                        break
+                time.sleep(0.25)
+
+        gui_log(serial, "new-stageplay8 ครบทั้ง 3 ตัวตามลำดับแล้ว → ไปต่อ", step="NewStage Done")
         DEVICE_NEWSTAGE_DONE[serial] = True
         return True
     finally:
         DEVICE_IN_NEWSTAGE[serial] = False
+        DEVICE_DISABLE_FIXOUT[serial] = _prev_fixout
 
 
 def click_next_until_gone(device, cycle_start, serial, x, y, stuck_secs=5.0, timeout=60.0, tag="Next"):
@@ -5924,6 +5955,7 @@ def process_device_login(device):
                 file_path, original_name = restart_p8
                 DEVICE_FILE_ASSIGNMENTS[serial] = original_name
                 cycle_start = time.time()
+                DEVICE_CYCLE_START[serial] = cycle_start
                 DEVICE_PAST_LOGIN[serial] = True   # ผ่าน login แล้ว (ถ้าเจอ fixclear อีกก็ยัง restart-play8 ไม่ login ใหม่)
                 gui_log(serial, f"Restart from play8 (same file, keep login, no re-push): {original_name}",
                         step="Restart play8", status="working")
@@ -5949,6 +5981,7 @@ def process_device_login(device):
                 gui_log(serial, f"File: {original_name}", step="File OK", status="working")
                 DEVICE_FILE_ASSIGNMENTS[serial] = original_name
                 cycle_start = time.time()
+                DEVICE_CYCLE_START[serial] = cycle_start
                 DEVICE_PAST_LOGIN[serial] = False   # ไฟล์ใหม่/เข้าใหม่ → ยังไม่ผ่าน login
 
                 # 2. Push file
