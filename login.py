@@ -4994,9 +4994,9 @@ def run_new_stage_play8(device, serial, cycle_start=None):
             if _skip_to_next:
                 continue
 
-            # 2) กดรัวๆ (~2 ครั้ง/วิ) — "เจอตัวถัดไปเมื่อไหร่ ไปหาตัวถัดไปทันที"
-            #    ไม่ต้องรอให้ตัวนี้หายก่อน (ตัวที่ 3 ไม่มีถัดไป → กดจนหายจริง ยืนยันหายครบ 1 วิ)
-            gui_log(serial, f"เจอ {_ns_name} — กดรัวๆ", step=f"NewStage {_ns}")
+            # 2) กดตัวนี้ไปเรื่อยๆ (~2 ครั้ง/วิ) "จนกว่ารูปนี้จะหายไป" ค่อยไปตัวถัดไป
+            #    (ยืนยันหายครบ 1 วิ กัน animation กระพริบแล้วเผลอไปต่อทั้งที่ยังอยู่)
+            gui_log(serial, f"เจอ {_ns_name} — กดไปเรื่อยๆ จนกว่าจะหาย", step=f"NewStage {_ns}")
             _click_n = 0
             _last_click = 0.0
             _gone_since = None
@@ -5006,11 +5006,6 @@ def run_new_stage_play8(device, serial, cycle_start=None):
                 if img_ns is None:
                     time.sleep(0.3)
                     continue
-                # ตัวถัดไปโผล่แล้ว → ไปต่อทันที ไม่ต้องรออะไรอีก
-                if _nx_path and img_search(img_ns, _nx_path):
-                    gui_log(serial, f"กด {_ns_name} ไป {_click_n} ครั้ง → เจอ {_nx_name} แล้ว ไปต่อทันที",
-                            step=f"NewStage {_ns} → {_ns + 1}")
-                    break
                 pts_ns = img_search(img_ns, _ns_path)
                 if pts_ns:
                     _gone_since = None
