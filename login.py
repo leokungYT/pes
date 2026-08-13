@@ -3343,7 +3343,7 @@ def get_screen_capture(device):
             #     = เครื่องนั้นค้างยาวจนกว่าจะกด reset เอง
             # เจอ checkponit-play8 → กด new-stageplay8-1 → -2 → -3 (กดรัวจนแต่ละตัวหายไปจริง)
             if not DEVICE_IN_NEWSTAGE.get(device.serial, False):
-                cp8_pts = img_search(img, os.path.join(IMG_DIR, "checkponit-play8.bmp"), threshold=0.9)
+                cp8_pts = img_search_best(img, os.path.join(IMG_DIR, "checkponit-play8.bmp"), threshold=0.9)
                 if cp8_pts:
                     gui_log(device.serial, "Floating: checkponit-play8 found! เริ่ม new-stageplay8...", step="NewStage")
                     run_new_stage_play8(device, device.serial)
@@ -3590,6 +3590,32 @@ def fixout_click_if_stuck(device, serial, img, stuck_since, secs=8.0, step="FixO
         gui_log(serial, f"ค้าง {secs:.0f}s — เจอ fixout กดปิด ({x_fo},{y_fo}) แล้วทำงานต่อ", step=step)
         time.sleep(1.0)
     return time.time()   # เริ่มจับเวลาใหม่ (เช็ครอบถัดไปอีก secs วิ)
+
+def img_search_best(gray_img, find_path, threshold=0.8):
+    """คืน "จุดเดียวที่เหมือนที่สุด" ของเทมเพลตนั้น (หรือ [] ถ้าคะแนนไม่ถึงเกณฑ์)
+
+    ต่างจาก img_search: img_search คืน "ทุกจุดที่ผ่านเกณฑ์" (np.where + groupRectangles)
+    แล้วตัวเรียกมักหยิบ pts[0] ซึ่งเป็นจุดแรกตามลำดับการจัดกลุ่ม — ไม่ใช่จุดที่คะแนนสูงสุด
+
+    เคสจริงที่พัง: หน้า Terms of Use มีคำว่า "Consent" ในข้อความ "Consent to All of the Above"
+    (คะแนน 0.95) อยู่เหนือปุ่ม Consent จริง (0.998) — ผ่านเกณฑ์ทั้งคู่ pts[0] เลยได้ "ข้อความ"
+    บอทกดตรงนั้นเท่าไหร่ก็ไม่มีอะไรเกิดขึ้น → ใช้ตัวนี้แทนเมื่อ "ต้องกดให้ตรงปุ่มจริง"
+    """
+    if gray_img is None:
+        return []
+    tmpl = load_template(find_path)
+    if tmpl is None:
+        return []
+    th, tw = tmpl.shape
+    if gray_img.shape[0] < th or gray_img.shape[1] < tw:
+        return []
+    res = cv2.matchTemplate(gray_img, tmpl, cv2.TM_CCOEFF_NORMED)
+    _mn, mx, _ml, mloc = cv2.minMaxLoc(res)
+    if mx < threshold:
+        return []
+    inv = 1.0 / SCREENCAP_SCALE if SCREENCAP_SCALE != 1.0 else 1.0
+    return [(int((mloc[0] + tw // 2) * inv), int((mloc[1] + th // 2) * inv))]
+
 
 def img_search_any(gray_img, names, threshold=0.8):
     """หา template หลายชื่อในภาพเดียว — เจอตัวไหนก่อนคืนผลตัวนั้นเลย
@@ -4935,14 +4961,14 @@ def run_new_stage_play8(device, serial, cycle_start=None):
                 check_device_reset(serial, cycle_start)
                 img_ns = fast_screencap(device)
                 if img_ns is not None:
-                    if img_search(img_ns, _ns_path, threshold=0.9):
+                    if img_search_best(img_ns, _ns_path, threshold=0.9):
                         break
-                    if _nx_path and img_search(img_ns, _nx_path, threshold=0.9):
+                    if _nx_path and img_search_best(img_ns, _nx_path, threshold=0.9):
                         gui_log(serial, f"เจอ {_nx_name} ก่อน — {_ns_name} ผ่านไปแล้ว ไปตัวถัดไปทันที",
                                 step=f"NewStage {_ns}")
                         _skip_to_next = True
                         break
-                    if _ns == 1 and not _cp8_logged and img_search(img_ns, os.path.join(IMG_DIR, "checkponit-play8.bmp"), threshold=0.9):
+                    if _ns == 1 and not _cp8_logged and img_search_best(img_ns, os.path.join(IMG_DIR, "checkponit-play8.bmp"), threshold=0.9):
                         gui_log(serial, "เจอ checkponit-play8 — อยู่หน้าอีเวนต์แล้ว รอ new-stageplay8-1...", step="NewStage")
                         _cp8_logged = True
                 time.sleep(0.4)
@@ -4961,7 +4987,7 @@ def run_new_stage_play8(device, serial, cycle_start=None):
                 if img_ns is None:
                     time.sleep(0.3)
                     continue
-                pts_ns = img_search(img_ns, _ns_path, threshold=0.9)
+                pts_ns = img_search_best(img_ns, _ns_path, threshold=0.9)
                 if pts_ns:
                     _gone_since = None
                     if time.time() - _last_click >= 0.5:
@@ -6067,7 +6093,7 @@ def process_device_login(device):
                     #         แล้วไปทำลำดับ ☐ ติ๊ก → Consent → Confirm ให้จบ ค่อยกลับมากด play8 ต่อ
                     #     *** ตัวเดียวที่ให้หยุดกด play8 ได้คือหน้านี้เท่านั้น ***
                     #     (stopplay8 เดิมที่หยุดกดชั่วคราว 5 วิ ถูกเอาออกแล้ว — ให้กด play8 ตามปกติไปเรื่อยๆ)
-                    if img_search(img, os.path.join(IMG_DIR, "checkponit-play8.bmp"), threshold=0.9):
+                    if img_search_best(img, os.path.join(IMG_DIR, "checkponit-play8.bmp"), threshold=0.9):
                         gui_log(serial, "เจอ checkponit-play8 — หยุดกด play8 ไปทำ Consent/Confirm ก่อน", step="play8 Stop")
                         run_new_stage_play8(device, serial, cycle_start)
                         play8_miss = 0
