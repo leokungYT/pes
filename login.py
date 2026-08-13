@@ -6069,6 +6069,52 @@ def process_device_login(device):
                     release_file(original_name)
                 continue
 
+            # 5.5 New Stage Event (หลังกด play8) ────────────────────────────
+            #     เช็คหา checkponit-play8 ก่อน = "มีอีเวนต์นี้จริง"
+            #       เจอ    → ทำ new-stageplay8-1 → -2 → -3 ทีละตัว
+            #                แต่ละตัว "กดซ้ำไปเรื่อยๆ จนกว่ารูปจะหายไปจริง" ค่อยไปตัวถัดไป
+            #       ไม่เจอ → ไม่มีอีเวนต์ ข้ามไป step ถัดไปตามปกติ (ไม่ถือว่าพัง)
+            #     (หลุดลูปทาง fixout→cancel = อยู่หน้าเมนูหลักแล้ว → ข้ามขั้นนี้)
+            if not p8_cancel_done:
+                gui_log(serial, "Checking checkponit-play8 (new stage event, 10s)...", step="NewStage")
+                found_cp8 = False
+                deadline_cp8 = time.time() + 10
+                while time.time() < deadline_cp8:
+                    check_device_reset(serial, cycle_start)
+                    img = get_screen_capture(device)
+                    if img is not None and img_search(img, os.path.join(IMG_DIR, "checkponit-play8.bmp")):
+                        found_cp8 = True
+                        gui_log(serial, "checkponit-play8 found! เริ่มขั้นตอน new-stageplay8...", step="NewStage")
+                        break
+                    time.sleep(0.5)
+
+                if found_cp8:
+                    for _ns in (1, 2, 3):
+                        _ns_name = f"new-stageplay8-{_ns}.bmp"
+                        gui_log(serial, f"Waiting {_ns_name}...", step=f"NewStage {_ns}")
+                        _ns_found = False
+                        _ns_deadline = time.time() + 15
+                        while time.time() < _ns_deadline:
+                            check_device_reset(serial, cycle_start)
+                            img = get_screen_capture(device)
+                            if img is not None:
+                                pts_ns = img_search(img, os.path.join(IMG_DIR, _ns_name))
+                                if pts_ns:
+                                    x_ns, y_ns = pts_ns[0]
+                                    # กดซ้ำจนกว่าจะหายไปจริง (ยืนยันหายครบ 1 วิ กัน animation กระพริบ)
+                                    click_img_until_gone(device, cycle_start, serial,
+                                                         os.path.join(IMG_DIR, _ns_name),
+                                                         x_ns, y_ns, stuck_secs=2.0, timeout=60.0,
+                                                         tag=f"NewStage {_ns}", gone_secs=1.0)
+                                    _ns_found = True
+                                    break
+                            time.sleep(0.4)
+                        if not _ns_found:
+                            gui_log(serial, f"{_ns_name} ไม่เจอใน 15 วิ — ข้ามไปตัวถัดไป", step=f"NewStage {_ns} Skip")
+                    gui_log(serial, "new-stageplay8 ครบทั้ง 3 ตัวแล้ว → ไป step ถัดไป", step="NewStage Done")
+                else:
+                    gui_log(serial, "ไม่เจอ checkponit-play8 — ไม่มีอีเวนต์ new stage ข้ามไปเลย", step="NewStage Skip")
+
             # 6. Event sequence — พฤติกรรมขึ้นกับ EVENT_IMG
             # (ถ้าหลุดลูปทาง fixout→cancel = กด Back+cancel ไปแล้ว อยู่หน้าเมนูหลักแล้ว → ข้ามขั้นนี้ทั้งหมด)
             if p8_cancel_done:
