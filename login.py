@@ -4967,12 +4967,19 @@ def run_new_stage_play8(device, serial, cycle_start=None):
             _ns_path = os.path.join(IMG_DIR, _ns_name)
 
             # 1) รอจนเจอตัวนี้จริงๆ (ไม่มี timeout — ห้ามข้ามไปตัวถัดไปเด็ดขาด)
+            #    เฉพาะตัวที่ 1: แวะเช็ค checkponit-play8 ด้วย (ตัวยืนยันว่าอยู่หน้าอีเวนต์แล้ว)
+            #    พอเจอ new-stageplay8-1 แล้ว = เลิกเช็ค checkpoint ที่เหลือไล่ตามลำดับอย่างเดียว
             gui_log(serial, f"รอ {_ns_name} (ไม่มี timeout)...", step=f"NewStage {_ns}")
+            _cp8_logged = False
             while True:
                 check_device_reset(serial, cycle_start)
                 img_ns = fast_screencap(device)
-                if img_ns is not None and img_search(img_ns, _ns_path):
-                    break
+                if img_ns is not None:
+                    if img_search(img_ns, _ns_path):
+                        break
+                    if _ns == 1 and not _cp8_logged and img_search(img_ns, os.path.join(IMG_DIR, "checkponit-play8.bmp")):
+                        gui_log(serial, "เจอ checkponit-play8 — อยู่หน้าอีเวนต์แล้ว รอ new-stageplay8-1...", step="NewStage")
+                        _cp8_logged = True
                 time.sleep(0.4)
 
             # 2) กดรัวๆ (~2 ครั้ง/วิ) จนกว่ารูปจะหายไปจริง — ยืนยันหายครบ 1 วิ กัน animation กระพริบ
@@ -6175,31 +6182,14 @@ def process_device_login(device):
                 continue
 
             # 5.5 New Stage Event (หลังกด play8) ────────────────────────────
-            #     เช็คหา checkponit-play8 ก่อน = "มีอีเวนต์นี้จริง"
-            #       เจอ    → ทำ new-stageplay8-1 → -2 → -3 ทีละตัว
-            #                แต่ละตัว "กดซ้ำไปเรื่อยๆ จนกว่ารูปจะหายไปจริง" ค่อยไปตัวถัดไป
-            #       ไม่เจอ → ไม่มีอีเวนต์ ข้ามไป step ถัดไปตามปกติ (ไม่ถือว่าพัง)
-            #     (หลุดลูปทาง fixout→cancel = อยู่หน้าเมนูหลักแล้ว → ข้ามขั้นนี้)
+            #     ทำตามลำดับนี้เป๊ะๆ: new-stageplay8-1 → -2 → -3
+            #     *** ห้ามยอมแพ้ / ห้ามมี timeout / ห้ามข้ามไป step อื่นระหว่างนี้ ***
+            #     หาไปเรื่อยๆ จนเจอตัวปัจจุบัน กดจนหาย แล้วค่อยไปตัวถัดไป
+            #     (ทางออกถ้าเกมค้างจริง = ปุ่ม ↺ reset / timeout รวมของทั้ง cycle เท่านั้น)
+            #     หลุดลูปทาง fixout→cancel = อยู่หน้าเมนูหลักแล้ว → ข้ามขั้นนี้
             if not p8_cancel_done and not DEVICE_NEWSTAGE_DONE.get(serial, False):
-                gui_log(serial, "Checking checkponit-play8 (new stage event, 10s)...", step="NewStage")
-                found_cp8 = False
-                deadline_cp8 = time.time() + 10
-                while time.time() < deadline_cp8:
-                    check_device_reset(serial, cycle_start)
-                    img = get_screen_capture(device)
-                    # floating check อาจจัดการอีเวนต์ให้เสร็จไปแล้วระหว่างแคปจอ → ไม่ต้องรอต่อ
-                    if DEVICE_NEWSTAGE_DONE.get(serial, False):
-                        break
-                    if img is not None and img_search(img, os.path.join(IMG_DIR, "checkponit-play8.bmp")):
-                        found_cp8 = True
-                        gui_log(serial, "checkponit-play8 found! เริ่มขั้นตอน new-stageplay8...", step="NewStage")
-                        break
-                    time.sleep(0.5)
-
-                if found_cp8:
-                    run_new_stage_play8(device, serial, cycle_start)
-                elif not DEVICE_NEWSTAGE_DONE.get(serial, False):
-                    gui_log(serial, "ไม่เจอ checkponit-play8 — ไม่มีอีเวนต์ new stage ข้ามไปเลย", step="NewStage Skip")
+                gui_log(serial, "New Stage: ทำ new-stageplay8-1 → -2 → -3 (หาไปเรื่อยๆ ไม่ยอมแพ้)", step="NewStage")
+                run_new_stage_play8(device, serial, cycle_start)
 
             # 6. Event sequence — พฤติกรรมขึ้นกับ EVENT_IMG
             # (ถ้าหลุดลูปทาง fixout→cancel = กด Back+cancel ไปแล้ว อยู่หน้าเมนูหลักแล้ว → ข้ามขั้นนี้ทั้งหมด)
