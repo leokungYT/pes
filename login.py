@@ -3336,6 +3336,57 @@ def get_screen_capture(device):
                     else:
                         gui_log(device.serial, "fixout gone on confirm — skip", step="Fix Out")
 
+            # Terms of Use floating check — เจอหัวข้อ "Terms of Use" (fixalert1) → กดยอมรับให้ผ่าน
+            #   เกมเปลี่ยน UI แล้ว:  เดิม = ช่องติ๊กว่าง ☐ + ปุ่ม "Accept"      (fixalert2 / fixalert3)
+            #                        ใหม่ = ติ๊กมาให้แล้ว ✅ + ปุ่ม "Consent"
+            #   ของเดิมวนหา fixalert2 แบบ while True ไม่มี timeout → UI ใหม่ไม่มีช่องติ๊กว่าง = ค้างตลอดกาล
+            #   ของใหม่: ติ๊กช่อง (เฉพาะถ้ายังว่าง) → กดปุ่มยอมรับ (consent.bmp / fixalert3)
+            #            หารูปปุ่มไม่เจอใน 12 วิ → แตะตำแหน่งปุ่มขวาล่างตามสัดส่วนจอ แล้วไปต่อ (ไม่ค้าง)
+            tou_pts = img_search(img, _P['fixalert1'], threshold=0.7)
+            if tou_pts:
+                gui_log(device.serial, "Floating: Terms of Use — กดยอมรับ...", step="Terms")
+                # 1) ช่องติ๊กยังว่าง → กดติ๊กก่อน (ไม่เจอ = เกมติ๊กมาให้แล้ว ข้ามได้เลย)
+                cb_pts = img_search(img, _P['fixalert2'], threshold=0.7)
+                if cb_pts:
+                    x_cb, y_cb = cb_pts[0]
+                    device.shell(f"input swipe {x_cb} {y_cb} {x_cb} {y_cb} 100")
+                    gui_log(device.serial, f"ติ๊ก consent checkbox ({x_cb},{y_cb})", step="Terms")
+                    time.sleep(1.0)
+
+                # 2) กดปุ่มยอมรับ — ลอง consent.bmp (ปุ่ม "Consent" ตัวใหม่) ก่อน แล้วค่อย fixalert3 ("Accept" ตัวเก่า)
+                accepted = False
+                deadline_tou = time.time() + 12
+                while time.time() < deadline_tou:
+                    img_t = fast_screencap(device)
+                    if img_t is None:
+                        time.sleep(0.3)
+                        continue
+                    pts_btn = (img_search(img_t, os.path.join(IMG_DIR, "consent.bmp"), threshold=0.7)
+                               or img_search(img_t, _P['fixalert3'], threshold=0.7))
+                    if pts_btn:
+                        x_bt, y_bt = pts_btn[0]
+                        device.shell(f"input swipe {x_bt} {y_bt} {x_bt} {y_bt} 100")
+                        gui_log(device.serial, f"กดปุ่มยอมรับ Terms ({x_bt},{y_bt})", step="Terms")
+                        time.sleep(2.0)
+                        accepted = True
+                        break
+                    # หน้า Terms หายไปเองแล้ว (กดผ่านไปแล้ว/จอเปลี่ยน) → ไม่ต้องทำอะไรต่อ
+                    if not img_search(img_t, _P['fixalert1'], threshold=0.7):
+                        accepted = True
+                        break
+                    time.sleep(0.4)
+
+                # 3) ไม่เจอรูปปุ่มเลย → แตะตำแหน่งปุ่มยอมรับ (ขวาล่าง) ตามสัดส่วนจอ
+                #    ปุ่มซ้าย = ปฏิเสธ / ปุ่มขวา = ยอมรับ — 0.70 อยู่กลางปุ่มขวาพอดี ห่างจากปุ่มซ้ายมาก
+                if not accepted:
+                    _h_s, _w_s = img.shape[0], img.shape[1]
+                    x_fb, y_fb = int(_w_s * 0.70), int(_h_s * 0.89)
+                    device.shell(f"input swipe {x_fb} {y_fb} {x_fb} {y_fb} 100")
+                    gui_log(device.serial, f"ไม่เจอรูปปุ่มยอมรับ — แตะตำแหน่งปุ่มขวาล่าง ({x_fb},{y_fb})", step="Terms Fallback")
+                    time.sleep(2.0)
+
+                img = fast_screencap(device)
+
             # checkponit-play8.bmp floating check — เจอหน้าอีเวนต์ new stage ตอนไหนก็จัดการทันที
             # *** แทนที่ fixalert1/2/3 เดิม ***
             #     ของเดิมพอเจอ fixalert1 จะวนหา fixalert2 แบบ "ไม่มี timeout" ถ้า fixalert2 ไม่โผล่
