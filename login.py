@@ -6101,11 +6101,13 @@ def process_device_login(device):
                                 pts_ns = img_search(img, os.path.join(IMG_DIR, _ns_name))
                                 if pts_ns:
                                     x_ns, y_ns = pts_ns[0]
-                                    # กดซ้ำจนกว่าจะหายไปจริง (ยืนยันหายครบ 1 วิ กัน animation กระพริบ)
+                                    # กดรัวๆ ~2 ครั้ง/วิ จนกว่ารูปจะหายไปจริง (กดรอบเดียวมักไม่ติด)
+                                    # stuck_secs=0.5 + settle=0.35 = ยังเห็นรูปอยู่ก็กดซ้ำแทบจะทันที
+                                    # gone_secs=1.0 = ต้องหายติดต่อกัน 1 วิ ถึงนับว่าหายจริง (กัน animation กระพริบ)
                                     click_img_until_gone(device, cycle_start, serial,
                                                          os.path.join(IMG_DIR, _ns_name),
-                                                         x_ns, y_ns, stuck_secs=2.0, timeout=60.0,
-                                                         tag=f"NewStage {_ns}", gone_secs=1.0)
+                                                         x_ns, y_ns, stuck_secs=0.5, settle=0.35,
+                                                         timeout=60.0, tag=f"NewStage {_ns}", gone_secs=1.0)
                                     _ns_found = True
                                     break
                             time.sleep(0.4)
