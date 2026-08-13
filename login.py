@@ -7618,6 +7618,7 @@ def process_device_login(device):
                                 found_g4 = False
                                 g4_click_count = 0
                                 g4_wait_since = time.time()   # ค้างรอ gacha4 เกิน 8 วิ → ลองหา next.bmp แล้วกด
+                                fixg1_first_seen = None       # ติดตาม fixgacha1 ค้าง (ครบ 10 วิ = กดปิด)
                                 while True:
                                     check_device_reset(serial, cycle_start)
                                     img = get_screen_capture(device)
@@ -7626,6 +7627,24 @@ def process_device_login(device):
                                         if img is None:
                                             continue
                                         # (ไม่เช็ค outloop ตรงนี้ — outloop เช็คเฉพาะ "หลังกด gacha5" แล้วเท่านั้น)
+
+                                        # ── fixgacha1 ค้างครบ 10 วิ → กดปิด แล้วกลับไปหา gacha4 ต่อ ──
+                                        #    (ต้องค้างจริง 10 วิ กันกดพลาดตอนจอกำลังเปลี่ยน)
+                                        pts_fg1 = img_search(img, os.path.join(IMG_DIR, "fixgacha1.bmp"))
+                                        if pts_fg1:
+                                            if fixg1_first_seen is None:
+                                                fixg1_first_seen = time.time()
+                                                gui_log(serial, "fixgacha1 detected — เฝ้าดู 10 วิ...", step="FixGacha1")
+                                            elif time.time() - fixg1_first_seen >= 10:
+                                                x_f1, y_f1 = pts_fg1[0]
+                                                device.shell(f"input swipe {x_f1} {y_f1} {x_f1} {y_f1} 100")
+                                                gui_log(serial, f"fixgacha1 ค้างครบ 10 วิ → กด ({x_f1},{y_f1}) แล้วกลับไปหา gacha4 ต่อ", step="FixGacha1 Click")
+                                                fixg1_first_seen = None
+                                                g4_wait_since = time.time()   # เริ่มจับเวลารอ gacha4 ใหม่
+                                                time.sleep(1.5)
+                                                continue
+                                        else:
+                                            fixg1_first_seen = None   # หายแล้ว → เจอใหม่ค่อยเริ่มนับ 10 วิใหม่
 
                                         # ค้างรอ gacha4 เกิน 8 วิ → หน้าผลสุ่มอาจยังค้างอยู่ → ลองหา next.bmp แล้วกด
                                         if time.time() - g4_wait_since > 8:
@@ -7687,7 +7706,8 @@ def process_device_login(device):
                                                 # watchdog ใน G5 จะสั่ง restart ตั้งแต่ play8 ให้เอง
                                                 found_g4 = True
                                                 break
-                                        if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
+                                        # เหรียญไม่พอ — เจอ nocions หรือ not-coin ตัวไหนก็นับว่าเหรียญหมด
+                                        if img_search_any(img, ["nocions.bmp", "not-coin.bmp"]):
                                             found_g4 = "nocoin"
                                             break
 
@@ -7697,7 +7717,7 @@ def process_device_login(device):
 
                                 if found_g4 in ["nocoin", "outloop"]:
                                     if found_g4 == "nocoin":
-                                        gui_log(serial, "nocions.bmp detected during Custom Gacha!", step="No-Coins")
+                                        gui_log(serial, "เหรียญหมด (nocions/not-coin) detected during Custom Gacha!", step="No-Coins")
                                     else:
                                         gui_log(serial, "outloop.bmp detected during Custom Gacha!", step="Outloop Exit")
                                     break
@@ -7816,6 +7836,7 @@ def process_device_login(device):
                             g4_click_count = 0
                             gui_log(serial, "Waiting gacha4.bmp (10s)...", step="Gacha4")
                             deadline_g4 = time.time() + 10
+                            fixg1_first_seen = None   # ติดตาม fixgacha1 ค้าง (ครบ 10 วิ = กดปิด)
                             while time.time() < deadline_g4:
                                 check_device_reset(serial, cycle_start)
                                 img = get_screen_capture(device)
@@ -7823,6 +7844,26 @@ def process_device_login(device):
                                     img, _ = check_and_click_fixback(device, img, serial, check_g1=False)
                                     if img is None:
                                         continue
+
+                                    # ── fixgacha1 ค้างครบ 10 วิ → กดปิด แล้วกลับไปหา gacha4 ต่อ ──
+                                    #    ระหว่างเฝ้าดูจะต่ออายุ deadline ให้ ไม่งั้นหมดเวลา 10 วิก่อนจะครบรอบเฝ้าดู
+                                    pts_fg1 = img_search(img, os.path.join(IMG_DIR, "fixgacha1.bmp"))
+                                    if pts_fg1:
+                                        if fixg1_first_seen is None:
+                                            fixg1_first_seen = time.time()
+                                            gui_log(serial, "fixgacha1 detected — เฝ้าดู 10 วิ...", step="FixGacha1")
+                                        elif time.time() - fixg1_first_seen >= 10:
+                                            x_f1, y_f1 = pts_fg1[0]
+                                            device.shell(f"input swipe {x_f1} {y_f1} {x_f1} {y_f1} 100")
+                                            gui_log(serial, f"fixgacha1 ค้างครบ 10 วิ → กด ({x_f1},{y_f1}) แล้วกลับไปหา gacha4 ต่อ", step="FixGacha1 Click")
+                                            fixg1_first_seen = None
+                                            time.sleep(1.5)
+                                            deadline_g4 = time.time() + 10   # ให้เวลาหา gacha4 ใหม่เต็ม 10 วิ
+                                            continue
+                                        deadline_g4 = max(deadline_g4, time.time() + 12)  # ยังเฝ้าดูอยู่ → อย่าเพิ่งหมดเวลา
+                                    else:
+                                        fixg1_first_seen = None   # หายแล้ว → เจอใหม่ค่อยเริ่มนับ 10 วิใหม่
+
                                     # เช็ค outloop.bmp ก่อนเสมอ เจอแล้วจบการทำงานทันที
                                     if img_search(img, os.path.join(IMG_DIR, "outloop.bmp")):
                                         gui_log(serial, "outloop.bmp detected while waiting/clicking gacha4!", step="G4-Outloop")
@@ -7874,8 +7915,8 @@ def process_device_login(device):
                                             # watchdog ใน G5 จะสั่ง restart ตั้งแต่ play8 ให้เอง
                                             found_g4 = True
                                             break
-                                    # เช็ค nocions ระหว่างรอ
-                                    if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
+                                    # เช็คเหรียญไม่พอระหว่างรอ (nocions / not-coin เจอตัวไหนก็นับ)
+                                    if img_search_any(img, ["nocions.bmp", "not-coin.bmp"]):
                                         found_g4 = "nocoin"
                                         break
 
@@ -7885,7 +7926,7 @@ def process_device_login(device):
 
                             if not found_g4:
                                 # ไม่เจอ gacha4 ใน 10s -> แวะเช็ค nocions ต่ออีก 10s
-                                gui_log(serial, "gacha4 not found, checking nocions (10s)...", step="Check-NC")
+                                gui_log(serial, "gacha4 not found, checking nocions/not-coin (10s)...", step="Check-NC")
                                 deadline_nc = time.time() + 10
                                 while time.time() < deadline_nc:
                                     check_device_reset(serial, cycle_start)
@@ -7894,7 +7935,7 @@ def process_device_login(device):
                                         img, _ = check_and_click_fixback(device, img, serial, check_g1=False)
                                         if img is None:
                                             continue
-                                        if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
+                                        if img_search_any(img, ["nocions.bmp", "not-coin.bmp"]):
                                             found_g4 = "nocoin"
                                             break
                                     time.sleep(0.15)
