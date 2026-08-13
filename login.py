@@ -6138,15 +6138,9 @@ def process_device_login(device):
                     release_file(original_name)
                 continue
 
-            # 5.5 New Stage Event (หลังกด play8) ────────────────────────────
-            #     ทำตามลำดับนี้เป๊ะๆ: new-stageplay8-1 → -2 → -3
-            #     *** ห้ามยอมแพ้ / ห้ามมี timeout / ห้ามข้ามไป step อื่นระหว่างนี้ ***
-            #     หาไปเรื่อยๆ จนเจอตัวปัจจุบัน กดจนหาย แล้วค่อยไปตัวถัดไป
-            #     (ทางออกถ้าเกมค้างจริง = ปุ่ม ↺ reset / timeout รวมของทั้ง cycle เท่านั้น)
-            #     หลุดลูปทาง fixout→cancel = อยู่หน้าเมนูหลักแล้ว → ข้ามขั้นนี้
-            if not p8_cancel_done and not DEVICE_NEWSTAGE_DONE.get(serial, False):
-                gui_log(serial, "New Stage: ทำ new-stageplay8-1 → -2 → -3 (หาไปเรื่อยๆ ไม่ยอมแพ้)", step="NewStage")
-                run_new_stage_play8(device, serial, cycle_start)
+            # (ไม่มีขั้น checkponit-play8 ตรงนี้แล้ว — เจอ checkpointlogin = ผ่าน login แล้ว
+            #  ให้ไป step ถัดไปเลย ลำดับ ☐ ติ๊ก → Consent → Confirm จะถูกทำก็ต่อเมื่อ
+            #  "เจอหน้า Terms of Use จริงๆ" เท่านั้น คือในลูป play8 ข้อ 1.5 หรือ floating check)
 
             # 6. Event sequence — พฤติกรรมขึ้นกับ EVENT_IMG
             # (ถ้าหลุดลูปทาง fixout→cancel = กด Back+cancel ไปแล้ว อยู่หน้าเมนูหลักแล้ว → ข้ามขั้นนี้ทั้งหมด)
