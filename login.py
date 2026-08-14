@@ -6377,11 +6377,54 @@ def process_device_login(device):
 
                 time.sleep(0.5)   # พักให้ช่องกรอกพร้อมก่อนพิมพ์
 
-                # Type the code text from config
+                # ── กรอกโค้ด แล้ว "ตรวจว่าตัวหนังสือลงจริง" ──────────────────
+                #   เทียบภาพช่องกรอก (กรอบเดียวกับที่ fixgetcode5 แมตช์) ก่อน/หลังพิมพ์
+                #   ภาพเหมือนเดิมเป๊ะ = ตัวหนังสือไม่ลง → เคลียร์ช่อง กดช่องใหม่ แล้วพิมพ์ซ้ำ (สูงสุด 3 รอบ)
+                #   (เครื่องนี้ไม่มีแอป clipper/ADBKeyBoard เลยใช้ input text + ตรวจผลแทน copy-paste)
                 code_text = GETCODE_TEXT
-                gui_log(serial, f"Typing code: {code_text}", step="Type Code")
-                device.shell(f"input text '{code_text}'")
-                time.sleep(1.5)
+
+                def _code_field_crop():
+                    """คืนภาพกรอบช่องกรอกโค้ด (numpy) หรือ None ถ้าหาไม่เจอ"""
+                    im_f = fast_screencap(device)
+                    if im_f is None:
+                        return None
+                    _p = os.path.join(IMG_DIR, "fixgetcode5.bmp")
+                    pts_f = img_search_best(im_f, _p, threshold=0.9)
+                    tpl_f = load_template(_p)
+                    if not pts_f or tpl_f is None:
+                        return None
+                    th_f, tw_f = tpl_f.shape
+                    cx_f, cy_f = pts_f[0]
+                    x0_f, y0_f = max(0, cx_f - tw_f // 2), max(0, cy_f - th_f // 2)
+                    return im_f[y0_f:y0_f + th_f, x0_f:x0_f + tw_f].copy()
+
+                for _code_try in range(3):
+                    before_crop = _code_field_crop()
+                    gui_log(serial, f"Typing code: {code_text} (รอบ {_code_try+1}/3)", step="Type Code")
+                    device.shell(f"input text '{code_text}'")
+                    time.sleep(1.5)
+
+                    after_crop = _code_field_crop()
+                    if before_crop is None or after_crop is None or before_crop.shape != after_crop.shape:
+                        gui_log(serial, "เทียบภาพช่องกรอกไม่ได้ — ถือว่าพิมพ์แล้ว ไปต่อ", step="Type Code")
+                        break
+
+                    diff_val = float(np.mean(cv2.absdiff(before_crop, after_crop)))
+                    if diff_val >= 1.0:
+                        gui_log(serial, f"โค้ดลงช่องแล้ว (diff={diff_val:.1f})", step="Type Code OK")
+                        break
+
+                    if _code_try == 2:
+                        gui_log(serial, "พิมพ์ครบ 3 รอบแล้วช่องยังว่าง — ไปต่อ", step="Type Code Fail")
+                        break
+
+                    # ช่องยังว่าง → เคลียร์ของเดิมทิ้ง แล้วกดช่องใหม่ให้โฟกัส ก่อนพิมพ์ซ้ำ
+                    gui_log(serial, f"ช่องยังว่าง (diff={diff_val:.1f}) → เคลียร์แล้วพิมพ์ใหม่", step="Type Code Retry")
+                    device.shell("input keyevent 123")   # MOVE_END
+                    device.shell(" ; ".join(["input keyevent 67"] * (len(code_text) + 5)))   # DEL รวดเดียว
+                    if gc5_pos:
+                        device.shell(f"input swipe {gc5_pos[0]} {gc5_pos[1]} {gc5_pos[0]} {gc5_pos[1]} 100")
+                    time.sleep(1.0)
 
                 # Click getcode6.bmp — กดซ้ำๆ จนกว่าจะไปหน้าถัดไป (getcode6 หายไป / เจอผล okcode-codesom)
                 gui_log(serial, "Waiting for getcode6.bmp...", step="getcode6 Wait")
