@@ -4942,6 +4942,19 @@ def run_new_stage_play8(device, serial, cycle_start=None):
     DEVICE_IN_NEWSTAGE[serial] = True
     _prev_fixout = DEVICE_DISABLE_FIXOUT.get(serial, False)
     DEVICE_DISABLE_FIXOUT[serial] = True   # ห้าม Back spam / กด cancel แทรกระหว่างขั้นตอนนี้
+
+    def _check_fixclearplay8(img_chk, step_no):
+        """เจอ fixclearplay8 ระหว่าง step 1/2 → ปิดแอพ เปิดใหม่ เริ่มจาก play8 อีกรอบ
+        (trigger_restart_from_play8 จะ force-stop + raise RestartFromPlay8Exception ให้เอง)"""
+        if step_no not in (1, 2) or img_chk is None:
+            return
+        if img_search_best(img_chk, os.path.join(IMG_DIR, "fixclearplay8.bmp"), threshold=0.9):
+            on_fc = DEVICE_FILE_ASSIGNMENTS.get(serial)
+            gui_log(serial, f"เจอ fixclearplay8 ตอน new-stageplay8-{step_no} → ปิดแอพเปิดใหม่ เริ่มจาก play8",
+                    step="FixClearPlay8", status="working")
+            trigger_restart_from_play8(device, serial, on_fc,
+                                       reason=f"fixclearplay8 ตอน new-stageplay8-{step_no}")
+
     try:
         for _ns in (1, 2, 3):
             _ns_name = f"new-stageplay8-{_ns}.bmp"
@@ -4960,6 +4973,7 @@ def run_new_stage_play8(device, serial, cycle_start=None):
             while True:
                 check_device_reset(serial, cycle_start)
                 img_ns = fast_screencap(device)
+                _check_fixclearplay8(img_ns, _ns)
                 if img_ns is not None:
                     if img_search_best(img_ns, _ns_path, threshold=0.9):
                         break
@@ -4984,6 +4998,7 @@ def run_new_stage_play8(device, serial, cycle_start=None):
             while True:
                 check_device_reset(serial, cycle_start)
                 img_ns = fast_screencap(device)
+                _check_fixclearplay8(img_ns, _ns)
                 if img_ns is None:
                     time.sleep(0.3)
                     continue
