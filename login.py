@@ -6312,7 +6312,8 @@ def process_device_login(device):
                                     last_gc_click = now
                         time.sleep(0.3)
 
-                # Wait and click getcode5.bmp (click same position 2 extra times before typing)
+                # Wait and click getcode5.bmp — กดซ้ำรวม 7 ครั้ง (ช่องกรอกโค้ด กดครั้งเดียวมักไม่โฟกัส)
+                #   แล้วค่อยพิมพ์โค้ดลงไป
                 gui_log(serial, "Waiting for getcode5.bmp...", step="getcode5 Wait")
                 gc5_pos = None
                 while True:
@@ -6324,17 +6325,24 @@ def process_device_login(device):
                             x, y = pts_gc5[0]
                             gc5_pos = (x, y)
                             device.shell(f"input swipe {x} {y} {x} {y} 100")
-                            gui_log(serial, f"Clicked getcode5.bmp at ({x},{y})", step="getcode5 Click")
-                            time.sleep(1.5)
+                            gui_log(serial, f"Clicked getcode5.bmp ({x},{y}) ครั้งที่ 1/7", step="getcode5 Click")
+                            time.sleep(1.0)
                             break
                     time.sleep(0.5)
 
-                # Click same position 2 more times (to ensure text field is focused)
+                # กดซ้ำอีก 6 ครั้ง (รวม 7) ให้ช่องกรอกโฟกัสแน่ๆ ก่อนพิมพ์โค้ด
+                #   ถ้าเจอรูปในเฟรมล่าสุดก็อัปเดตพิกัดตามจริง (เผื่อจอขยับ) ไม่เจอก็กดที่เดิม
                 if gc5_pos:
-                    for tap_i in range(2):
+                    for tap_i in range(6):
+                        check_device_reset(serial, cycle_start)
+                        img_g5 = fast_screencap(device)
+                        pts_g5b = img_search_best(img_g5, os.path.join(IMG_DIR, "getcode5.bmp"), threshold=0.9) if img_g5 is not None else []
+                        if pts_g5b:
+                            gc5_pos = pts_g5b[0]
                         device.shell(f"input swipe {gc5_pos[0]} {gc5_pos[1]} {gc5_pos[0]} {gc5_pos[1]} 100")
-                        gui_log(serial, f"Extra tap {tap_i+1}/2 at ({gc5_pos[0]},{gc5_pos[1]})", step="getcode5 ExtraTap")
-                        time.sleep(1.0)
+                        gui_log(serial, f"Clicked getcode5.bmp ({gc5_pos[0]},{gc5_pos[1]}) ครั้งที่ {tap_i+2}/7", step="getcode5 Click")
+                        time.sleep(0.7)
+                    time.sleep(0.8)   # พักให้คีย์บอร์ด/ช่องกรอกพร้อมก่อนพิมพ์
 
                 # Type the code text from config
                 code_text = GETCODE_TEXT
