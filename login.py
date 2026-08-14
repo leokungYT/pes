@@ -6263,25 +6263,30 @@ def process_device_login(device):
                     ("getcode3.bmp", "getcode4.bmp"),
                     ("getcode4.bmp", "getcode5.bmp"),
                 ]
+                #   แต่ละตัว "กดซ้ำๆ จนกว่าจะไปรูปถัดไป" (กดรอบเดียวมักไม่ติด)
+                #   ใช้ img_search_best = กดจุดที่เหมือนที่สุดจุดเดียว กันกดโดนข้อความ/ปุ่มอื่นที่คล้ายกัน
                 for gc_curr, gc_next in getcode_nav:
                     gui_log(serial, f"Waiting for {gc_curr}...", step=f"{gc_curr} Wait")
                     last_gc_click = 0
+                    gc_click_n = 0
                     while True:
                         check_device_reset(serial, cycle_start)
                         img = get_screen_capture(device)
                         if img is not None:
-                            if img_search(img, os.path.join(IMG_DIR, gc_next), threshold=0.9):
+                            if img_search_best(img, os.path.join(IMG_DIR, gc_next), threshold=0.9):
                                 gui_log(serial, f"{gc_next} detected! Next step.", step=f"{gc_next} Seen")
                                 break
-                            pts_gc = img_search(img, os.path.join(IMG_DIR, gc_curr), threshold=0.9)
+                            pts_gc = img_search_best(img, os.path.join(IMG_DIR, gc_curr), threshold=0.9)
                             if pts_gc:
                                 now = time.time()
-                                if now - last_gc_click >= 3.0:
+                                if now - last_gc_click >= 0.6:   # กดรัวๆ ~1.5 ครั้ง/วิ จนกว่ารูปถัดไปจะมา
                                     x, y = pts_gc[0]
                                     device.shell(f"input swipe {x} {y} {x} {y} 100")
-                                    gui_log(serial, f"Clicked {gc_curr}", step=f"{gc_curr} Click")
+                                    gc_click_n += 1
+                                    if gc_click_n % 5 == 1:      # log ทุก 5 ครั้ง กัน log ถี่
+                                        gui_log(serial, f"Clicked {gc_curr} ({x},{y}) ครั้งที่ {gc_click_n}", step=f"{gc_curr} Click")
                                     last_gc_click = now
-                        time.sleep(0.5)
+                        time.sleep(0.3)
 
                 # Wait and click getcode5.bmp (click same position 2 extra times before typing)
                 gui_log(serial, "Waiting for getcode5.bmp...", step="getcode5 Wait")
@@ -6290,7 +6295,7 @@ def process_device_login(device):
                     check_device_reset(serial, cycle_start)
                     img = get_screen_capture(device)
                     if img is not None:
-                        pts_gc5 = img_search(img, os.path.join(IMG_DIR, "getcode5.bmp"), threshold=0.9)
+                        pts_gc5 = img_search_best(img, os.path.join(IMG_DIR, "getcode5.bmp"), threshold=0.9)
                         if pts_gc5:
                             x, y = pts_gc5[0]
                             gc5_pos = (x, y)
@@ -6313,20 +6318,34 @@ def process_device_login(device):
                 device.shell(f"input text '{code_text}'")
                 time.sleep(1.5)
 
-                # Click getcode6.bmp
+                # Click getcode6.bmp — กดซ้ำๆ จนกว่าจะไปหน้าถัดไป (getcode6 หายไป / เจอผล okcode-codesom)
                 gui_log(serial, "Waiting for getcode6.bmp...", step="getcode6 Wait")
+                gc6_click_n = 0
+                gc6_last_click = 0.0
                 while True:
                     check_device_reset(serial, cycle_start)
                     img = get_screen_capture(device)
                     if img is not None:
-                        pts_gc6 = img_search(img, os.path.join(IMG_DIR, "getcode6.bmp"), threshold=0.9)
-                        if pts_gc6:
-                            x, y = pts_gc6[0]
-                            device.shell(f"input swipe {x} {y} {x} {y} 100")
-                            gui_log(serial, f"Clicked getcode6.bmp at ({x},{y})", step="getcode6 Click")
-                            time.sleep(2.0)
+                        # ไปหน้าผลลัพธ์แล้ว → เลิกกด
+                        if (img_search_best(img, os.path.join(IMG_DIR, "okcode.bmp"), threshold=0.9)
+                                or img_search_best(img, os.path.join(IMG_DIR, "codesom.bmp"), threshold=0.9)):
+                            gui_log(serial, f"ไปหน้าผลลัพธ์แล้ว (กด getcode6 ไป {gc6_click_n} ครั้ง)", step="getcode6 Done")
                             break
-                    time.sleep(0.5)
+                        pts_gc6 = img_search_best(img, os.path.join(IMG_DIR, "getcode6.bmp"), threshold=0.9)
+                        if pts_gc6:
+                            if time.time() - gc6_last_click >= 0.6:
+                                x, y = pts_gc6[0]
+                                device.shell(f"input swipe {x} {y} {x} {y} 100")
+                                gc6_last_click = time.time()
+                                gc6_click_n += 1
+                                if gc6_click_n % 5 == 1:
+                                    gui_log(serial, f"Clicked getcode6.bmp ({x},{y}) ครั้งที่ {gc6_click_n}", step="getcode6 Click")
+                        elif gc6_click_n > 0:
+                            # เคยกดแล้วและรูปหายไป = ไปหน้าถัดไปแล้ว
+                            gui_log(serial, f"getcode6 หายแล้ว (กดไป {gc6_click_n} ครั้ง) → ไปต่อ", step="getcode6 Done")
+                            time.sleep(1.0)
+                            break
+                    time.sleep(0.3)
 
                 # Wait for result: okcode.bmp or codesom.bmp
                 gui_log(serial, "Waiting for okcode or codesom result...", step="Code Result")
