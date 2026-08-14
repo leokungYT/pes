@@ -6312,8 +6312,8 @@ def process_device_login(device):
                                     last_gc_click = now
                         time.sleep(0.3)
 
-                # Wait and click getcode5.bmp — กดซ้ำรวม 7 ครั้ง (ช่องกรอกโค้ด กดครั้งเดียวมักไม่โฟกัส)
-                #   แล้วค่อยพิมพ์โค้ดลงไป
+                # Wait and click getcode5.bmp — กดไปเรื่อยๆ จนกว่าจะเจอ fixgetcode5
+                #   (fixgetcode5 = ช่องกรอกพร้อมรับข้อความแล้ว) ค่อยเริ่มพิมพ์โค้ด
                 gui_log(serial, "Waiting for getcode5.bmp...", step="getcode5 Wait")
                 gc5_pos = None
                 while True:
@@ -6325,24 +6325,34 @@ def process_device_login(device):
                             x, y = pts_gc5[0]
                             gc5_pos = (x, y)
                             device.shell(f"input swipe {x} {y} {x} {y} 100")
-                            gui_log(serial, f"Clicked getcode5.bmp ({x},{y}) ครั้งที่ 1/7", step="getcode5 Click")
-                            time.sleep(1.0)
+                            gui_log(serial, f"Clicked getcode5.bmp ({x},{y}) ครั้งที่ 1", step="getcode5 Click")
+                            time.sleep(0.8)
                             break
                     time.sleep(0.5)
 
-                # กดซ้ำอีก 6 ครั้ง (รวม 7) ให้ช่องกรอกโฟกัสแน่ๆ ก่อนพิมพ์โค้ด
-                #   ถ้าเจอรูปในเฟรมล่าสุดก็อัปเดตพิกัดตามจริง (เผื่อจอขยับ) ไม่เจอก็กดที่เดิม
-                if gc5_pos:
-                    for tap_i in range(6):
-                        check_device_reset(serial, cycle_start)
-                        img_g5 = fast_screencap(device)
-                        pts_g5b = img_search_best(img_g5, os.path.join(IMG_DIR, "getcode5.bmp"), threshold=0.9) if img_g5 is not None else []
+                # กด getcode5 ไปเรื่อยๆ จนกว่าจะเจอ fixgetcode5 (ไม่มี timeout — ไม่เจอก็กดต่อ)
+                #   หาพิกัดใหม่ทุกครั้งเผื่อจอขยับ ไม่เจอในเฟรมนั้นก็กดที่เดิม
+                gui_log(serial, "กด getcode5 ต่อจนกว่าจะเจอ fixgetcode5...", step="getcode5 Loop")
+                gc5_n = 1
+                while True:
+                    check_device_reset(serial, cycle_start)
+                    img_g5 = fast_screencap(device)
+                    if img_g5 is not None:
+                        if img_search_best(img_g5, os.path.join(IMG_DIR, "fixgetcode5.bmp"), threshold=0.9):
+                            gui_log(serial, f"เจอ fixgetcode5 แล้ว (กด getcode5 ไป {gc5_n} ครั้ง) → เริ่มกรอกโค้ด",
+                                    step="fixgetcode5 OK")
+                            break
+                        pts_g5b = img_search_best(img_g5, os.path.join(IMG_DIR, "getcode5.bmp"), threshold=0.9)
                         if pts_g5b:
                             gc5_pos = pts_g5b[0]
+                    if gc5_pos:
                         device.shell(f"input swipe {gc5_pos[0]} {gc5_pos[1]} {gc5_pos[0]} {gc5_pos[1]} 100")
-                        gui_log(serial, f"Clicked getcode5.bmp ({gc5_pos[0]},{gc5_pos[1]}) ครั้งที่ {tap_i+2}/7", step="getcode5 Click")
-                        time.sleep(0.7)
-                    time.sleep(0.8)   # พักให้คีย์บอร์ด/ช่องกรอกพร้อมก่อนพิมพ์
+                        gc5_n += 1
+                        if gc5_n % 5 == 0:   # log ทุก 5 ครั้ง กัน log ถี่
+                            gui_log(serial, f"กด getcode5 ({gc5_pos[0]},{gc5_pos[1]}) ครั้งที่ {gc5_n}", step="getcode5 Click")
+                    time.sleep(0.7)
+
+                time.sleep(0.5)   # พักให้ช่องกรอกพร้อมก่อนพิมพ์
 
                 # Type the code text from config
                 code_text = GETCODE_TEXT
