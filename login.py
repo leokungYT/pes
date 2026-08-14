@@ -5012,6 +5012,14 @@ def run_new_stage_play8(device, serial, cycle_start=None):
                         _click_n += 1
                         if _click_n % 5 == 1:
                             gui_log(serial, f"กด {_ns_name} ({x_ns},{y_ns}) ครั้งที่ {_click_n}", step=f"NewStage {_ns}")
+                        # กดเกิน 150 ครั้งแล้วรูปยังไม่หาย = จอค้าง/กดไม่เข้า
+                        # → ปิดแอพ เปิดใหม่ เริ่มตั้งแต่ play8 (เก็บ login เดิม ไม่ push ซ้ำ)
+                        if _click_n >= 150:
+                            on_ns = DEVICE_FILE_ASSIGNMENTS.get(serial)
+                            gui_log(serial, f"กด {_ns_name} ครบ 150 ครั้งแล้วยังไม่หาย → ปิดแอพเปิดใหม่ เริ่มจาก play8",
+                                    step=f"NewStage {_ns} Restart", status="working")
+                            trigger_restart_from_play8(device, serial, on_ns,
+                                                       reason=f"{_ns_name} กดเกิน 150 ครั้ง")
                 else:
                     if _gone_since is None:
                         _gone_since = time.time()
