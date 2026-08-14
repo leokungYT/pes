@@ -5252,16 +5252,40 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path, coin_
         return False
 
     # 1. gacha1 → gacha2 (ทำแค่ครั้งเดียวตอนเริ่ม)
+    #    gacha1: หาไปเรื่อยๆ ไม่มี timeout — ไม่เจอครบ 20 วิเมื่อไหร่ กด fixcode ใหม่
+    #            แล้วกลับไปเริ่มหา gacha1 ต่อ (นับ 20 วิใหม่ทุกครั้งที่กด)
+    #    gacha2: ตามเดิม (รอ 30 วิ)
     for i in range(1, 3):
         name = f"gacha{i}.bmp"
         gui_log(serial, f"Waiting {name}...", step=name)
-        deadline = time.time() + 30
-        while time.time() < deadline:
+        deadline = None if i == 1 else time.time() + 30
+        no_find_since = time.time()   # เริ่มจับเวลา "หาไม่เจอ" (ใช้เฉพาะ gacha1)
+        while deadline is None or time.time() < deadline:
             check_device_reset(serial, cycle_start)
             _check_fixcoin()  # priority #1
             img = get_screen_capture(device)
             if img is not None:
                 pts = img_search(img, os.path.join(IMG_DIR, name))
+                if not pts and i == 1 and time.time() - no_find_since >= 20:
+                    # ไม่เจอ gacha1 ครบ 20 วิ → กด fixcode ใหม่ (สูงสุด 5 ครั้ง / หยุดเมื่อรูปหาย)
+                    gui_log(serial, "ไม่เจอ gacha1 ครบ 20 วิ → กด fixcode ใหม่", step="gacha1 FixCode")
+                    fx_n = 0
+                    while fx_n < 5:
+                        check_device_reset(serial, cycle_start)
+                        img_fx = get_screen_capture(device)
+                        pts_fx = img_search_best(img_fx, os.path.join(IMG_DIR, "fixcode.bmp"), threshold=0.9) if img_fx is not None else []
+                        if not pts_fx:
+                            break
+                        x_fx, y_fx = pts_fx[0]
+                        device.shell(f"input swipe {x_fx} {y_fx} {x_fx} {y_fx} 100")
+                        fx_n += 1
+                        gui_log(serial, f"กด fixcode ({x_fx},{y_fx}) ครั้งที่ {fx_n}/5", step="gacha1 FixCode")
+                        time.sleep(0.6)
+                    if fx_n == 0:
+                        gui_log(serial, "ไม่เจอ fixcode บนจอ — หา gacha1 ต่อ", step="gacha1 FixCode")
+                    no_find_since = time.time()   # เริ่มนับ 20 วิใหม่ แล้วกลับไปหา gacha1 ต่อ
+                    time.sleep(1.0)
+                    continue
                 if pts:
                     x, y = pts[0]
                     if i == 2:
