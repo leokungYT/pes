@@ -6387,17 +6387,28 @@ def process_device_login(device):
                                 break
 
                 # Wait and click fixcode.bmp before proceeding to Box
+                #   กดซ้ำ 5 รอบเผื่อกดไม่ติด — ถ้ารูปหายไปก่อนครบ 5 ก็ถือว่าติดแล้ว หยุดกดไปต่อเลย
                 gui_log(serial, "Waiting for fixcode.bmp...", step="fixcode Wait")
+                fc_clicked = 0
                 while True:
                     check_device_reset(serial, cycle_start)
                     img = get_screen_capture(device)
                     if img is not None:
-                        pts_fc = img_search(img, os.path.join(IMG_DIR, "fixcode.bmp"), threshold=0.9)
+                        pts_fc = img_search_best(img, os.path.join(IMG_DIR, "fixcode.bmp"), threshold=0.9)
                         if pts_fc:
                             x, y = pts_fc[0]
                             device.shell(f"input swipe {x} {y} {x} {y} 100")
-                            gui_log(serial, f"Clicked fixcode.bmp at ({x},{y})", step="fixcode Click")
-                            time.sleep(2.0)
+                            fc_clicked += 1
+                            gui_log(serial, f"Clicked fixcode.bmp ({x},{y}) ครั้งที่ {fc_clicked}/5", step="fixcode Click")
+                            if fc_clicked >= 5:
+                                gui_log(serial, "กด fixcode ครบ 5 ครั้ง → ไปต่อ", step="fixcode Done")
+                                time.sleep(1.0)
+                                break
+                            time.sleep(0.6)
+                        elif fc_clicked > 0:
+                            # กดไปแล้วและรูปหายไป = ติดแล้ว ไม่ต้องกดให้ครบ 5
+                            gui_log(serial, f"fixcode หายแล้ว (กดไป {fc_clicked} ครั้ง) → ไปต่อ", step="fixcode Done")
+                            time.sleep(1.0)
                             break
                     time.sleep(0.5)
 
