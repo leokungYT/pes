@@ -47,6 +47,23 @@ pip install easyocr
 
 echo.
 echo ====================================================
+echo  [8/8] Checking Tesseract-OCR
+echo ====================================================
+if exist "C:\Program Files\Tesseract-OCR\tesseract.exe" (
+    echo  [OK] Tesseract found at C:\Program Files\Tesseract-OCR
+) else (
+    echo  [MISSING] Tesseract is NOT installed!
+    echo  The bot needs it at: C:\Program Files\Tesseract-OCR\tesseract.exe
+    echo.
+    echo  Download and install ^(default path, install once per machine^):
+    echo  https://github.com/UB-Mannheim/tesseract/wiki
+    echo.
+    echo  NOTE: Tesseract is no longer shipped inside this repo -
+    echo        it made every auto-update download 28 MB instead of ~7 MB.
+)
+
+echo.
+echo ====================================================
 echo  [IMPORTANT] Visual C++ Redistributable
 echo ====================================================
 echo.
