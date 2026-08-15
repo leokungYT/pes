@@ -6377,14 +6377,15 @@ def process_device_login(device):
 
                 time.sleep(0.5)   # พักให้ช่องกรอกพร้อมก่อนพิมพ์
 
-                # ── กรอกโค้ด แล้ว "ตรวจว่าตัวหนังสือลงจริง" ──────────────────
-                #   เทียบภาพช่องกรอก (กรอบเดียวกับที่ fixgetcode5 แมตช์) ก่อน/หลังพิมพ์
-                #   ภาพเหมือนเดิมเป๊ะ = ตัวหนังสือไม่ลง → เคลียร์ช่อง กดช่องใหม่ แล้วพิมพ์ซ้ำ (สูงสุด 3 รอบ)
-                #   (เครื่องนี้ไม่มีแอป clipper/ADBKeyBoard เลยใช้ input text + ตรวจผลแทน copy-paste)
+                # ── กรอกโค้ด: ล้างช่องก่อนเสมอ แล้ว OCR อ่านยืนยันว่าตรงจริง ──────
+                #   เคสจริงที่พัง: ในช่องมีตัวหนังสือเก่าค้างอยู่ (พิมพ์ไม่จบ/พิมพ์ซ้ำ)
+                #   พอพิมพ์ทับเลยกลายเป็น "CONNE" + "CONNECT813" = CONNECONNECT813 -> โค้ดใช้ไม่ได้
+                #   วิธีแก้: ล้างช่องให้เกลี้ยงทุกครั้ง -> พิมพ์ -> OCR อ่านกลับมาเทียบ
+                #           ไม่ตรง = ล้างแล้วพิมพ์ใหม่ (สูงสุด 3 รอบ)
                 code_text = GETCODE_TEXT
 
-                def _code_field_crop():
-                    """คืนภาพกรอบช่องกรอกโค้ด (numpy) หรือ None ถ้าหาไม่เจอ"""
+                def _code_field_box():
+                    """คืน (x, y, w, h) ของกรอบช่องกรอกโค้ด หรือ None ถ้าหาไม่เจอ"""
                     im_f = fast_screencap(device)
                     if im_f is None:
                         return None
@@ -6395,36 +6396,58 @@ def process_device_login(device):
                         return None
                     th_f, tw_f = tpl_f.shape
                     cx_f, cy_f = pts_f[0]
-                    x0_f, y0_f = max(0, cx_f - tw_f // 2), max(0, cy_f - th_f // 2)
-                    return im_f[y0_f:y0_f + th_f, x0_f:x0_f + tw_f].copy()
+                    return (max(0, cx_f - tw_f // 2), max(0, cy_f - th_f // 2), tw_f, th_f)
 
+                def _read_code_field(box):
+                    """OCR อ่านข้อความในช่องกรอก คืนสตริง (อ่านไม่ได้ = '')"""
+                    if not box:
+                        return ""
+                    img_r = get_screen_capture(device)
+                    if img_r is None:
+                        return ""
+                    x_b, y_b, w_b, h_b = box
+                    return read_screen_text(img_r, region=Region(x_b, y_b, w_b, h_b), serial=serial) or ""
+
+                def _norm_code(t):
+                    """ตัดช่องว่าง/ขีด แล้วทำเป็นตัวใหญ่ — กัน OCR อ่านเว้นวรรคเกินมา"""
+                    return "".join(ch for ch in str(t).upper() if ch.isalnum())
+
+                def _clear_code_field():
+                    """ล้างตัวหนังสือในช่องให้เกลี้ยง (ไปท้ายบรรทัดแล้วลบถอยหลังเผื่อไว้เยอะๆ)"""
+                    device.shell("input keyevent 123")                       # MOVE_END
+                    device.shell(" ; ".join(["input keyevent 67"] * 40))     # BACKSPACE x40
+                    device.shell(" ; ".join(["input keyevent 112"] * 10))    # FORWARD_DEL x10
+                    time.sleep(0.5)
+
+                code_box = _code_field_box()
+                typed_ok = False
                 for _code_try in range(3):
-                    before_crop = _code_field_crop()
+                    # 1) ล้างช่องก่อนเสมอ (ไม่ว่าจะรอบแรกหรือรอบแก้ตัว) แล้วกดช่องให้โฟกัสอีกที
+                    _clear_code_field()
+                    if gc5_pos:
+                        device.shell(f"input swipe {gc5_pos[0]} {gc5_pos[1]} {gc5_pos[0]} {gc5_pos[1]} 100")
+                        time.sleep(0.4)
+
+                    # 2) พิมพ์โค้ด
                     gui_log(serial, f"Typing code: {code_text} (รอบ {_code_try+1}/3)", step="Type Code")
                     device.shell(f"input text '{code_text}'")
                     time.sleep(1.5)
 
-                    after_crop = _code_field_crop()
-                    if before_crop is None or after_crop is None or before_crop.shape != after_crop.shape:
-                        gui_log(serial, "เทียบภาพช่องกรอกไม่ได้ — ถือว่าพิมพ์แล้ว ไปต่อ", step="Type Code")
+                    # 3) OCR อ่านกลับมาเทียบ
+                    got = _read_code_field(code_box)
+                    if not code_box:
+                        gui_log(serial, "หากรอบช่องกรอกไม่เจอ — ข้ามการตรวจ ไปต่อ", step="Type Code")
+                        typed_ok = True
                         break
-
-                    diff_val = float(np.mean(cv2.absdiff(before_crop, after_crop)))
-                    if diff_val >= 1.0:
-                        gui_log(serial, f"โค้ดลงช่องแล้ว (diff={diff_val:.1f})", step="Type Code OK")
+                    if _norm_code(got) == _norm_code(code_text):
+                        gui_log(serial, f"✅ โค้ดในช่องถูกต้อง: {got.strip()}", step="Type Code OK")
+                        typed_ok = True
                         break
+                    gui_log(serial, f"⚠️ โค้ดในช่องไม่ตรง (อ่านได้: '{got.strip()}' ต้องการ: '{code_text}') → ล้างแล้วพิมพ์ใหม่",
+                            step="Type Code Retry")
 
-                    if _code_try == 2:
-                        gui_log(serial, "พิมพ์ครบ 3 รอบแล้วช่องยังว่าง — ไปต่อ", step="Type Code Fail")
-                        break
-
-                    # ช่องยังว่าง → เคลียร์ของเดิมทิ้ง แล้วกดช่องใหม่ให้โฟกัส ก่อนพิมพ์ซ้ำ
-                    gui_log(serial, f"ช่องยังว่าง (diff={diff_val:.1f}) → เคลียร์แล้วพิมพ์ใหม่", step="Type Code Retry")
-                    device.shell("input keyevent 123")   # MOVE_END
-                    device.shell(" ; ".join(["input keyevent 67"] * (len(code_text) + 5)))   # DEL รวดเดียว
-                    if gc5_pos:
-                        device.shell(f"input swipe {gc5_pos[0]} {gc5_pos[1]} {gc5_pos[0]} {gc5_pos[1]} 100")
-                    time.sleep(1.0)
+                if not typed_ok:
+                    gui_log(serial, "พิมพ์ครบ 3 รอบแล้วโค้ดยังไม่ตรง — ส่งไปตามที่พิมพ์ได้", step="Type Code Fail")
 
                 # รอ 5 วิให้พิมพ์ลงครบทุกตัวก่อนค่อยไปกด getcode6
                 #   (บางทีตัวหนังสือยังพิมพ์ไม่จบ แล้วโดนกดส่งไปก่อน = โค้ดไม่ครบ)
