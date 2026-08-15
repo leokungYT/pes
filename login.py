@@ -6428,10 +6428,19 @@ def process_device_login(device):
                         device.shell(f"input swipe {gc5_pos[0]} {gc5_pos[1]} {gc5_pos[0]} {gc5_pos[1]} 100")
                         time.sleep(0.4)
 
-                    # 2) พิมพ์โค้ด
-                    gui_log(serial, f"Typing code: {code_text} (รอบ {_code_try+1}/3)", step="Type Code")
-                    device.shell(f"input text '{code_text}'")
-                    time.sleep(1.5)
+                    # 2) พิมพ์โค้ด — 2 รอบแรกพิมพ์รวดเดียว (เร็ว)
+                    #    รอบสุดท้ายพิมพ์ทีละตัวอักษร: ช้ากว่าแต่ตัวหล่นยากที่สุด
+                    #    (input text ยาวๆ บางเครื่องส่งไม่ครบ ตัวแรกๆ หายบ้าง)
+                    if _code_try < 2:
+                        gui_log(serial, f"Typing code: {code_text} (รอบ {_code_try+1}/3)", step="Type Code")
+                        device.shell(f"input text '{code_text}'")
+                        time.sleep(1.5)
+                    else:
+                        gui_log(serial, f"Typing code ทีละตัว: {code_text} (รอบ 3/3)", step="Type Code Slow")
+                        for _ch in code_text:
+                            device.shell(f"input text '{_ch}'")
+                            time.sleep(0.15)
+                        time.sleep(1.0)
 
                     # 3) OCR อ่านกลับมาเทียบ
                     got = _read_code_field(code_box)
@@ -6453,6 +6462,31 @@ def process_device_login(device):
                 #   (บางทีตัวหนังสือยังพิมพ์ไม่จบ แล้วโดนกดส่งไปก่อน = โค้ดไม่ครบ)
                 gui_log(serial, "พิมพ์เสร็จ — รอ 5 วิให้ตัวหนังสือลงครบก่อนกด getcode6", step="Type Code Wait")
                 time.sleep(5)
+
+                # ── ตรวจซ้ำ "ก่อนกดส่ง" อีกรอบ ────────────────────────────────
+                #    ระหว่าง 5 วินาทีนี้ตัวหนังสืออาจเพิ่งลงครบ/เพี้ยนได้อีก
+                #    ไม่ตรง = ล้างแล้วพิมพ์ทีละตัวใหม่ 1 รอบ ก่อนกดส่งจริง
+                if code_box:
+                    final_txt = _read_code_field(code_box)
+                    if _norm_code(final_txt) != _norm_code(code_text):
+                        gui_log(serial, f"⚠️ ก่อนกดส่งเช็คแล้วยังไม่ตรง (อ่านได้: '{final_txt.strip()}') → แก้ก่อนส่ง",
+                                step="Type Code Fix")
+                        _clear_code_field()
+                        if gc5_pos:
+                            device.shell(f"input swipe {gc5_pos[0]} {gc5_pos[1]} {gc5_pos[0]} {gc5_pos[1]} 100")
+                            time.sleep(0.4)
+                        for _ch in code_text:
+                            device.shell(f"input text '{_ch}'")
+                            time.sleep(0.15)
+                        time.sleep(2.0)
+                        final_txt = _read_code_field(code_box)
+                        if _norm_code(final_txt) == _norm_code(code_text):
+                            gui_log(serial, f"✅ แก้แล้วตรง: {final_txt.strip()}", step="Type Code OK")
+                        else:
+                            gui_log(serial, f"⚠️ ยังไม่ตรง (อ่านได้: '{final_txt.strip()}') — ส่งไปตามที่พิมพ์ได้",
+                                    step="Type Code Fail")
+                    else:
+                        gui_log(serial, f"✅ ก่อนกดส่ง โค้ดในช่องถูกต้อง: {final_txt.strip()}", step="Type Code OK")
 
                 # Click getcode6.bmp — กดซ้ำๆ จนกว่าจะไปหน้าถัดไป (getcode6 หายไป / เจอผล okcode-codesom)
                 gui_log(serial, "Waiting for getcode6.bmp...", step="getcode6 Wait")
