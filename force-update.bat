@@ -3,31 +3,32 @@ title FORCE UPDATE - PES Bot (no clicking required)
 cd /d "%~dp0"
 
 echo ============================================================
-echo  FORCE UPDATE - อัปเดตแบบไม่ต้องกดอะไรเลย
-echo  ใช้กับเครื่องที่ค้างอยู่หน้าต่าง "ตรวจพบเวอร์ชันใหม่"
+echo  FORCE UPDATE - update without any clicking
+echo  Use on machines stuck at the "New version detected" popup
 echo ============================================================
 echo.
 
-echo [1/3] ปิดหน้าต่างอัปเดตที่ค้างรอคนกด + บอทที่รันอยู่...
-taskkill /f /im pythonw.exe >nul 2>&1
-taskkill /f /im python.exe  >nul 2>&1
-taskkill /f /im py.exe      >nul 2>&1
+:: [1/3] ปิดเฉพาะ "บอท PES" เท่านั้น (login.py / auto_update.py ที่ค้าง)
+::       ห้ามใช้ taskkill /im python.exe เด็ดขาด — จะไปฆ่า agent.py ของระบบ remote
+::       ทำให้เครื่องหลุดจากหน้า dashboard ทั้งฟลีต
+echo [1/3] Closing PES bot only (remote agent is NOT touched) ...
+powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*login.py*' -or $_.CommandLine -like '*auto_update.py*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" >nul 2>&1
 timeout /t 2 /nobreak >nul
 
-echo [2/3] อัปเดตแบบเงียบ (ใช้โหมดจาก SILENT_UPDATE_MODE ใน config.py)...
+echo [2/3] Running silent update (mode from SILENT_UPDATE_MODE in config.py) ...
 py auto_update.py --silent
 
-echo [3/3] ตรวจว่าบอทถูกเปิดใหม่แล้วหรือยัง...
+echo [3/3] Making sure the bot is running again ...
 timeout /t 15 /nobreak >nul
-tasklist | find /i "python.exe" >nul
+powershell -NoProfile -Command "if (Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*login.py*' }) { exit 0 } else { exit 1 }"
 if errorlevel 1 (
-    echo      ยังไม่มีบอทรันอยู่ - เปิด login.bat ให้เอง
+    echo      Bot is not running - starting login.bat
     start "" login.bat
 ) else (
-    echo      บอทถูกเปิดใหม่โดยตัวอัปเดตแล้ว
+    echo      Bot was already relaunched by the updater.
 )
 
 echo.
-echo เสร็จแล้ว - หน้าต่างนี้จะปิดใน 5 วินาที
+echo Done - this window closes in 5 seconds.
 timeout /t 5 /nobreak >nul
 exit
