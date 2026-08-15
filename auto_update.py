@@ -13,6 +13,50 @@ from tkinter import font as tkfont
 REPO = "leokungYT/pes"
 VERSION_FILE = "version.txt"
 
+# ── ช่องทางโหลดไฟล์อัปเดต (ลองไล่ทีละอันจนกว่าจะได้) ─────────────────
+#    เจอบ่อย: raw.githubusercontent (เช็คเวอร์ชัน) ผ่าน แต่ github.com/codeload
+#    ที่ใช้โหลด ZIP โดน timeout (WinError 10060) เพราะเน็ต/ISP บล็อกคนละโดเมนกัน
+def _zip_candidates(zip_url):
+    urls = []
+    if zip_url:
+        urls.append(zip_url)
+    urls.append(f"https://github.com/{REPO}/archive/refs/heads/main.zip")
+    urls.append(f"https://codeload.github.com/{REPO}/zip/refs/heads/main")
+    # มิเรอร์สำรอง — เรียงตามผลทดสอบจริง (ghfast.top ตัดออก: SSL cert verify failed)
+    for pre in ("https://ghproxy.net/", "https://gh-proxy.com/"):
+        urls.append(pre + f"https://github.com/{REPO}/archive/refs/heads/main.zip")
+    seen, out = set(), []
+    for u in urls:
+        if u and u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out
+
+
+def download_update_zip(zip_url, tries_each=2, timeout=300):
+    """โหลดไฟล์ ZIP อัปเดต — ลองทุกช่องทาง ช่องทางละ tries_each ครั้ง
+    คืน bytes ของ zip (ตรวจ magic 'PK' ก่อน) หรือ raise ถ้าไม่ได้เลยสักช่องทาง
+
+    *** timeout ต้องยาว: ZIP ของรีโปนี้ ~28 MB (มี Tesseract-OCR + รูปทั้งหมด)
+        ของเดิมตั้งไว้ 30 วิ เน็ตเครื่องลูกโหลดไม่ทัน เลยเด้ง WinError 10060 ***"""
+    import time as _time
+    last_err = "ไม่ทราบสาเหตุ"
+    for url in _zip_candidates(zip_url):
+        for attempt in range(1, tries_each + 1):
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    data = resp.read()
+                if len(data) > 1000 and data[:2] == b"PK":
+                    print(f"[Updater] Downloaded OK ({len(data):,} bytes) from {url}")
+                    return data
+                last_err = f"ไฟล์ที่ได้ไม่ใช่ zip ({len(data)} bytes)"
+            except Exception as e:
+                last_err = str(e)
+            print(f"[Updater] โหลดไม่สำเร็จ (ครั้งที่ {attempt}/{tries_each}) {url} -> {last_err[:110]}")
+            _time.sleep(3)
+    raise RuntimeError(f"โหลดไฟล์อัปเดตไม่สำเร็จทุกช่องทาง: {last_err}")
+
 def get_latest_release():
     # 🌟 ดึงข้อมูลเวอร์ชันผ่าน Raw Content ของกิ่งหลัก (main) และใช้ ZIP ล่าสุดของกิ่งนั้นโดยตรง
     # ข้อดี: พี่เพียงแค่แก้เลขเวอร์ชันใน version.txt แล้ว push ขึ้น GitHub บอตเครื่องลูกจะอัปเดตทันที (ไม่ต้องกดสร้าง Release/Tag บนเว็บ)
@@ -301,9 +345,9 @@ def update(silent=False):
         OVERWRITE_CONFIG_ON_UPDATE = True
 
     try:
-        req = urllib.request.Request(zip_url, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=30) as response:
-            with zipfile.ZipFile(io.BytesIO(response.read())) as zip_ref:
+        zip_bytes = download_update_zip(zip_url)
+        if True:
+            with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zip_ref:
                 # ไฟล์ zip จาก GitHub จะมีโฟลเดอร์หลักครอบอยู่ 1 ชั้นเสมอ
                 root_folder = zip_ref.namelist()[0]
                 
