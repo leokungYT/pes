@@ -6426,6 +6426,11 @@ def process_device_login(device):
                         device.shell(f"input swipe {gc5_pos[0]} {gc5_pos[1]} {gc5_pos[0]} {gc5_pos[1]} 100")
                     time.sleep(1.0)
 
+                # รอ 5 วิให้พิมพ์ลงครบทุกตัวก่อนค่อยไปกด getcode6
+                #   (บางทีตัวหนังสือยังพิมพ์ไม่จบ แล้วโดนกดส่งไปก่อน = โค้ดไม่ครบ)
+                gui_log(serial, "พิมพ์เสร็จ — รอ 5 วิให้ตัวหนังสือลงครบก่อนกด getcode6", step="Type Code Wait")
+                time.sleep(5)
+
                 # Click getcode6.bmp — กดซ้ำๆ จนกว่าจะไปหน้าถัดไป (getcode6 หายไป / เจอผล okcode-codesom)
                 gui_log(serial, "Waiting for getcode6.bmp...", step="getcode6 Wait")
                 gc6_click_n = 0
