@@ -28,6 +28,11 @@ if errorlevel 1 (
     echo      Bot was already relaunched by the updater.
 )
 
+:: [4/4] ปลุก agent ของระบบ remote กลับมาถ้ามันไม่ได้รันอยู่
+::       (เผื่อเครื่องเคยโดน force-update.bat เวอร์ชันเก่าฆ่า agent ทิ้งไป)
+echo [4/4] Making sure the remote agent is alive ...
+powershell -NoProfile -Command "if (-not (Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*agent.py*' })) { $a = Get-ChildItem -Path C:\Users\*\Downloads\remote\remote-file\agent.py,C:\remote-file\agent.py,D:\remote-file\agent.py -ErrorAction SilentlyContinue | Select-Object -First 1; if ($a) { Start-Process pythonw -ArgumentList $a.FullName -WorkingDirectory $a.DirectoryName } }" >nul 2>&1
+
 echo.
 echo Done - this window closes in 5 seconds.
 timeout /t 5 /nobreak >nul
