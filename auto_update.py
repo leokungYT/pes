@@ -43,6 +43,28 @@ def get_local_version():
             return f.read().strip()
     return None
 
+def get_update_mode():
+    """โหมดอัปเดตจาก config: 'keep' = เก็บข้อมูลเดิม (ดีฟอลต์) / 'clean' = ล้างทั้งหมด"""
+    try:
+        from config import SILENT_UPDATE_MODE
+        return SILENT_UPDATE_MODE if SILENT_UPDATE_MODE in ["keep", "clean"] else "keep"
+    except Exception:
+        return "keep"
+
+
+def is_unattended():
+    """True = อัปเดตเองทั้งหมด ไม่มีป๊อปอัพให้กด ไม่มี pause (ดีฟอลต์ = True)
+
+    เปิดเครื่องลูกทิ้งไว้หลายสิบเครื่องแล้วต้องเดินไปกดปุ่มทีละเครื่องไม่ไหว
+    ปิดโหมดนี้ (กลับไปมีหน้าต่างถาม) ได้ด้วยการใส่ AUTO_UPDATE_NO_ASK = False ใน config.py
+    """
+    try:
+        from config import AUTO_UPDATE_NO_ASK
+        return bool(AUTO_UPDATE_NO_ASK)
+    except Exception:
+        return True
+
+
 def ask_custom_update_ui(new_version):
     """สร้างหน้าต่าง UI ตักเตือนและถามอัปเดตขนาดใหญ่แบบพรีเมียม (ภาษาไทยสมบูรณ์)"""
     result = {"update": False}
@@ -228,14 +250,11 @@ def update(silent=False):
         
     print(f"[Updater] New version found: {latest_version}.")
     
-    if silent:
-        # ในโหมดเงียบ: อ่านค่าโหมดจาก config.py (หากมีค่า clean/keep) หรือดีฟอลต์เป็น keep เพื่อความปลอดภัย
-        try:
-            from config import SILENT_UPDATE_MODE
-            mode = SILENT_UPDATE_MODE if SILENT_UPDATE_MODE in ["keep", "clean"] else "keep"
-        except Exception:
-            mode = "keep"
-        print(f"[Updater] Running silent update with mode: {mode}")
+    if silent or is_unattended():
+        # โหมดอัตโนมัติ (เงียบ / ไม่ถาม): อ่านโหมดจาก config.py — ไม่มีหน้าต่างให้กด
+        mode = get_update_mode()
+        kind = "silent" if silent else "unattended"
+        print(f"[Updater] Running {kind} update with mode: {mode}")
     else:
         # 🌟 เรียกใช้หน้าจอเตือนอัปเดตขนาดใหญ่
         mode = ask_custom_update_ui(latest_version)
@@ -324,6 +343,10 @@ def update(silent=False):
                 os.makedirs(folder, exist_ok=True)
 
         if not silent:
+            if is_unattended():
+                # โหมดอัตโนมัติ: ไม่มีป๊อปอัพให้กด — คืน exit code 10 ให้ login.bat วนกลับไปเริ่มใหม่เอง
+                print(f"[Updater] Updated to {latest_version} ({mode}) — login.bat will restart automatically.")
+                sys.exit(10)
             # 🌟 แจ้งเตือนเมื่ออัปเดตเสร็จแบบ Custom UI
             detail_msg = "บอทได้รับการอัปเดตและเก็บรักษาข้อมูลเดิมเรียบร้อยแล้ว!" if mode == "keep" else "บอทได้รับการอัปเดตและล้างข้อมูลเก่าทั้งหมดเรียบร้อยแล้ว!"
             show_custom_info_popup(
