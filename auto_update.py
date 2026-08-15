@@ -188,6 +188,27 @@ def ask_custom_update_ui(new_version):
     )
     btn_no.pack(side="right", padx=5)
 
+    # ── นับถอยหลัง 10 วิ ไม่มีใครกด = เลือก "ไม่ลบไฟล์เดิม (Keep Files)" ให้เอง ──
+    #    (เครื่องลูกหลายสิบเครื่อง เดินไปกดทีละเครื่องไม่ไหว — กดเองได้ตลอด ไม่ต้องรอครบ)
+    countdown = {"left": 10}
+    lbl_count = tk.Label(content_frame, text="", font=body_font, bg="#FDFEFE", fg="#7F8C8D")
+    lbl_count.pack(anchor="w")
+
+    def _tick():
+        if result["update"] is not False and result["update"]:
+            return                      # มีคนกดไปแล้ว
+        n = countdown["left"]
+        if n <= 0:
+            lbl_count.config(text="⏱ หมดเวลา — อัปเดตแบบไม่ลบไฟล์เดิมอัตโนมัติ")
+            on_keep()
+            return
+        lbl_count.config(text=f"⏱ ไม่กดอะไรภายใน {n} วินาที จะอัปเดตแบบ 'ไม่ลบไฟล์เดิม' ให้อัตโนมัติ")
+        btn_keep.config(text=f"อัปเดตแบบไม่ลบไฟล์เดิม (Keep Files) — {n}s")
+        countdown["left"] = n - 1
+        root.after(1000, _tick)
+
+    _tick()
+
     root.mainloop()
     return result["update"]
 
@@ -232,7 +253,10 @@ def show_custom_info_popup(title, message):
         command=on_ok
     )
     btn_confirm.pack(pady=15)
-    
+
+    # ปิดเองใน 10 วิ ถ้าไม่มีใครกด (ไม่ให้หน้าต่างค้างขวางการเปิดบอทใหม่)
+    root.after(10000, lambda: root.destroy() if root.winfo_exists() else None)
+
     root.mainloop()
 
 def update(silent=False):
