@@ -6335,68 +6335,47 @@ def process_device_login(device):
                                     last_gc_click = now
                         time.sleep(0.3)
 
-                # Wait and click getcode5.bmp — กดไปเรื่อยๆ จนกว่าจะเจอ fixgetcode5
-                #   (fixgetcode5 = ช่องกรอกพร้อมรับข้อความแล้ว) ค่อยเริ่มพิมพ์โค้ด
-                gui_log(serial, "Waiting for getcode5.bmp...", step="getcode5 Wait")
+                # ── กดช่องกรอกโค้ด (getcode5 = ข้อความ "Gift Code") แล้วพิมพ์โค้ด ──────
+                #   *** ไม่ใช้ fixgetcode5.bmp แล้ว: ไฟล์นั้นเป็นแถบดำล้วน แมตช์พื้นที่ดำ
+                #       ตรงไหนบนจอก็ได้ (เคยไปโดนมุมซ้ายล่าง) ทำให้ทั้งการรอและ region
+                #       ที่ใช้ OCR ผิดหมด -> วนล้างช่อง/พิมพ์ใหม่ไม่จบ ช่องเลยว่างค้าง ***
+                #   ตัวชี้ขาดว่าสำเร็จคือ "OCR อ่านข้อความในช่องแล้วตรงกับโค้ด" อย่างเดียว
+                gui_log(serial, "Waiting for getcode5.bmp (ช่องกรอกโค้ด)...", step="getcode5 Wait")
                 gc5_pos = None
+                code_box = None
                 while True:
                     check_device_reset(serial, cycle_start)
                     img = get_screen_capture(device)
                     if img is not None:
-                        pts_gc5 = img_search_best(img, os.path.join(IMG_DIR, "getcode5.bmp"), threshold=0.9)
+                        _p5 = os.path.join(IMG_DIR, "getcode5.bmp")
+                        pts_gc5 = img_search_best(img, _p5, threshold=0.9)
                         if pts_gc5:
                             x, y = pts_gc5[0]
                             gc5_pos = (x, y)
-                            device.shell(f"input swipe {x} {y} {x} {y} 100")
-                            gui_log(serial, f"Clicked getcode5.bmp ({x},{y}) ครั้งที่ 1", step="getcode5 Click")
-                            time.sleep(0.8)
+                            tpl5 = load_template(_p5)
+                            if tpl5 is not None:
+                                th5, tw5 = tpl5.shape
+                                # ขยายกรอบไปทางขวาเผื่อโค้ดยาวกว่าคำว่า "Gift Code"
+                                bx = max(0, x - tw5 // 2 - 15)
+                                by = max(0, y - th5 // 2 - 10)
+                                bw = min(img.shape[1] - bx, tw5 + 340)
+                                bh = min(img.shape[0] - by, th5 + 20)
+                                code_box = (bx, by, bw, bh)
+                            gui_log(serial, f"เจอช่องกรอกโค้ดที่ ({x},{y})", step="getcode5 Found")
                             break
                     time.sleep(0.5)
 
-                # กด getcode5 ไปเรื่อยๆ จนกว่าจะเจอ fixgetcode5 (ไม่มี timeout — ไม่เจอก็กดต่อ)
-                #   หาพิกัดใหม่ทุกครั้งเผื่อจอขยับ ไม่เจอในเฟรมนั้นก็กดที่เดิม
-                gui_log(serial, "กด getcode5 ต่อจนกว่าจะเจอ fixgetcode5...", step="getcode5 Loop")
-                gc5_n = 1
-                while True:
+                # กดช่อง 3 ครั้งให้โฟกัสแน่ๆ (กดครั้งเดียวบางทีไม่ติด)
+                for _tap in range(3):
                     check_device_reset(serial, cycle_start)
-                    img_g5 = fast_screencap(device)
-                    if img_g5 is not None:
-                        if img_search_best(img_g5, os.path.join(IMG_DIR, "fixgetcode5.bmp"), threshold=0.9):
-                            gui_log(serial, f"เจอ fixgetcode5 แล้ว (กด getcode5 ไป {gc5_n} ครั้ง) → เริ่มกรอกโค้ด",
-                                    step="fixgetcode5 OK")
-                            break
-                        pts_g5b = img_search_best(img_g5, os.path.join(IMG_DIR, "getcode5.bmp"), threshold=0.9)
-                        if pts_g5b:
-                            gc5_pos = pts_g5b[0]
-                    if gc5_pos:
-                        device.shell(f"input swipe {gc5_pos[0]} {gc5_pos[1]} {gc5_pos[0]} {gc5_pos[1]} 100")
-                        gc5_n += 1
-                        if gc5_n % 5 == 0:   # log ทุก 5 ครั้ง กัน log ถี่
-                            gui_log(serial, f"กด getcode5 ({gc5_pos[0]},{gc5_pos[1]}) ครั้งที่ {gc5_n}", step="getcode5 Click")
-                    time.sleep(0.7)
-
-                time.sleep(0.5)   # พักให้ช่องกรอกพร้อมก่อนพิมพ์
+                    device.shell(f"input swipe {gc5_pos[0]} {gc5_pos[1]} {gc5_pos[0]} {gc5_pos[1]} 100")
+                    gui_log(serial, f"กดช่องกรอกโค้ด ครั้งที่ {_tap+1}/3", step="getcode5 Click")
+                    time.sleep(0.8)
 
                 # ── กรอกโค้ด: ล้างช่องก่อนเสมอ แล้ว OCR อ่านยืนยันว่าตรงจริง ──────
                 #   เคสจริงที่พัง: ในช่องมีตัวหนังสือเก่าค้างอยู่ (พิมพ์ไม่จบ/พิมพ์ซ้ำ)
-                #   พอพิมพ์ทับเลยกลายเป็น "CONNE" + "CONNECT813" = CONNECONNECT813 -> โค้ดใช้ไม่ได้
-                #   วิธีแก้: ล้างช่องให้เกลี้ยงทุกครั้ง -> พิมพ์ -> OCR อ่านกลับมาเทียบ
-                #           ไม่ตรง = ล้างแล้วพิมพ์ใหม่ (สูงสุด 3 รอบ)
+                #   พอพิมพ์ทับเลยกลายเป็น "CONNE" + "CONNECT813" -> โค้ดใช้ไม่ได้
                 code_text = GETCODE_TEXT
-
-                def _code_field_box():
-                    """คืน (x, y, w, h) ของกรอบช่องกรอกโค้ด หรือ None ถ้าหาไม่เจอ"""
-                    im_f = fast_screencap(device)
-                    if im_f is None:
-                        return None
-                    _p = os.path.join(IMG_DIR, "fixgetcode5.bmp")
-                    pts_f = img_search_best(im_f, _p, threshold=0.9)
-                    tpl_f = load_template(_p)
-                    if not pts_f or tpl_f is None:
-                        return None
-                    th_f, tw_f = tpl_f.shape
-                    cx_f, cy_f = pts_f[0]
-                    return (max(0, cx_f - tw_f // 2), max(0, cy_f - th_f // 2), tw_f, th_f)
 
                 def _read_code_field(box):
                     """OCR อ่านข้อความในช่องกรอก คืนสตริง (อ่านไม่ได้ = '')"""
@@ -6409,28 +6388,23 @@ def process_device_login(device):
                     return read_screen_text(img_r, region=Region(x_b, y_b, w_b, h_b), serial=serial) or ""
 
                 def _norm_code(t):
-                    """ตัดช่องว่าง/ขีด แล้วทำเป็นตัวใหญ่ — กัน OCR อ่านเว้นวรรคเกินมา"""
+                    """เทียบแบบตัดช่องว่าง/สัญลักษณ์ และไม่สนตัวพิมพ์เล็กใหญ่"""
                     return "".join(ch for ch in str(t).upper() if ch.isalnum())
 
                 def _clear_code_field():
-                    """ล้างตัวหนังสือในช่องให้เกลี้ยง (ไปท้ายบรรทัดแล้วลบถอยหลังเผื่อไว้เยอะๆ)"""
+                    """ล้างตัวหนังสือในช่องให้เกลี้ยง"""
                     device.shell("input keyevent 123")                       # MOVE_END
                     device.shell(" ; ".join(["input keyevent 67"] * 40))     # BACKSPACE x40
                     device.shell(" ; ".join(["input keyevent 112"] * 10))    # FORWARD_DEL x10
                     time.sleep(0.5)
 
-                code_box = _code_field_box()
                 typed_ok = False
                 for _code_try in range(3):
-                    # 1) ล้างช่องก่อนเสมอ (ไม่ว่าจะรอบแรกหรือรอบแก้ตัว) แล้วกดช่องให้โฟกัสอีกที
                     _clear_code_field()
-                    if gc5_pos:
-                        device.shell(f"input swipe {gc5_pos[0]} {gc5_pos[1]} {gc5_pos[0]} {gc5_pos[1]} 100")
-                        time.sleep(0.4)
+                    device.shell(f"input swipe {gc5_pos[0]} {gc5_pos[1]} {gc5_pos[0]} {gc5_pos[1]} 100")
+                    time.sleep(0.4)
 
-                    # 2) พิมพ์โค้ด — 2 รอบแรกพิมพ์รวดเดียว (เร็ว)
-                    #    รอบสุดท้ายพิมพ์ทีละตัวอักษร: ช้ากว่าแต่ตัวหล่นยากที่สุด
-                    #    (input text ยาวๆ บางเครื่องส่งไม่ครบ ตัวแรกๆ หายบ้าง)
+                    # 2 รอบแรกพิมพ์รวดเดียว (เร็ว) / รอบสุดท้ายพิมพ์ทีละตัว (ตกหล่นยากสุด)
                     if _code_try < 2:
                         gui_log(serial, f"Typing code: {code_text} (รอบ {_code_try+1}/3)", step="Type Code")
                         device.shell(f"input text '{code_text}'")
@@ -6442,12 +6416,7 @@ def process_device_login(device):
                             time.sleep(0.15)
                         time.sleep(1.0)
 
-                    # 3) OCR อ่านกลับมาเทียบ
                     got = _read_code_field(code_box)
-                    if not code_box:
-                        gui_log(serial, "หากรอบช่องกรอกไม่เจอ — ข้ามการตรวจ ไปต่อ", step="Type Code")
-                        typed_ok = True
-                        break
                     if _norm_code(got) == _norm_code(code_text):
                         gui_log(serial, f"✅ โค้ดในช่องถูกต้อง: {got.strip()}", step="Type Code OK")
                         typed_ok = True
