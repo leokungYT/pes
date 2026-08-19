@@ -86,7 +86,7 @@ LOGIN_SUCCESS_DIR = "login-success"
 # ── Find Hero Sequence ─────────────────────────────
 # 1 = ทำงาน fin1-fin8 และค้นหาฮีโร่ตามภาพ
 # 0 = ข้าม
-FIND_HERO = 0
+FIND_HERO = 1
 
 # แมพไฟล์ภาพฮีโร่เข้ากับชื่อฮีโร่
 HERO_IMG_MAP = {
@@ -98,7 +98,7 @@ HERO_IMG_MAP = {
 # ── Gacha Free Sequence ───────────────────────────
 # 1 = ทำ gacha free หลังจบ box (gacha1 → gacha2 → เลื่อนหา gachafree1)
 # 0 = ข้าม
-GACHA_FREE = 1
+GACHA_FREE = 0
 
 # จำนวนลูปย่อยที่ต้องการสุ่มกาชาฟรี (เช่น 2, 3, 5)
 GACHA_FREE_LOOPS = 5
@@ -178,7 +178,10 @@ list_find_hero = [
     "Rui Costa",
     "Abbiati",
     "Massimo Oddo",
-    "Gennaro Gattuso"
+    "Gennaro Gattuso",
+    "Eden Hazard",
+    "Diego Costa",
+    "Gary Cahill"
 ]
 
 # แชร์ list เดียวกัน — แก้ที่ list_find_hero อย่างเดียวพอ
@@ -277,7 +280,7 @@ OVERWRITE_CONFIG_ON_UPDATE = True
 # ── Get Code Sequence ─────────────────────────────
 # 1 = ทำขั้นตอน getcode (getcode1→getcode6 + พิมพ์โค้ด) ก่อน Box
 # 0 = ข้าม
-GETCODE = 1
+GETCODE = 0
 
 # ข้อความที่จะพิมพ์ในช่อง code (สามารถเปลี่ยนได้ตามต้องการ)
 GETCODE_TEXT = "CONNECT813"
