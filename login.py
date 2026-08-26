@@ -2253,8 +2253,14 @@ def refresh_serial_index_map(force=False):
         serials = [s for s in get_connected_devices() if force or s not in SERIAL_TO_INDEX]
         if serials and idx_ep:
             idx_list = list(idx_ep.keys())
+            eps = [idx_ep[i] for i in idx_list]
+            # *** endpoint ที่ MuMuManager บอก (เช่น 127.0.0.1:16512) มักยังไม่ถูก adb connect
+            #     → adb -s <ep> อ่าน boot_id ไม่ได้เลย จับคู่ล้มเหลวทั้งที่เป็นเครื่องเดียวกัน
+            #     ต้อง connect ก่อนเสมอ (ต่ออยู่แล้วก็แค่ already connected ไม่เสียหาย) ***
             with concurrent.futures.ThreadPoolExecutor(max_workers=16) as ex:
-                ep_boot  = list(ex.map(_device_boot_id, [idx_ep[i] for i in idx_list]))
+                list(ex.map(try_reconnect_device, eps))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=16) as ex:
+                ep_boot  = list(ex.map(_device_boot_id, eps))
                 ser_boot = list(ex.map(_device_boot_id, serials))
             boot_to_idx = {b: i for i, b in zip(idx_list, ep_boot) if b}
             for s, b in zip(serials, ser_boot):
