@@ -2029,17 +2029,23 @@ def get_connected_devices():
             else:
                 port_map[serial] = serial
         # Normalize emulator-XXXX → 127.0.0.1:(XXXX+1) so all devices use IP:port format
+        # *** ต้องคืนชื่อ IP:port เสมอ — ถ้า adb connect ช้า/timeout แล้วคืน emulator-XXXX ดิบๆ
+        #     รอบสแกนถัดไปจะมองว่าเป็นคนละเครื่องกับ 127.0.0.1:XXXX+1 → GUI งอกแถวซ้ำ/รันบอทซ้อน ***
         final = []
         for serial in port_map.values():
             if "emulator-" in serial:
                 try:
                     adb_port = int(serial.split("-")[1]) + 1
-                    ip_serial = f"127.0.0.1:{adb_port}"
+                except Exception:
+                    final.append(serial)   # ชื่อแปลก parse ไม่ได้ — เก็บตามเดิม
+                    continue
+                ip_serial = f"127.0.0.1:{adb_port}"
+                try:
                     subprocess.run([adb_path, "connect", ip_serial],
                                    capture_output=True, timeout=2, shell=(os.name == 'nt'))
-                    final.append(ip_serial)
                 except Exception:
-                    final.append(serial)
+                    pass   # connect ช้าไม่เป็นไร — ชื่อ canonical ของเครื่องนี้คือ IP:port อยู่ดี
+                final.append(ip_serial)
             else:
                 final.append(serial)
 
@@ -2381,18 +2387,35 @@ def is_root(device):
     except Exception:
         return False
 
+_ROOT_MAP_REFRESH_LOCK = threading.Lock()   # refresh แมพทีละคน — กันหลายเธรดแห่เรียกซ้อนตอนสตาร์ท
+_ROOT_MAP_LAST_REFRESH = [0.0]              # เวลาที่ refresh ล่าสุด (cooldown กันเรียกรัวเมื่อ map ไม่เจอจริงๆ)
+
+def _mumu_index_for(serial):
+    """หา MuMu index ของ serial — ไม่เจอในแมพ → ลองสร้างแมพใหม่ (จับคู่ boot_id) ก่อน
+    ยังไม่เจออีก → fallback MUMU_INDEX จาก config พร้อม log เตือน
+    (เดิม: serial ที่ map ไม่ทันตอนบอทเริ่ม จะ fallback ไป MUMU_INDEX ทันทีทุก cycle
+     → ไปเปิด/ปิด root ให้ instance ผิดตัว วนไม่จบ)"""
+    idx = SERIAL_TO_INDEX.get(serial)
+    if idx is None:
+        with _ROOT_MAP_REFRESH_LOCK:
+            if serial not in SERIAL_TO_INDEX and time.time() - _ROOT_MAP_LAST_REFRESH[0] > 10:
+                gui_log(serial, "ยังไม่รู้ MuMu index ของเครื่องนี้ — สร้างแมพ serial→index ใหม่...", step="Root Map")
+                try:
+                    refresh_serial_index_map()
+                except Exception:
+                    pass
+                _ROOT_MAP_LAST_REFRESH[0] = time.time()
+        idx = SERIAL_TO_INDEX.get(serial)
+    if idx is None:
+        idx = MUMU_INDEX
+        gui_log(serial, f"⚠️ map ไม่เจอ — ใช้ MUMU_INDEX={idx} จาก config (ถ้า root ไม่มา เช็คว่า MuMuManager เห็นเครื่องนี้)", step="Root Map")
+    return idx
+
 def enable_root(device):
     """เปิด root (MuMu: root_permission=true, live ไม่ต้อง restart)"""
     serial = device.serial
     if USE_MUMU_ROOT:
-        # พยายามดึง index จาก instance ที่คุยผ่าน adb port
-        if not SERIAL_TO_INDEX:
-            try:
-                for idx, s in get_mumu_instances():
-                    SERIAL_TO_INDEX[s] = idx
-            except Exception:
-                pass
-        idx = SERIAL_TO_INDEX.get(serial, MUMU_INDEX)
+        idx = _mumu_index_for(serial)
         gui_log(serial, f"เปิด root (MuMu idx={idx} root_permission=true)...", step="Root Enable")
         mumu_set_root(idx, True)
         time.sleep(1)
@@ -2415,13 +2438,7 @@ def disable_root(device):
     """ปิด root (MuMu: root_permission=false, live ไม่ต้อง restart)"""
     serial = device.serial
     if USE_MUMU_ROOT:
-        if not SERIAL_TO_INDEX:
-            try:
-                for idx, s in get_mumu_instances():
-                    SERIAL_TO_INDEX[s] = idx
-            except Exception:
-                pass
-        idx = SERIAL_TO_INDEX.get(serial, MUMU_INDEX)
+        idx = _mumu_index_for(serial)
         gui_log(serial, f"ปิด root (MuMu idx={idx} root_permission=false)...", step="Root Disable")
         mumu_set_root(idx, False)
         time.sleep(1)
