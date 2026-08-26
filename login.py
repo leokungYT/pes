@@ -1385,8 +1385,15 @@ if GUI_ENABLED:
             global AUTORUN
             if AUTORUN == 1 and not getattr(self, 'autorun_triggered', False):
                 self.autorun_triggered = True
-                self.log("🚀 [AUTORUN] Auto-start enabled! Starting bot in 3 seconds...")
-                self.after(3000, self.toggle_bot)
+                # เชื่อม ADB ให้ครบทุกเครื่องก่อน (สแกนซ้ำเก็บเครื่องที่ boot ช้า) ค้าง 10 วิ แล้วค่อยเริ่มบอท
+                self.log("🚀 [AUTORUN] Auto-start enabled! เชื่อม ADB ให้ครบก่อน — เริ่มบอทใน 10 วินาที...")
+                self.after(3000, self.connect_missing_devices)
+                self.after(6500, self.connect_missing_devices)
+                self.after(10000, self._autorun_start)
+
+        def _autorun_start(self):
+            self.log(f"🚀 [AUTORUN] เริ่มบอท — เจอ {len(self.device_monitors)} เครื่อง")
+            self.start_bot()
 
         def connect_missing_devices(self):
             self.log("Scanning for missing emulators...")
