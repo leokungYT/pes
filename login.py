@@ -2967,19 +2967,32 @@ def get_screen_capture(device):
                     img = img_fn1re
 
             # === fixneterror floating check ===
-            # เจอ fixneterror (เน็ตเออเรอร์) → ปิดแอพแล้วเข้าใหม่ไฟล์เดิมเฉยๆ (แค่นั้น)
+            # เจอ fixneterror = ไฟล์เสีย → clear app + ส่งไฟล์ไป login-failed → หยิบ id ใหม่เลย (ไม่ retry)
             if img_search(img, os.path.join(IMG_DIR, "fixneterror.bmp")):
                 time.sleep(1.5)   # กันจังหวะ popup กำลังปิดตัวเองพอดี → เช็คซ้ำให้ชัวร์ก่อน
                 img_nere = fast_screencap(device)
                 if img_nere is not None and img_search(img_nere, os.path.join(IMG_DIR, "fixneterror.bmp")):
                     serial_ne = device.serial
                     original_name = DEVICE_FILE_ASSIGNMENTS.get(serial_ne)
-                    gui_log(serial_ne, "fixneterror detected! Closing app & re-entering (same file)...", step="Fix Net Error")
-                    if original_name:
-                        trigger_restart_from_play8(device, serial_ne, original_name, reason="fixneterror")
+                    gui_log(serial_ne, "fixneterror detected! Moving file to login-failed, next id...", step="Fix Net Error", status="error")
                     device.shell("am force-stop jp.konami.pesam")
-                    time.sleep(1)
-                    raise DeviceResetException("fixneterror detected (no file)")
+                    device.shell("su -c 'rm -f /data/data/jp.konami.pesam/files/SaveData/AUTH/online_user_id_data.dat'")
+                    device.shell("su -c 'rm -rf /data/data/jp.konami.pesam/files/SaveData/AUTH/*'")
+                    DEVICE_RESTART_PLAY8_COUNT.pop(serial_ne, None)
+                    DEVICE_RESTART_PLAY8.pop(serial_ne, None)
+                    if original_name:
+                        ne_src  = os.path.join(INPUT_DIR, original_name)
+                        ne_dest = os.path.join(LOGIN_FAILED_DIR, original_name)
+                        if os.path.exists(ne_src):
+                            try:
+                                if os.path.exists(ne_dest):
+                                    os.remove(ne_dest)
+                                _safe_copy(ne_src, ne_dest)
+                                os.remove(ne_src)
+                                gui_log(serial_ne, f"Moved {original_name} to login-failed", step="Fix Net Error")
+                            except Exception as e:
+                                gui_log(serial_ne, f"Failed to move {original_name} to login-failed: {e}", step="Fix Net Error")
+                    raise DeviceResetException("fixneterror — moved to login-failed")
                 if img_nere is not None:
                     img = img_nere
 
@@ -3084,9 +3097,15 @@ def get_screen_capture(device):
                 x, y = fg_pts[0]
                 device.shell(f"input swipe {x} {y} {x} {y} 100")
 
+            # เช็คทั้ง sell.bmp และ sellv2.bmp — เจอตัวไหนก็จัดการเหมือนกัน
+            # (clear app → ส่งไฟล์ชื่อเดิมเข้า login-failed → ขึ้น id ใหม่)
+            sell_name = "sell.bmp"
             sell_pts = img_search(img, os.path.join(IMG_DIR, "sell.bmp"))
+            if not sell_pts:
+                sell_name = "sellv2.bmp"
+                sell_pts = img_search(img, os.path.join(IMG_DIR, "sellv2.bmp"))
             if sell_pts:
-                gui_log(device.serial, "🛑 Floating: sell.bmp found! Force closing app and moving file to login-failed", step="Sell Detected")
+                gui_log(device.serial, f"🛑 Floating: {sell_name} found! Force closing app and moving file to login-failed", step="Sell Detected")
                 device.shell("am force-stop jp.konami.pesam")
                 time.sleep(1)
                 
@@ -3100,8 +3119,8 @@ def get_screen_capture(device):
                         _safe_copy(file_path, dest_path)
                         os.remove(file_path)
                         gui_log(device.serial, f"✅ Sorted (Sell): {original_name} -> {LOGIN_FAILED_DIR}", step="Sell Sorted")
-                
-                raise SellScreenException("sell.bmp detected")
+
+                raise SellScreenException(f"{sell_name} detected")
 
             # === failed1/failed2/failed3 floating check ===
             failed1_pts = img_search(img, os.path.join(IMG_DIR, "failed1.bmp"))
@@ -3804,52 +3823,99 @@ def is_hero_match(hero_name, ocr_text):
 
     return False
 
-def _extar_file_for(hero_name):
-    """หาชื่อไฟล์รูปของ EXTAR_FIND จากชื่อฮีโร่ (ไม่สนตัวพิมพ์ใหญ่-เล็ก / ช่องว่างหัวท้าย)
+def _extar_entry_for(hero_name):
+    """หา value ใน EXTAR_FIND จากชื่อฮีโร่ (ไม่สนตัวพิมพ์ใหญ่-เล็ก / ช่องว่างหัวท้าย)
+    value เป็นได้ทั้ง "รูป.png" หรือ ("รูป.png", "ชื่อที่ใช้ตอน export")
     ไม่ได้อยู่ในลิสต์ → None"""
     if not EXTAR_FIND:
         return None
     key = str(hero_name).strip().lower()
     for k, v in EXTAR_FIND.items():
         if str(k).strip().lower() == key and v:
-            return str(v).strip()
+            return v
     return None
+
+def _extar_variants(hero_name):
+    """แปลง value ของ EXTAR_FIND เป็น list ของ (ไฟล์รูป, ชื่อ export หรือ None)
+    รองรับ 3 แบบ:
+      "img.png"                                      → ร่างเดียว ไม่มีชื่อ custom
+      ("img.png", "ชื่อ")                             → ร่างเดียว + ชื่อ custom
+      [("img1.png", "ชื่อ1"), ("img2.png", "ชื่อ2")]  → หลายร่าง รูปไหน match ใช้ชื่อร่างนั้น
+    ไม่ได้อยู่ในลิสต์ → None"""
+    v = _extar_entry_for(hero_name)
+    if v is None:
+        return None
+    if isinstance(v, (tuple, list)) and v and all(isinstance(e, (tuple, list)) for e in v):
+        entries = v
+    else:
+        entries = [v]
+    out = []
+    for e in entries:
+        if isinstance(e, (tuple, list)):
+            fname = str(e[0]).strip() if len(e) >= 1 and e[0] else None
+            cname = str(e[1]).strip() if len(e) >= 2 and e[1] else None
+        else:
+            fname = str(e).strip() if e else None
+            cname = None
+        if fname:
+            out.append((fname, cname))
+    return out or None
+
+def hero_export_name(hero_name):
+    """ชื่อฮีโร่ที่ใช้เขียนลงชื่อไฟล์ตอน export (กรณีไม่มีผลเทียบรูปให้ดู เช่น GachaFree)
+    ตั้ง custom name ได้ใน EXTAR_FIND แบบ ("รูป.png", "ชื่อ custom")
+    หลายร่าง (list) → ไม่รู้ว่าร่างไหน ใช้ชื่อฮีโร่เดิม (ร่างจริงตัดสินด้วยรูปใน extar_img_confirm)"""
+    variants = _extar_variants(hero_name)
+    if variants and len(variants) == 1 and variants[0][1]:
+        return variants[0][1]
+    return hero_name
 
 def extar_img_confirm(img, hero_name, serial, step_tag="Extar", cache=None):
     """EXTAR_FIND — ฮีโร่บางคนต้อง "OCR เจอชื่อ" + "เจอรูปในจอ" ถึงจะนับว่าเจอจริง
-    (กัน OCR อ่านผิดแล้วนับเกิน)
+    (กัน OCR อ่านผิดแล้วนับเกิน) — หลายร่างได้ เทียบรูปทีละร่างตามลำดับใน config
 
-      - ชื่อไม่ได้อยู่ใน EXTAR_FIND   → True (ใช้ OCR อย่างเดียวเหมือนเดิม)
-      - อยู่ในลิสต์ + เจอรูป          → True
-      - อยู่ในลิสต์ + ไม่เจอรูป       → False (ไม่นับว่าเจอ)
-      - ไฟล์รูปหาย                   → True + log เตือน (ไม่บล็อกการทำงาน)
+    คืนค่า:
+      True    = นับว่าเจอ (ใช้ชื่อฮีโร่เดิม) — ไม่อยู่ใน EXTAR_FIND / รูปหายทุกไฟล์ / img เป็น None
+      "ชื่อ"  = นับว่าเจอ + ร่างที่ match ตั้งชื่อ custom ไว้ → ใช้ชื่อนี้เขียนลงชื่อไฟล์
+      False   = OCR เจอชื่อ แต่ไม่เจอรูปสักร่าง → ไม่นับว่าเจอ
 
-    cache: dict ว่างๆ ส่งเข้ามาได้ — เฟรมเดียวกันเทียบรูปเดิมซ้ำหลาย lock จะใช้ผลเดิม
+    cache: dict ว่างๆ ส่งเข้ามาได้ — เฟรมเดียวกันเช็คฮีโร่เดิมซ้ำหลาย lock จะใช้ผลเดิม
     """
-    fname = _extar_file_for(hero_name)
-    if not fname:
+    variants = _extar_variants(hero_name)
+    if not variants:
         return True
     if img is None:
         return True
 
-    if cache is not None and fname in cache:
-        return cache[fname]
+    ckey = str(hero_name).strip().lower()
+    if cache is not None and ckey in cache:
+        return cache[ckey]
 
-    path = os.path.join(IMG_DIR, EXTAR_SUBDIR, fname)
-    base, _ext = os.path.splitext(path)
-    if not (os.path.exists(path) or os.path.exists(base + ".png") or os.path.exists(base + ".bmp")):
-        gui_log(serial, f"⚠️ EXTAR_FIND: ไม่พบไฟล์รูป {path} — ใช้ผล OCR อย่างเดียว", step=f"{step_tag} No Img")
-        return True   # ไม่ cache — เผื่อเพิ่งวางไฟล์รูปทีหลัง
+    missing = 0
+    for fname, cname in variants:
+        path = os.path.join(IMG_DIR, EXTAR_SUBDIR, fname)
+        base, _ext = os.path.splitext(path)
+        if not (os.path.exists(path) or os.path.exists(base + ".png") or os.path.exists(base + ".bmp")):
+            gui_log(serial, f"⚠️ EXTAR_FIND: ไม่พบไฟล์รูป {path} — ข้ามรูปนี้", step=f"{step_tag} No Img")
+            missing += 1
+            continue
+        pts = img_search(img, path, threshold=EXTAR_FIND_THRESHOLD)
+        if pts:
+            tail = f" → ใช้ชื่อ {cname}" if cname else ""
+            gui_log(serial, f"EXTAR ✅ {hero_name}: OCR เจอ + รูป {fname} match ที่ {pts[0]}{tail}", step=f"{step_tag} OK")
+            result = cname if cname else True
+            if cache is not None:
+                cache[ckey] = result
+            return result
 
-    pts = img_search(img, path, threshold=EXTAR_FIND_THRESHOLD)
-    ok = bool(pts)
-    if ok:
-        gui_log(serial, f"EXTAR ✅ {hero_name}: OCR เจอ + รูป {fname} match ที่ {pts[0]}", step=f"{step_tag} OK")
-    else:
-        gui_log(serial, f"EXTAR ❌ {hero_name}: OCR เจอ แต่ไม่เจอรูป {fname} → ไม่นับว่าเจอ", step=f"{step_tag} Reject")
+    if missing == len(variants):
+        return True   # รูปหายหมด → ใช้ผล OCR อย่างเดียว (ไม่ cache — เผื่อเพิ่งวางไฟล์รูปทีหลัง)
+
+    all_files = ", ".join(f for f, _ in variants)
+    gui_log(serial, f"EXTAR ❌ {hero_name}: OCR เจอ แต่ไม่เจอรูป ({all_files}) → ไม่นับว่าเจอ", step=f"{step_tag} Reject")
     if cache is not None:
-        cache[fname] = ok
-    return ok
+        cache[ckey] = False
+    return False
 
 def parse_hero_config(config_list):
     """
@@ -4661,10 +4727,15 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
                 for h, count in counts.items():
                     req = target_config.get(h, 1)
                     if count >= req:
+                        # ชื่อที่เขียนลงชื่อไฟล์ — เอาชื่อร่างที่รูป match จริงในเฟรมนี้ก่อน
+                        # (extar_img_confirm เก็บไว้ใน extar_cache) ไม่มีค่อย fallback ชื่อ custom เดี่ยว
+                        disp = extar_cache.get(str(h).strip().lower())
+                        if not isinstance(disp, str):
+                            disp = hero_export_name(h)
                         if count > 1:
-                            pass_valid_heroes.append(f"{h}x{count}")
+                            pass_valid_heroes.append(f"{disp}x{count}")
                         else:
-                            pass_valid_heroes.append(h)
+                            pass_valid_heroes.append(disp)
                 
                 if pass_valid_heroes:
                     found_heroes.extend(pass_valid_heroes)
@@ -5765,10 +5836,11 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path, coin_
         for h, count in counts.items():
             req = target_config.get(h, 1)
             if count >= req:
+                disp = hero_export_name(h)   # custom name จาก EXTAR_FIND (ถ้าตั้งไว้)
                 if count > 1:
-                    found_heroes.append(f"{h}x{count}")
+                    found_heroes.append(f"{disp}x{count}")
                 else:
-                    found_heroes.append(h)
+                    found_heroes.append(disp)
 
         if found_heroes:
             num_heroes = len(found_heroes)

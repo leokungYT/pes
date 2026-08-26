@@ -175,10 +175,12 @@ def _wait_for(device, serial, cycle_start, img_path, label, timeout=None):
     return False
 
 
-def _sort_file(serial, file_path, original_name, dest_dir, reason):
-    """ย้ายไฟล์ .dat (ชื่อเดิม) เข้าโฟลเดอร์ปลายทาง"""
+def _sort_file(serial, file_path, original_name, dest_dir, reason, tag=""):
+    """ย้ายไฟล์ .dat เข้าโฟลเดอร์ปลายทาง — ใช้ชื่อไฟล์เดิมทั้งชื่อ
+    tag (เช่น "[TH]") ต่อท้ายชื่อก่อนนามสกุล .dat"""
     os.makedirs(dest_dir, exist_ok=True)
-    final_name = export_base_name(file_path, original_name, strip_dash=True)
+    base, ext = os.path.splitext(original_name)
+    final_name = f"{base}{tag}{ext}"
     dest = os.path.join(dest_dir, final_name)
     if not os.path.exists(file_path):
         gui_log(serial, f"ไม่พบไฟล์ต้นทาง {original_name} — ข้ามการย้าย", step="Sort Skip")
@@ -229,7 +231,7 @@ def run_check_th(device, serial, cycle_start, file_path, original_name):
 
     if found_th:
         gui_log(serial, "🇹🇭 เจอ Thailand", step="CheckTH = TH", status="working")
-        _sort_file(serial, file_path, original_name, TH_DIR, "บัญชีไทย")
+        _sort_file(serial, file_path, original_name, TH_DIR, "บัญชีไทย", tag="[TH]")
     else:
         gui_log(serial, f"ไม่เจอ Thailand ใน {TH_FIND_SECS:.0f} วิ", step="CheckTH = Other", status="working")
         _sort_file(serial, file_path, original_name, OTHER_DIR, "ไม่ใช่บัญชีไทย")

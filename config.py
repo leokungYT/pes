@@ -86,7 +86,7 @@ LOGIN_SUCCESS_DIR = "login-success"
 # ── Find Hero Sequence ─────────────────────────────
 # 1 = ทำงาน fin1-fin8 และค้นหาฮีโร่ตามภาพ
 # 0 = ข้าม
-FIND_HERO = 0
+FIND_HERO = 1
 
 # แมพไฟล์ภาพฮีโร่เข้ากับชื่อฮีโร่
 HERO_IMG_MAP = {
@@ -195,9 +195,23 @@ HERO_LIST_FREE = list_find_hero
 #   - ชื่อที่ไม่ได้ใส่ในนี้ → ใช้ OCR อย่างเดียวเหมือนเดิม
 # path รูป = img/extar/<ชื่อไฟล์>   (นามสกุล .png/.bmp สลับกันได้ ระบบหาให้เอง)
 # ปิดฟีเจอร์นี้ = ปล่อยเป็น dict ว่าง  EXTAR_FIND = {}
+#
+# ตั้ง "ชื่อ custom" ให้ใช้ตอนเขียนลงชื่อไฟล์ได้ ด้วยรูปแบบ ("รูป.png", "ชื่อ custom"):
+#   "Mbappe": ("extarfind2.png", "customname")
+#   → เจอ Mbappe แล้วไฟล์ export จะขึ้นต้น customname+... แทน Mbappe+...
+# ไม่ใส่ชื่อ custom (ใส่แค่ชื่อรูปแบบเดิม) → ใช้ชื่อฮีโร่ตามเดิม
+#
+# ฮีโร่คนเดียวมี "หลายร่าง" → ใส่เป็น list ใน key เดียว (ห้ามใส่ key ชื่อซ้ำ 2 บรรทัด —
+# Python จะเอาบรรทัดล่างทับบรรทัดบนเงียบๆ เหลือร่างเดียว):
+#   "Mbappe": [("extarfind2.png", "MbappeW"), ("extarfind3.png", "MbappeO")],
+#   → OCR เจอ Mbappe แล้วไล่เทียบรูปทีละร่างตามลำดับ รูปไหน match ใช้ชื่อร่างนั้นลงชื่อไฟล์
 EXTAR_FIND = {
     "Lionel Messi": "extarfind1.png",
-    "Mbappe": "extarfind2.png"
+    "Mbappe": [("extarfind2.png", "MbappeW"), ("extarfind3.bmp", "MbappeO")],
+    "Johan Cruyff": "extarfind4.bmp",
+    "Johan Manzambi": "extarfind5.bmp",
+    "Luka": ("extarfind6.bmp", "LukaO"),
+    "Luka Modric": ("extarfind7.bmp", "LukaN")
 }
 
 # ความแม่นตอนเทียบรูปของ EXTAR_FIND (0.0 - 1.0) — ยิ่งสูงยิ่งเข้มงวด
@@ -219,7 +233,7 @@ DEBUG_CONSOLE = 0
 # ── Check Coin Sequence ───────────────────────────
 # 1 = ทำงานสแกนเหรียญ (หา checkpointcoin.bmp → OCR สแกนหาเลขเหรียญที่ Region(52, 10, 106, 41) → บันทึกลง check-coin)
 # 0 = ข้าม
-CHECK_COIN = 0
+CHECK_COIN = 1
 
 # ── Min Coin to Gacha (ใช้ร่วมกับ Check Coin) ──────
 # เลขเหรียญขั้นต่ำที่จะ "สุ่ม" — ถ้าสแกนเหรียญได้ "น้อยกว่า" ค่านี้:
@@ -300,7 +314,7 @@ GETQUEST_IMG_DIR = "img/getquest"
 # ── Move login-success → input-id (ตั้งเวลา) ────────
 # 1 = ย้ายไฟล์ทั้งหมดจาก login-success → input-id อัตโนมัติทุกวันตามเวลา MOVE_LS_TIME
 # 0 = ปิด (ย้ายเองด้วยปุ่มในหน้า config ได้ตลอด)
-MOVE_LS_ENABLE = 1
+MOVE_LS_ENABLE = 0
 # เวลาที่จะย้ายอัตโนมัติ (รูปแบบ HH:MM 24 ชั่วโมง เช่น "09:00")
 MOVE_LS_TIME = "09:00"
 
