@@ -211,7 +211,9 @@ EXTAR_FIND = {
     "Johan Cruyff": "extarfind4.bmp",
     "Johan Manzambi": "extarfind5.bmp",
     "Luka": ("extarfind6.bmp", "LukaO"),
-    "Luka Modric": ("extarfind7.bmp", "LukaN")
+    "Luka Modric": ("extarfind7.bmp", "LukaN"),
+    "Rui Costa": ("extarfind8.bmp", "Rui Costa"),
+    "Diego Costa": ("extarfind9.bmp", "Diego Costa")
 }
 
 # ความแม่นตอนเทียบรูปของ EXTAR_FIND (0.0 - 1.0) — ยิ่งสูงยิ่งเข้มงวด

@@ -1098,25 +1098,28 @@ def is_hero_match(hero_name, ocr_text):
     
     if not cleaned_hero or not cleaned_ocr:
         return False
-        
-    if cleaned_hero in cleaned_ocr:
-        return True
-        
-    if cleaned_ocr in cleaned_hero:
-        return True
-        
+    # ป้องกัน OCR ข้อความสั้นเกินไป (noise/ขยะจากหน้าจอ) จับคู่ผิดพลาด
+    if len(cleaned_ocr) < 3:
+        return False
+
+    # ── หลักการ: ต้องเจอ "ชื่อเต็ม" เท่านั้นถึงนับว่า match (เหมือน login.py) ──
+    #    ทุกคำสำคัญของชื่อฮีโร่ต้องอยู่ใน OCR ครบ (แบบเต็มคำ) — เจอแค่บางคำไม่นับ
+    #    เช่น "Diego Costa" ต้องเจอทั้ง diego และ costa
+    #    (กัน OCR เจอ "Rui Costa" แล้วถูกนับเป็น "Diego Costa" เพราะคำว่า costa ซ้ำกัน)
+    #    คำเชื่อมสั้นๆ (de/van/der/...) และคำสั้นกว่า 3 ตัวอักษร ไม่บังคับ — OCR ชอบอ่านเพี้ยน
     hero_words = cleaned_hero.split()
+    ocr_words = set(cleaned_ocr.split())
+    _skip_words = {"de", "van", "der", "dos", "das", "del", "los", "la", "el", "al", "di", "da"}
+    required = [w for w in hero_words if len(w) >= 3 and w not in _skip_words]
+    if required and all(w in ocr_words for w in required):
+        return True
+
+    # เผื่อ OCR อ่านชื่อติดกันไม่มีวรรค (เช่น "erlinghaaland") — เช็คชื่อเต็มแบบไม่มีวรรค
+    # เฉพาะชื่อหลายคำเท่านั้น (ชื่อคำเดียวใช้กฎเต็มคำข้างบนพอ กัน substring มั่ว เช่น luka ใน lukaku)
     if len(hero_words) > 1:
-        if all(w in cleaned_ocr for w in hero_words):
+        if cleaned_hero.replace(" ", "") in cleaned_ocr.replace(" ", ""):
             return True
-        match_count = sum(1 for w in hero_words if w in cleaned_ocr)
-        if match_count >= max(2, len(hero_words) * 0.7):
-            return True
-            
-    for w in hero_words:
-        if len(w) >= 5 and w in cleaned_ocr:
-            return True
-            
+
     return False
 
 # ═══════════════════════════════════════════════════════════════════════════════
