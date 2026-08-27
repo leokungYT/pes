@@ -210,8 +210,7 @@ EXTAR_FIND = {
     "Mbappe": [("extarfind2.png", "MbappeW"), ("extarfind3.bmp", "MbappeO")],
     "Johan Cruyff": "extarfind4.bmp",
     "Johan Manzambi": "extarfind5.bmp",
-    "Luka": ("extarfind6.bmp", "LukaO"),
-    "Luka Modric": ("extarfind7.bmp", "LukaN"),
+    "Luka Modric": [("extarfind7.bmp", "LukaN"), ("extarfind10.bmp", "LukaO")],
     "Rui Costa": ("extarfind8.bmp", "Rui Costa"),
     "Diego Costa": ("extarfind9.bmp", "Diego Costa")
 }
