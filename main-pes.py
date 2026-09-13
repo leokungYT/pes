@@ -2495,11 +2495,12 @@ def process_device(serial_or_device):
             # 5. FINAL BACKUP LOGIC
             gui_log(serial, "Starting final backup sequence...", step="Final Backup")
 
-            # ── Check Coin (CHECK_COIN=1): สแกนเหรียญ "ก่อน" ปิดแอป → แนบ +[เลข] ท้ายชื่อไฟล์ ──
+            # ── Check Coin (CHECK_COIN=1): สแกนเหรียญ "ก่อน" ปิดแอป → แนบ [เลข]- ไว้หน้าชื่อไฟล์ ──
+            #    (รูปแบบเดียวกับ login.py: [320]-ชื่อเดิม.dat)
             coin_scanned = None
             if CHECK_COIN == 1:
                 coin_scanned = scan_coin_number_mainpes(device, cycle_start, serial)
-            coin_suffix = f"+[{coin_scanned}]" if coin_scanned is not None else ""
+            coin_tag = f"[{coin_scanned}]-" if coin_scanned is not None else ""
 
             backup_dir = "backup"
             if not os.path.exists(backup_dir): os.makedirs(backup_dir)
@@ -2537,17 +2538,17 @@ def process_device(serial_or_device):
                     
                     # ถ้า NOSCAN=1 → ส่งไป fast-random/ เสมอ
                     if NOSCAN == 1:
-                        final_name = f"{user_code}{coin_suffix}.dat"
+                        final_name = f"{coin_tag}{user_code}.dat"
                         dest_dir = FAST_RANDOM_DIR
                         gui_log(serial, f"NOSCAN → {dest_dir}/{final_name}", step="Fast Random")
                     # ถ้ามี gacha free result → ส่งไป backup-id
                     elif GACHA_FREE == 1 and gacha_free_result:
                         hero_prefix = "+".join(gacha_free_result)
-                        final_name = f"{hero_prefix}+{user_code}{coin_suffix}.dat"
+                        final_name = f"{coin_tag}{hero_prefix}+{user_code}.dat"
                         dest_dir = BACKUP_ID_DIR
                         gui_log(serial, f"⭐ HERO FOUND: {hero_prefix} → {dest_dir}", step="Match!")
                     else:
-                        final_name = f"{user_code}{coin_suffix}.dat"
+                        final_name = f"{coin_tag}{user_code}.dat"
                         dest_dir = backup_dir
 
                     final_local_path = os.path.join(dest_dir, final_name)

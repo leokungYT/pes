@@ -4097,20 +4097,67 @@ def extract_user_code(dat_path):
         pass
     return None
 
+# ═════════════════════════════════════════════════════════════════════════════
+# Coin tag ในชื่อไฟล์ — เลขเหรียญที่ OCR สแกนได้ ติดไว้ "หน้าชื่อไฟล์" เสมอ
+# ─────────────────────────────────────────────────────────────────────────────
+#   รูปแบบปัจจุบัน:  [320]-Hero+ASCV610367086.dat
+#   รูปแบบเก่าที่ยังต้องอ่านออก (ไฟล์ที่ค้างในเครื่อง/มาจากบอทตัวอื่น):
+#       Hero+ASCV610367086-[320].dat   ← find_hero เดิม (ต่อท้าย)
+#       ASCV610367086+[320].dat        ← main-pes.py (ต่อท้าย)
+#       [320]+Hero+ASCV610367086.dat   ← check-coin เดิม (หน้า คั่นด้วย +)
+#   ทุกครั้งที่ "จดเลขใหม่" ต้องลบ tag เก่าออกก่อน ไม่ว่าจะอยู่หน้าหรือท้าย — กันเลขซ้อนกัน
+import re as _re_coin
+
+_COIN_TAG_HEAD = _re_coin.compile(r"^\[(\d+)\]\s*[-+]")
+_COIN_TAG_TAIL = _re_coin.compile(r"[-+]\[(\d+)\]")
+
+def find_coin_tag(name):
+    """คืนเลข coin ที่ติดอยู่ในชื่อไฟล์ (หน้า หรือท้ายแบบเก่า) — ไม่มี → None"""
+    base = os.path.splitext(name or "")[0]
+    m = _COIN_TAG_HEAD.search(base) or _COIN_TAG_TAIL.search(base)
+    return m.group(1) if m else None
+
+def strip_coin_tag(name):
+    """ลบ coin tag ออกจากชื่อไฟล์ให้หมด — ทั้งแบบหน้าและแบบท้ายเก่าทุกรูปแบบ"""
+    base, ext = os.path.splitext(name or "")
+    base = _COIN_TAG_HEAD.sub("", base)
+    base = _COIN_TAG_TAIL.sub("", base)
+    return f"{base}{ext}"
+
+def apply_coin_tag(name, coin):
+    """ติดเลข coin ไว้หน้าชื่อไฟล์ → [320]-ชื่อเดิม.dat
+    ลบ tag เก่าออกก่อนเสมอ (ทั้งหน้าและท้าย) — coin ว่าง/None = คืนชื่อที่ลบ tag แล้วเฉยๆ"""
+    base_name = strip_coin_tag(name)
+    if coin is None or str(coin).strip() == "":
+        return base_name
+    return f"[{coin}]-{base_name}"
+
+def carry_coin_tag(final_name, original_name, coin=None):
+    """ติด coin tag ให้ "ชื่อปลายทางที่ประกอบเสร็จแล้ว" (ต้องเรียกหลังต่อ hero prefix เสมอ
+    ไม่งั้นเลขจะไปค้างกลางชื่อ)
+
+    coin มีค่า        → ใช้เลขที่สแกนสดมา (จดทับของเก่า)
+    coin ว่าง/None    → ใช้เลขเดิมที่ติดมากับ original_name (ถ้ามี) — ย้ายมาไว้หน้าให้
+    ไม่มีเลขทั้งคู่   → คืนชื่อเดิมเฉยๆ
+    """
+    if coin is None or str(coin).strip() == "":
+        coin = find_coin_tag(original_name)
+    return apply_coin_tag(final_name, coin)
+
 def export_base_name(file_path, original_name, strip_dash=False):
     """ชื่อไฟล์ที่จะใช้ตอน export — ดึง user_code "จากข้างในไฟล์" มาเป็นชื่อ
     เพราะชื่อไฟล์ขาเข้าอาจไม่ตรงกับ user_code จริงของบัญชีนั้น
-    (เก็บ coin tag -[เลข] ที่ติดมากับชื่อเดิมไว้ด้วย)
+
+    *** คืน "ชื่อล้วนๆ ไม่มี coin tag" — เลขเหรียญติดทีหลังด้วย carry_coin_tag()
+        ตอนที่ชื่อปลายทางประกอบเสร็จแล้ว (กันเลขไปค้างกลางชื่อเวลาต่อ hero prefix) ***
 
     อ่าน user_code ไม่ได้ → fallback ตัด prefix จากชื่อเดิมแบบเดิมเป๊ะๆ
-    strip_dash: ตัดหลัง '-' ด้วยไหม (บาง flow ตัด, flow ของ find_hero ไม่ตัดเพราะต้องเก็บ coin tag)
+    strip_dash: ตัดหลัง '-' ด้วยไหม (บาง flow ตัด, บาง flow ไม่ตัด)
     """
+    clean = strip_coin_tag(original_name or "")   # ตัด tag ออกก่อน split กันตัดผิดตำแหน่ง
     uc = extract_user_code(file_path) if file_path else None
     if uc:
-        import re as _re_ex
-        m = _re_ex.search(r"-\[\d+\]", os.path.splitext(original_name or "")[0])
-        return f"{uc}{m.group(0) if m else ''}.dat"
-    clean = original_name
+        return f"{uc}.dat"
     if "+" in clean:
         clean = clean.split("+")[-1]
     elif strip_dash and "-" in clean:
@@ -4825,13 +4872,11 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
         else:
             gui_log(serial, "No hero match found (OCR unverified) → no-hero.", step="No Match")
 
-    # แนบเลขเหรียญที่สแกนสดมา ต่อท้ายชื่อไฟล์ก่อนนามสกุล (เฉพาะกรณีที่ส่ง coin_prefix เข้ามา)
-    #   เช่น  Paolo Maldini+ASCV610367086.dat -> Paolo Maldini+ASCV610367086-[300].dat
-    if coin_prefix:
-        import re as _re_fh
-        _b, _e = os.path.splitext(final_name)
-        _b = _re_fh.sub(r"-\[\d+\]", "", _b)  # กัน coin ซ้อนถ้าชื่อมี -[เลข] อยู่แล้ว
-        final_name = f"{_b}-[{coin_prefix}]{_e}"
+    # แนบเลขเหรียญไว้ "หน้าชื่อไฟล์" — ใช้เลขที่สแกนสด ไม่มีก็ยกเลขเดิมที่ติดมากับไฟล์มาไว้หน้า
+    #   เช่น  Paolo Maldini+ASCV610367086.dat -> [300]-Paolo Maldini+ASCV610367086.dat
+    _before_tag = final_name
+    final_name = carry_coin_tag(final_name, original_name, coin_prefix)
+    if final_name != _before_tag:
         gui_log(serial, f"🪙 Attaching coins to filename: {final_name}", step="Coin Tag")
 
     dest = os.path.join(dest_dir, final_name)
@@ -5199,17 +5244,14 @@ def _g500_checkpoint_then_next(device, cycle_start, serial, cp_secs=30, next_sec
 
 def _g500_check_coin_and_collect(device, cycle_start, serial, original_name, file_path, img):
     """GACHA500 step1: สแกน coin จากภาพ img (region 52,10,106,41).
-    coin >= COIN_GACHA_THRESHOLD → เก็บไฟล์เข้า coin<threshold>+ (ชื่อ [coin]+เดิม) + release
+    coin >= COIN_GACHA_THRESHOLD → เก็บไฟล์เข้า coin<threshold>+ (ชื่อ [coin]-เดิม) + release
       แล้ว raise GachaCoinCollectedException (จบบัญชี ไม่สุ่ม)
     coin <  COIN_GACHA_THRESHOLD → return เฉยๆ (ไปสุ่ม loop ต่อ)"""
-    import re
     coin_val = _read_coin_from_img(img, serial)
     gui_log(serial, f"🪙 อ่าน coin (ที่ new-gacha1) = {coin_val} | เกณฑ์เก็บ {COIN_GACHA_THRESHOLD}", step="G500-Coin")
     if coin_val < COIN_GACHA_THRESHOLD:
         return
-    _m = re.match(r"^\[\d+\]\+(.+)$", original_name)
-    base = _m.group(1) if _m else original_name
-    final_name = f"[{coin_val}]+{base}"
+    final_name = apply_coin_tag(original_name, coin_val)
     coin_dir = f"coin{COIN_GACHA_THRESHOLD}+"
     device.shell("am force-stop jp.konami.pesam")
     time.sleep(1)
@@ -5896,14 +5938,12 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path, coin_
         final_name = clean_orig
         gui_log(serial, "GachaFree: No hero found in any loop", step="No Match")
 
-    # แนบเลขเหรียญ "ไว้หน้าชื่อไฟล์" แบบเดียวกับโหมด Check Coin (เฉพาะตอนเปิด CHECK_COIN)
-    #   เช่น  ASCV610367086.dat -> [500]+ASCV610367086.dat
-    if coin_prefix:
-        import re as _re_gf
-        _base = _re_gf.sub(r"^\[\d+\]\+", "", final_name)   # กัน [เลข]+ ซ้อนถ้าชื่อมีอยู่แล้ว
-        _base = _re_gf.sub(r"-\[\d+\]", "", _base)          # กันเลขแบบต่อท้ายเก่าปนมาด้วย
-        final_name = f"[{coin_prefix}]+{_base}"
-        gui_log(serial, f"🪙 Coins: {coin_prefix} -> {final_name}", step="Coin Match")
+    # แนบเลขเหรียญ "ไว้หน้าชื่อไฟล์" แบบเดียวกับโหมด Check Coin
+    #   เช่น  ASCV610367086.dat -> [500]-ASCV610367086.dat
+    _before_tag = final_name
+    final_name = carry_coin_tag(final_name, original_name, coin_prefix)
+    if final_name != _before_tag:
+        gui_log(serial, f"🪙 Coins: {coin_prefix or find_coin_tag(original_name)} -> {final_name}", step="Coin Match")
 
     dest = os.path.join(dest_dir, final_name)
     if os.path.exists(file_path):
@@ -5928,7 +5968,7 @@ def check_coin_mode(device, cycle_start, serial, original_name, file_path, coin_
     """
     Check Coin sequence:
     1. ใช้เลขเหรียญที่สแกนไว้ "ก่อน" แล้ว (coin_prefix) — ถ้าไม่มีค่อยสแกนสด ณ จุดนี้
-    2. Rename file: [digits]+original_name (stripping any old [digits]+ from original name to avoid nesting)
+    2. Rename file: [digits]-original_name (ลบ coin tag เก่าทั้งหน้า/ท้ายออกก่อน กันเลขซ้อน)
     3. Move file to 'check-coin' directory
     4. Force-stop game and return True
     """
@@ -5988,14 +6028,8 @@ def check_coin_mode(device, cycle_start, serial, original_name, file_path, coin_
         gui_log(serial, "Could not read coins via OCR! Using '0'", step="OCR Fail")
         coin_number = "0"
 
-    # 2. Rename file and strip old [digits]+ prefix
-    match = re.match(r"^\[\d+\]\+(.+)$", original_name)
-    if match:
-        base_name = match.group(1)
-    else:
-        base_name = original_name
-
-    final_name = f"[{coin_number}]+{base_name}"
+    # 2. Rename file — ติดเลข coin ไว้หน้าชื่อ (ลบ tag เก่าทั้งหน้า/ท้ายออกก่อน กันเลขซ้อน)
+    final_name = apply_coin_tag(original_name, coin_number)
     gui_log(serial, f"🪙 Coins: {coin_number} -> {final_name}", step="Coin Match")
     cprint(f"[{serial}] Coin Scan Result: {coin_number} -> file: {final_name}")
 
@@ -7279,8 +7313,9 @@ def process_device_login(device):
                     device.shell("am force-stop jp.konami.pesam")
                     time.sleep(1)
 
-                    # ชื่อไฟล์ตอน export = user_code จริงจากข้างในไฟล์ .dat
+                    # ชื่อไฟล์ตอน export = user_code จริงจากข้างในไฟล์ .dat (+ ยก coin tag เดิมมาไว้หน้า)
                     clean_orig = export_base_name(file_path, original_name, strip_dash=True)
+                    clean_orig = carry_coin_tag(clean_orig, original_name)
 
                     dest_dir = LOGIN_SUCCESS_DIR
                     dest = os.path.join(dest_dir, clean_orig)
@@ -8506,13 +8541,12 @@ def process_device_login(device):
                 dest_dir = LOGIN_SUCCESS_DIR
                 final_name = clean_orig
 
-            # แนบเลขเหรียญไว้ "หน้าชื่อไฟล์" แบบเดียวกับโหมด Check Coin → [420]+ชื่อเดิม.dat
-            if CHECK_COIN == 1 and coin_prefix:
-                import re as _re_cc
-                _base = _re_cc.sub(r"^\[\d+\]\+", "", final_name)   # กัน [เลข]+ ซ้อน
-                _base = _re_cc.sub(r"-\[\d+\]", "", _base)          # กันเลขแบบต่อท้ายเก่าปนมา
-                final_name = f"[{coin_prefix}]+{_base}"
-                gui_log(serial, f"🪙 Coins: {coin_prefix} -> {final_name}", step="Coin Match")
+            # แนบเลขเหรียญไว้ "หน้าชื่อไฟล์" แบบเดียวกับโหมด Check Coin → [420]-ชื่อเดิม.dat
+            _before_tag = final_name
+            final_name = carry_coin_tag(final_name, original_name,
+                                        coin_prefix if CHECK_COIN == 1 else None)
+            if final_name != _before_tag:
+                gui_log(serial, f"🪙 Coins: {coin_prefix or find_coin_tag(original_name)} -> {final_name}", step="Coin Match")
 
             dest = os.path.join(dest_dir, final_name)
             if os.path.exists(file_path):
