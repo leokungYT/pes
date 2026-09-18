@@ -249,6 +249,8 @@ DEVICE_RESET_FLAGS   = {}
 DEVICE_FILE_ASSIGNMENTS = {}
 DEVICE_DISABLE_FIXEVENT = {}
 DEVICE_IN_GACHA      = {}     # serial -> True ระหว่างอยู่ใน sequence กาชา → เปิดหา ad-rewardfix1 แบบลอยๆ ทุกเฟรม
+_GACHA_BACKHOME_SEEN = {}     # serial -> เวลาที่เริ่มเห็น backhome ค้างบนจอ (เฉพาะช่วงกาชา)
+GACHA_BACKHOME_STUCK_SECS = 7.0   # วิ — ระหว่างสุ่มกาชา ถ้า backhome ค้างบนจอนานเกินนี้ = ไปต่อไม่ได้ → กดกลับ Home
 DEVICE_IN_NEWSTAGE   = {}     # serial -> True ระหว่างทำ new-stageplay8 อยู่ (กัน floating check เรียกซ้ำซ้อนตัวเอง)
 DEVICE_NEWSTAGE_DONE = {}     # serial -> True ถ้าอีเวนต์ new stage ถูกจัดการไปแล้วใน cycle นี้ (ข้ามการรอซ้ำ)
 DEVICE_CYCLE_START   = {}     # serial -> เวลาเริ่ม cycle ปัจจุบัน (ให้ floating check ใช้เช็ค timeout รวมได้)
@@ -3449,6 +3451,44 @@ def get_screen_capture(device):
                     time.sleep(1.5)
                     img = fast_screencap(device)
 
+            # === backhome floating check (เฉพาะช่วง sequence กาชา) ===
+            #     ระหว่างสุ่มกาชา ถ้า backhome "ค้าง" บนจอเกิน GACHA_BACKHOME_STUCK_SECS วิ
+            #     = ลูปสุ่มไปต่อไม่ได้แล้ว → กดกลับ Home ให้เอง (แล้วเคลียร์ backhome1 ที่เด้งตามมาด้วย)
+            #     เห็นแวบเดียวแล้วหายไปเอง = ไม่กด (จับเฉพาะตอนค้างจริงๆ) — หาลอยๆ ทุกเฟรม ไม่บล็อกขั้นตอน
+            if DEVICE_IN_GACHA.get(device.serial, False) and img is not None:
+                _sr_bh = device.serial
+                pts_bh = img_search(img, os.path.join(IMG_DIR, "backhome.png"))
+                if not pts_bh:
+                    _GACHA_BACKHOME_SEEN.pop(_sr_bh, None)   # ไม่เห็นแล้ว = ไม่ค้าง → รีเซ็ตตัวจับเวลา
+                else:
+                    _t0_bh = _GACHA_BACKHOME_SEEN.get(_sr_bh)
+                    if _t0_bh is None:
+                        _GACHA_BACKHOME_SEEN[_sr_bh] = time.time()   # เพิ่งเห็นครั้งแรก → เริ่มจับเวลา
+                    elif time.time() - _t0_bh >= GACHA_BACKHOME_STUCK_SECS:
+                        x_bh, y_bh = pts_bh[0]
+                        device.shell(f"input swipe {x_bh} {y_bh} {x_bh} {y_bh} 100")
+                        gui_log(device.serial,
+                                f"Floating: backhome ค้างเกิน {GACHA_BACKHOME_STUCK_SECS:.0f} วิ → กด ({x_bh},{y_bh})",
+                                step="Gacha BackHome")
+                        _GACHA_BACKHOME_SEEN[_sr_bh] = time.time()   # จับเวลาใหม่ กันกดรัวๆ
+                        time.sleep(2.0)
+
+                        # เคลียร์ backhome1 (ป๊อปอัพยืนยัน) ให้หายก่อน ไม่งั้นค้างที่ dialog
+                        _bh1_deadline = time.time() + 15
+                        while time.time() < _bh1_deadline:
+                            _img_bh1 = fast_screencap(device)
+                            if _img_bh1 is None:
+                                break
+                            _pts_bh1 = img_search(_img_bh1, os.path.join(IMG_DIR, "backhome1.png"))
+                            if not _pts_bh1:
+                                break
+                            x_bh1, y_bh1 = _pts_bh1[0]
+                            device.shell(f"input swipe {x_bh1} {y_bh1} {x_bh1} {y_bh1} 100")
+                            gui_log(device.serial, f"Floating: กด backhome1 ({x_bh1},{y_bh1})", step="Gacha BackHome 1")
+                            time.sleep(2.0)
+
+                        img = fast_screencap(device)
+
             # === fixgachanew1 -> fixgachanew2 floating check ===
             if in_new_gacha_loop and img is not None:
                 pts_fg1 = img_search(img, os.path.join(IMG_DIR, "fixgachanew1.bmp"))
@@ -6078,6 +6118,7 @@ def process_device_login(device):
             DEVICE_DISABLE_FIXEVENT[serial] = False
             DEVICE_DISABLE_FIXOUT[serial] = False   # เริ่ม cycle ใหม่ → เปิด fixout check กลับ (ช่วง login ต้องใช้)
             DEVICE_IN_GACHA[serial] = False         # เริ่ม cycle ใหม่ → ยังไม่เข้ากาชา (กันค้างจากรอบก่อนที่หลุด exception)
+            _GACHA_BACKHOME_SEEN.pop(serial, None)
             DEVICE_IN_NEWSTAGE[serial] = False      # เริ่ม cycle ใหม่ → เคลียร์ธงกัน new-stage ซ้อน
             DEVICE_NEWSTAGE_DONE[serial] = False    # ไฟล์ใหม่ = ยังไม่ได้ทำอีเวนต์ new stage ของรอบนี้
             check_device_reset(serial)
@@ -7541,6 +7582,7 @@ def process_device_login(device):
                 DEVICE_DISABLE_FIXOUT[serial] = True
                 # เปิดหา ad-rewardfix1 แบบลอยๆ ตลอด sequence กาชา — เจอเมื่อไหร่กดปิดทันที
                 DEVICE_IN_GACHA[serial] = True
+                _GACHA_BACKHOME_SEEN.pop(serial, None)   # เริ่มนับ backhome ค้างใหม่ทุกครั้งที่เข้ากาชา
                 
                 while True:
                     try:
@@ -8493,6 +8535,7 @@ def process_device_login(device):
 
                 # จบ sequence กาชาแล้ว → ปิดการหา ad-rewardfix1 แบบลอยๆ
                 DEVICE_IN_GACHA[serial] = False
+                _GACHA_BACKHOME_SEEN.pop(serial, None)
 
             # 8.5 Gacha + Find Hero (Optional) — หลังสุ่มกาชาเสร็จ "ไม่ clear app"
             #      next → กด Back รัวๆจนเจอ cancel → คลิก → แล้วค่อยค้นหา fin1
