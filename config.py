@@ -11,17 +11,17 @@ EVENT_IMG = 0
 # ── Box Sequence (main-pes.py) ────────────────────
 # 1 = เปิดกล่อง (ทำ play26-play31 และ box1-box4)
 # 0 = ข้ามการเปิดกล่อง (จบที่ play25 แล้วส่งไฟล์เลย)
-DO_BOX = 0
+DO_BOX = 1
 
 # ── Gacha Sequence (login.py) ──────────────────────
 # 1 = สุ่มกาชา (ต่อจากจบ box4)
 # 0 = ไม่สุ่มกาชา (จบงานปกติ)
-DO_GACHA = 0
+DO_GACHA = 1
 
 # ── New Gacha Sequence (login.py) ──────────────────
 # 1 = เปิดการทำงาน new-gacha1 -> เลื่อนหา new-gacha1 -> ข้ามไป gacha4.bmp
 # 0 = ปิด
-NEW_GACHA = 0
+NEW_GACHA = 1
 
 # ── New Gacha Swipe (เลื่อนหน้าจอ) ──────────────────
 # 1 = เปิดการเลื่อนหน้าจอ (swipe 144,243 -> 699,233) ตอนหา new-gacha1
@@ -31,12 +31,12 @@ NEW_GACHA_SWIPE = 0
 # ── Custom Gacha Loop Mode ──────────────────────────
 # 1 = เปิดโหมด Custom Gacha (loopgacha1 -> gacha4 -> gacha5 -> loop จนเจอ outloop)
 # 0 = ปิดโหมด
-CUSTOM_GACHA = 0
+CUSTOM_GACHA = 1
 
 # ── Custom Gacha Loop Limit (ใช้คู่กับ "สุ่มจน coin หมด") ──
 # 0  = สุ่มจนหมด (จนเจอ nocions/outloop) — พฤติกรรมเดิม
 # >0 = Custom: สุ่มไม่เกินกี่รอบแล้ว break ออกเลย (เช่น 5 = สุ่มแค่ 5 รอบ)
-GACHA_LOOP_LIMIT = 3
+GACHA_LOOP_LIMIT = 1
 
 # ── GACHA500: step พิเศษ (หลังเจอ checkpoint-gacha4) ──
 # *** ไม่ต้องเปิด CUSTOM_GACHA แล้ว — GACHA500 = 1 เข้า flow นี้ได้เอง ***
@@ -86,7 +86,7 @@ LOGIN_SUCCESS_DIR = "login-success"
 # ── Find Hero Sequence ─────────────────────────────
 # 1 = ทำงาน fin1-fin8 และค้นหาฮีโร่ตามภาพ
 # 0 = ข้าม
-FIND_HERO = 1
+FIND_HERO = 0
 
 # แมพไฟล์ภาพฮีโร่เข้ากับชื่อฮีโร่
 HERO_IMG_MAP = {
@@ -181,7 +181,13 @@ list_find_hero = [
     "Gennaro Gattuso",
     "Eden Hazard",
     "Diego Costa",
-    "Gary Cahill"
+    "Gary Cahill",
+    "Grorge Best",
+    "Alessandro",
+    "Gareth Bale",
+    "Edwin van der",
+    "Tomas Rosicky",
+    "Carles Puyol"
 ]
 
 # แชร์ list เดียวกัน — แก้ที่ list_find_hero อย่างเดียวพอ
@@ -234,7 +240,7 @@ DEBUG_CONSOLE = 0
 # ── Check Coin Sequence ───────────────────────────
 # 1 = ทำงานสแกนเหรียญ (หา checkpointcoin.bmp → OCR สแกนหาเลขเหรียญที่ Region(52, 10, 106, 41) → บันทึกลง check-coin)
 # 0 = ข้าม
-CHECK_COIN = 1
+CHECK_COIN = 0
 
 # ── Min Coin to Gacha (ใช้ร่วมกับ Check Coin) ──────
 # เลขเหรียญขั้นต่ำที่จะ "สุ่ม" — ถ้าสแกนเหรียญได้ "น้อยกว่า" ค่านี้:
