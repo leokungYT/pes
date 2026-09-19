@@ -36,7 +36,7 @@ CUSTOM_GACHA = 1
 # ── Custom Gacha Loop Limit (ใช้คู่กับ "สุ่มจน coin หมด") ──
 # 0  = สุ่มจนหมด (จนเจอ nocions/outloop) — พฤติกรรมเดิม
 # >0 = Custom: สุ่มไม่เกินกี่รอบแล้ว break ออกเลย (เช่น 5 = สุ่มแค่ 5 รอบ)
-GACHA_LOOP_LIMIT = 1
+GACHA_LOOP_LIMIT = 0
 
 # ── GACHA500: step พิเศษ (หลังเจอ checkpoint-gacha4) ──
 # *** ไม่ต้องเปิด CUSTOM_GACHA แล้ว — GACHA500 = 1 เข้า flow นี้ได้เอง ***
@@ -48,7 +48,7 @@ GACHA_LOOP_LIMIT = 1
 #              → gacha500 → gacha500v1 → nocions (Back 1 ครั้ง) / checkpointgacha (กด next จนหาย)
 #              เจอ out900 เมื่อไหร่ = ข้าม step ที่เหลือทันที
 # 0 = ปิด → สุ่ม loop แบบปกติ (ไม่เช็ค coin / ไม่หา gacha500)
-GACHA500 = 0
+GACHA500 = 1
 # เกณฑ์ coin ที่จะ "เก็บ" (>= ค่านี้เก็บ, < ค่านี้สุ่มต่อ) — ชื่อโฟลเดอร์จะเป็น coin<ค่านี้>+
 COIN_GACHA_THRESHOLD = 800
 
@@ -86,7 +86,7 @@ LOGIN_SUCCESS_DIR = "login-success"
 # ── Find Hero Sequence ─────────────────────────────
 # 1 = ทำงาน fin1-fin8 และค้นหาฮีโร่ตามภาพ
 # 0 = ข้าม
-FIND_HERO = 0
+FIND_HERO = 1
 
 # แมพไฟล์ภาพฮีโร่เข้ากับชื่อฮีโร่
 HERO_IMG_MAP = {
