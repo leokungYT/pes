@@ -182,7 +182,7 @@ list_find_hero = [
     "Eden Hazard",
     "Diego Costa",
     "Gary Cahill",
-    "Grorge Best",
+    "George Best",
     "Alessandro",
     "Gareth Bale",
     "Edwin van der",
