@@ -113,6 +113,11 @@ try:
     from config import FIND_IMG_THRESHOLD
 except ImportError:
     FIND_IMG_THRESHOLD = 0.85
+# ── กันค้างหน้า title: ไม่เจอ play8/checkpointlogin ติดกันกี่วิ ถึงจะกู้เอง ──
+try:
+    from config import PLAY8_STUCK_SECS
+except ImportError:
+    PLAY8_STUCK_SECS = 90
 # ── Auto restart เครื่องที่ adb หลุด (offline ค้าง) ──
 try:
     from config import AUTO_RESTART_OFFLINE
@@ -6408,6 +6413,8 @@ def process_device_login(device):
             #    (กด play8 / fallback ไปเรื่อยๆ จนกว่าจะเจอ แล้วค่อยไปขั้นตอนกด Back รัวๆ)
             gui_log(serial, "Waiting checkpointlogin (clicking play8)...", step="play8/Check")
             play8_miss = 0   # นับรอบที่ play8 หาย + ยังไม่เจอ checkpoint (ไว้ทำ fallback กันค้าง)
+            p8_seen_since = time.time()   # เวลาล่าสุดที่ยัง "เห็นอะไรที่รู้จัก" บนจอ (play8/checkpoint/fixout/terms)
+            p8_rescue_n = 0               # จำนวนรอบที่กู้ไปแล้ว (ครบ 3 = ยอมแพ้ไฟล์นี้)
             play8_click_count = 0   # นับจำนวนครั้งที่กด play8 ติดกัน — ครบ 7 → พัก 8 วิ แล้วเช็คใหม่
             play8_pause_until = 0.0     # ช่วงพักหลังกดครบ 5 ครั้ง (พักแบบไม่หลับ — ลูปยังเช็ค checkpointlogin ตลอด)
             DEVICE_FIXOUT_CANCEL_DONE.pop(serial, None)   # ล้าง flag ค้างจากรอบ/เฟสก่อน กัน break มั่ว
@@ -6459,6 +6466,7 @@ def process_device_login(device):
                         run_new_stage_play8(device, serial, cycle_start)
                         play8_miss = 0
                         play8_click_count = 0
+                        p8_seen_since = time.time()
                         continue
 
                     # --- 1.7 หา fixout ลอยๆ "ทุกเฟรม" (popup บังจอ เช่น Terms of Use) ---
@@ -6480,6 +6488,8 @@ def process_device_login(device):
 
                     if pts_8:
                         play8_miss = 0   # เจอ play8 แล้ว รีเซ็ตตัวนับ
+                        p8_seen_since = time.time()
+                        p8_rescue_n = 0
 
                         # Prioritize fixlg3
                         pts_lg3 = img_search(img, os.path.join(IMG_DIR, "fixlg3.bmp"))
@@ -6503,6 +6513,30 @@ def process_device_login(device):
                     # --- 3. play8/play8fix หายแล้วแต่ยังไม่เจอ checkpoint → รอเฉยๆ วนเช็คต่อ ---
                     #     (checkpointlogin/fixout ถูกเช็คทุกเฟรมข้างบนอยู่แล้ว)
                     play8_miss += 1
+
+                    # --- 3.5 ไม่เจอ "ทั้ง play8 และ checkpointlogin" ติดกันเกิน PLAY8_STUCK_SECS วิ ---
+                    #     = ค้างอยู่หน้าที่บอทไม่รู้จัก (เกมค้างหน้า title / มีอะไรบังจอ)
+                    #     เดิมลูปนี้ไม่มีทางออกเลย ต้องรอจน TIMEOUT_MINUTES (30 นาที) → เสียเวลาเปล่า
+                    #     กู้เอง: กด Back + เปิดเกมใหม่ 2 รอบ ไม่ขึ้นอีกค่อยปล่อยไฟล์ไปตัวใหม่
+                    if time.time() - p8_seen_since >= PLAY8_STUCK_SECS:
+                        p8_rescue_n += 1
+                        if p8_rescue_n >= 3:
+                            gui_log(serial, f"ค้างหน้า title เกิน {PLAY8_STUCK_SECS:.0f}s x3 — คืนไฟล์ ไปไฟล์ใหม่",
+                                    step="play8 Give Up", status="stuck")
+                            device.shell("am force-stop jp.konami.pesam")
+                            time.sleep(1)
+                            raise DeviceResetException("play8 stuck — ไม่เจอ play8/checkpointlogin")
+                        gui_log(serial, f"ไม่เจอ play8/checkpointlogin {PLAY8_STUCK_SECS:.0f}s — กด Back แล้วเปิดเกมใหม่ (รอบ {p8_rescue_n}/2)",
+                                step="play8 Rescue", status="working")
+                        device.shell("input keyevent 4")
+                        time.sleep(1.0)
+                        device.shell("am force-stop jp.konami.pesam")
+                        time.sleep(1.5)
+                        launch_game(device, settle=10)
+                        p8_seen_since = time.time()
+                        play8_miss = 0
+                        play8_click_count = 0
+                        continue
 
                 time.sleep(0.3)
 
@@ -8865,7 +8899,7 @@ def _disable_console_quickedit():
 def apply_config_now(reason=""):
     """โหลด config.py ใหม่แล้วอัปเดตตัวแปร runtime ทันที (ใช้ได้ทุกที่ ทุกเวลา)
     คืน True ถ้าสำเร็จ — ตัวนี้คือหัวใจของ 'แก้ config ปุ๊บ มีผลปั๊บ'"""
-    global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA, NEW_GACHA_SWIPE, GACHA_LOOP_LIMIT, GACHA500, COIN_GACHA_THRESHOLD, ONE_GACHA500, HERO_LIST, HERO_LIST_FREE, EXTAR_FIND, EXTAR_FIND_THRESHOLD, FIND_IMG, FIND_IMG_DIR, FIND_IMG_THRESHOLD, AUTO_RESTART_OFFLINE, OFFLINE_RESTART_AFTER, OFFLINE_BOOT_WAIT, OFFLINE_RESTART_COOLDOWN, SCREENCAP_MAX_CONCURRENT, SCREENCAP_INTERVAL, _MIN_SCREENCAP_INTERVAL, IMG_ROI_CACHE, IMG_ROI_PAD
+    global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA, NEW_GACHA_SWIPE, GACHA_LOOP_LIMIT, GACHA500, COIN_GACHA_THRESHOLD, ONE_GACHA500, HERO_LIST, HERO_LIST_FREE, EXTAR_FIND, EXTAR_FIND_THRESHOLD, FIND_IMG, FIND_IMG_DIR, FIND_IMG_THRESHOLD, PLAY8_STUCK_SECS, AUTO_RESTART_OFFLINE, OFFLINE_RESTART_AFTER, OFFLINE_BOOT_WAIT, OFFLINE_RESTART_COOLDOWN, SCREENCAP_MAX_CONCURRENT, SCREENCAP_INTERVAL, _MIN_SCREENCAP_INTERVAL, IMG_ROI_CACHE, IMG_ROI_PAD
     try:
         import importlib
         import config as cfg
@@ -8909,6 +8943,7 @@ def apply_config_now(reason=""):
         FIND_IMG = getattr(cfg, 'FIND_IMG', 0)
         FIND_IMG_DIR = getattr(cfg, 'FIND_IMG_DIR', 'find-img')
         FIND_IMG_THRESHOLD = getattr(cfg, 'FIND_IMG_THRESHOLD', 0.85)
+        PLAY8_STUCK_SECS = getattr(cfg, 'PLAY8_STUCK_SECS', 90)
         # Auto restart เครื่องที่ adb หลุด
         AUTO_RESTART_OFFLINE = getattr(cfg, 'AUTO_RESTART_OFFLINE', 1)
         OFFLINE_RESTART_AFTER = getattr(cfg, 'OFFLINE_RESTART_AFTER', 90)
