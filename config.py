@@ -16,12 +16,12 @@ DO_BOX = 1
 # ── Gacha Sequence (login.py) ──────────────────────
 # 1 = สุ่มกาชา (ต่อจากจบ box4)
 # 0 = ไม่สุ่มกาชา (จบงานปกติ)
-DO_GACHA = 1
+DO_GACHA = 0
 
 # ── New Gacha Sequence (login.py) ──────────────────
 # 1 = เปิดการทำงาน new-gacha1 -> เลื่อนหา new-gacha1 -> ข้ามไป gacha4.bmp
 # 0 = ปิด
-NEW_GACHA = 1
+NEW_GACHA = 0
 
 # ── New Gacha Swipe (เลื่อนหน้าจอ) ──────────────────
 # 1 = เปิดการเลื่อนหน้าจอ (swipe 144,243 -> 699,233) ตอนหา new-gacha1
@@ -31,7 +31,7 @@ NEW_GACHA_SWIPE = 0
 # ── Custom Gacha Loop Mode ──────────────────────────
 # 1 = เปิดโหมด Custom Gacha (loopgacha1 -> gacha4 -> gacha5 -> loop จนเจอ outloop)
 # 0 = ปิดโหมด
-CUSTOM_GACHA = 1
+CUSTOM_GACHA = 0
 
 # ── Custom Gacha Loop Limit (ใช้คู่กับ "สุ่มจน coin หมด") ──
 # 0  = สุ่มจนหมด (จนเจอ nocions/outloop) — พฤติกรรมเดิม
@@ -48,7 +48,7 @@ GACHA_LOOP_LIMIT = 0
 #              → gacha500 → gacha500v1 → nocions (Back 1 ครั้ง) / checkpointgacha (กด next จนหาย)
 #              เจอ out900 เมื่อไหร่ = ข้าม step ที่เหลือทันที
 # 0 = ปิด → สุ่ม loop แบบปกติ (ไม่เช็ค coin / ไม่หา gacha500)
-GACHA500 = 1
+GACHA500 = 0
 # เกณฑ์ coin ที่จะ "เก็บ" (>= ค่านี้เก็บ, < ค่านี้สุ่มต่อ) — ชื่อโฟลเดอร์จะเป็น coin<ค่านี้>+
 COIN_GACHA_THRESHOLD = 800
 
@@ -95,6 +95,30 @@ HERO_IMG_MAP = {
     "heroo3.bmp": "naruto"
 }
 
+# ── ชื่อไฟล์ตอน export (ทุกโฟลเดอร์ปลายทาง) ─────────
+# ชื่อไฟล์ที่ส่งออกจะ "เหลือแค่ UID" เสมอ — ชื่อนักเตะ/ชื่อเก่าที่ติดมากับไฟล์ ลบทิ้งหมด
+#   CHECK_COIN = 0 → ASCV610367086.dat          (ลบวงเล็บ [ ] ทิ้งด้วย)
+#   CHECK_COIN = 1 → [450]-ASCV610367086.dat    (สแกนเหรียญสดรอบนี้ แล้วอัปเดตทับเลขเก่า)
+#                     สแกนเหรียญไม่ได้ → ไม่ใส่ [ ] (ไม่เอาเลขเก่ามาแปะ)
+# UID มาจากข้างในไฟล์ .dat (user_code) — อ่านไม่ได้ค่อยใช้ท่อนท้ายของชื่อไฟล์เดิม
+
+# ── Find Hero: สแกนด้วย "รูป" แทน OCR ───────────────
+# 0 = สแกนชื่อนักเตะด้วย OCR ตามปกติ (ใช้ list_find_hero)
+# 1 = ไม่ใช้ OCR — เอารูป "ทั้งโฟลเดอร์" img/find-img/ มาเทียบกับหน้าจอทีเดียวจบ
+#     เจอรูปไหน = เจอตัวนั้น — ใช้ตัดสินโฟลเดอร์ปลายทางเหมือน OCR
+#     (เจอ 1 ตัว → found-hero/hero1, 2 ตัว → hero2, 3 ตัวขึ้นไป → hero3)
+#     *** ชื่อไฟล์ที่ export = UID ล้วนเสมอ ไม่มีชื่อนักเตะ (ดูหัวข้อ "ชื่อไฟล์ตอน export")
+#     ชื่อไฟล์รูปใช้โชว์ใน log ว่าเจอใคร เช่น  img/find-img/Messi.png
+#     ไม่เจอรูปไหนเลย → ไป no-hero เหมือนเดิม
+FIND_IMG = 1
+
+# โฟลเดอร์ย่อยใน img/ ที่เก็บรูปไว้สแกน (รองรับ .png .bmp .jpg)
+FIND_IMG_DIR = "find-img"
+
+# ความแม่นตอนเทียบรูปของ FIND_IMG (0.0 - 1.0) — ยิ่งสูงยิ่งเข้มงวด
+FIND_IMG_THRESHOLD = 0.85
+
+
 # ── Gacha Free Sequence ───────────────────────────
 # 1 = ทำ gacha free หลังจบ box (gacha1 → gacha2 → เลื่อนหา gachafree1)
 # 0 = ข้าม
@@ -107,12 +131,11 @@ GACHA_FREE_LOOPS = 5
 list_find_hero = [
     "Fabio Cannavaro",
     "Paolo Maldini",
-    "Daniele De Rossi",
+    "Daniele De Rossi", 
     "Didier Drogba",
     "Mohamed Salah",
     "Nico Paz",
-    "Federico Dimarco",
-    "Luka",
+    "Federico Dimarco", 
     "rgson",
     "Arribas",
     "Aubameyang",
@@ -129,10 +152,10 @@ list_find_hero = [
     "Peter Schmeichel",
     "Leonardo Bonucci",
     "Ronald Koeman",
-    "Casemiro",
-    "Erling Haaland",
+    "Casemiro", 
+    "Erling Haaland", 
     "Hugo Ekitike",
-    "Declan Rice",
+    "Declan Rice", 
     "Hidetoshi Nakata",
     "Seigo Narazaki",
     "Shunsuke Nakamura",
@@ -160,14 +183,14 @@ list_find_hero = [
     "Dani Olmo",
     "Ferran Torres",
     "Harry Kane",
-    "Cristian Romero",
+    "Cristian Romero", 
     "Lionel Messi",
     "Kevin De Bruyne",
     "James Rodriguez",
     "Nevmar",
     "Luka Modric",
     "Manuel Neuer",
-    "Cristiano Ronaldo",
+    "Cristiano Ronaldo", 
     "Jude Bellingham",
     "Ayyoub Bouaddi",
     "Michael Olise",
@@ -176,17 +199,17 @@ list_find_hero = [
     "Zlatan",
     "Ruud Gullit",
     "Rui Costa",
-    "Abbiati",
+    "Abbiati", 
     "Massimo Oddo",
     "Gennaro Gattuso",
-    "Eden Hazard",
-    "Diego Costa",
+    "Eden Hazard", 
+    "Diego Costa", 
     "Gary Cahill",
     "George Best",
-    "Alessandro",
+    "Alessandro", 
     "Gareth Bale",
     "Edwin van der",
-    "Tomas Rosicky",
+    "Tomas Rosicky", 
     "Carles Puyol"
 ]
 
@@ -240,7 +263,7 @@ DEBUG_CONSOLE = 0
 # ── Check Coin Sequence ───────────────────────────
 # 1 = ทำงานสแกนเหรียญ (หา checkpointcoin.bmp → OCR สแกนหาเลขเหรียญที่ Region(52, 10, 106, 41) → บันทึกลง check-coin)
 # 0 = ข้าม
-CHECK_COIN = 0
+CHECK_COIN = 1
 
 # ── Min Coin to Gacha (ใช้ร่วมกับ Check Coin) ──────
 # เลขเหรียญขั้นต่ำที่จะ "สุ่ม" — ถ้าสแกนเหรียญได้ "น้อยกว่า" ค่านี้:

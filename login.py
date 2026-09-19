@@ -100,6 +100,19 @@ try:
 except ImportError:
     EXTAR_FIND_THRESHOLD = 0.8
 EXTAR_SUBDIR = "extar"   # โฟลเดอร์รูปของ EXTAR_FIND → img/extar/
+# ── FIND_IMG — สแกนหาตัวด้วย "รูป" แทน OCR (รูปอยู่ใน img/find-img/) ──
+try:
+    from config import FIND_IMG
+except ImportError:
+    FIND_IMG = 0
+try:
+    from config import FIND_IMG_DIR
+except ImportError:
+    FIND_IMG_DIR = "find-img"
+try:
+    from config import FIND_IMG_THRESHOLD
+except ImportError:
+    FIND_IMG_THRESHOLD = 0.85
 # ── Auto restart เครื่องที่ adb หลุด (offline ค้าง) ──
 try:
     from config import AUTO_RESTART_OFFLINE
@@ -803,6 +816,10 @@ if GUI_ENABLED:
                     var_check_coin.set(0)
             _toggle_row("Find + Check Coin", var_find_cc, command=_sync_find_cc)
             _combo_row("Box + Find + Check Coin", [var_box, var_find_hero, var_check_coin])
+            var_find_img = ctk.IntVar(value=getattr(cfg, 'FIND_IMG', 0))
+            _toggle_row("ใช้รูปแทน OCR (img/find-img)", var_find_img)
+            entry_find_img_th = _entry_row("  └─ ความแม่นรูป (0.0 - 1.0)",
+                                           getattr(cfg, 'FIND_IMG_THRESHOLD', 0.85), width=70)
 
             # ════════ Setting ════════
             _section("🔧 Setting")
@@ -999,7 +1016,7 @@ if GUI_ENABLED:
 
             # ── Save button (pinned at bottom, outside scrollable area) ───
             def _save():
-                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA, NEW_GACHA_SWIPE, GACHA_LOOP_LIMIT
+                global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA, NEW_GACHA_SWIPE, GACHA_LOOP_LIMIT, FIND_IMG, FIND_IMG_THRESHOLD
                 new_event = var_event.get()
                 new_box   = var_box.get()
                 new_gacha = var_gacha.get()
@@ -1191,6 +1208,24 @@ if GUI_ENABLED:
                 else:
                     content += f"\nNEW_GACHA = {new_new_gacha}\n"
 
+                new_find_img = var_find_img.get()
+                if re.search(r"^FIND_IMG\s*=\s*\d", content, flags=re.MULTILINE):
+                    content = re.sub(r"^FIND_IMG\s*=\s*\d", f"FIND_IMG = {new_find_img}",
+                                     content, flags=re.MULTILINE)
+                else:
+                    content += f"\nFIND_IMG = {new_find_img}\n"
+
+                try:
+                    new_find_img_th = min(1.0, max(0.1, float(entry_find_img_th.get())))
+                except ValueError:
+                    new_find_img_th = 0.85
+                if re.search(r"^FIND_IMG_THRESHOLD\s*=\s*[\d.]+", content, flags=re.MULTILINE):
+                    content = re.sub(r"^FIND_IMG_THRESHOLD\s*=\s*[\d.]+",
+                                     f"FIND_IMG_THRESHOLD = {new_find_img_th}",
+                                     content, flags=re.MULTILINE)
+                else:
+                    content += f"\nFIND_IMG_THRESHOLD = {new_find_img_th}\n"
+
                 if re.search(r"^NEW_GACHA_SWIPE\s*=\s*\d", content, flags=re.MULTILINE):
                     content = re.sub(r"^NEW_GACHA_SWIPE\s*=\s*\d", f"NEW_GACHA_SWIPE = {new_ng_swipe}",
                                      content, flags=re.MULTILINE)
@@ -1204,6 +1239,8 @@ if GUI_ENABLED:
                 GACHA_LOOP_LIMIT = new_gacha_limit
                 NEW_GACHA = new_new_gacha
                 NEW_GACHA_SWIPE = new_ng_swipe
+                FIND_IMG   = new_find_img
+                FIND_IMG_THRESHOLD = new_find_img_th
                 EVENT_IMG  = new_event
                 DO_BOX     = new_box
                 DO_GACHA   = new_gacha
@@ -1558,6 +1595,8 @@ if GUI_ENABLED:
                 "🔍 Find Hero": [
                     ("chk", "หาตัวนักเตะ",                 "FIND_HERO"),
                     ("chk", "Check Coin",                "CHECK_COIN"),
+                    ("chk", "ใช้รูปแทน OCR (img/find-img)", "FIND_IMG"),
+                    ("entf", "└ ความแม่นรูป (0.0-1.0)",   "FIND_IMG_THRESHOLD"),
                 ],
                 "🔧 Setting": [
                     ("chk", "No Scan (→ fast-random)",   "NOSCAN"),
@@ -1629,11 +1668,11 @@ if GUI_ENABLED:
                         e = ctk.CTkEntry(row, width=(120 if is_str else 60), height=24, justify="center")
                         e.insert(0, str(cur))
                         e.pack(side="right", padx=10, pady=6)
-                        def _save(ev=None, vr=var, ent=e, s=is_str):
+                        def _save(ev=None, vr=var, ent=e, s=is_str, k=kind):
                             val = ent.get().strip()
                             if not s:
                                 try:
-                                    val = int(val)
+                                    val = float(val) if k == "entf" else int(val)
                                 except ValueError:
                                     return
                             self._write_config_var(vr, val, is_string=s)
@@ -3017,7 +3056,7 @@ def get_screen_capture(device):
                     DEVICE_RESTART_PLAY8.pop(serial_ne, None)
                     if original_name:
                         ne_src  = os.path.join(INPUT_DIR, original_name)
-                        ne_dest = os.path.join(LOGIN_FAILED_DIR, original_name)
+                        ne_dest = os.path.join(LOGIN_FAILED_DIR, export_final_name(ne_src, original_name))
                         if os.path.exists(ne_src):
                             try:
                                 if os.path.exists(ne_dest):
@@ -3147,7 +3186,7 @@ def get_screen_capture(device):
                 original_name = DEVICE_FILE_ASSIGNMENTS.get(device.serial)
                 if original_name:
                     file_path = os.path.join(INPUT_DIR, original_name)
-                    dest_path = os.path.join(LOGIN_FAILED_DIR, original_name)
+                    dest_path = os.path.join(LOGIN_FAILED_DIR, export_final_name(file_path, original_name))
                     if os.path.exists(file_path):
                         if os.path.exists(dest_path):
                             os.remove(dest_path)
@@ -3170,7 +3209,7 @@ def get_screen_capture(device):
                 original_name = DEVICE_FILE_ASSIGNMENTS.get(device.serial)
                 if original_name:
                     file_path = os.path.join(INPUT_DIR, original_name)
-                    dest_path = os.path.join(LOGIN_FAILED_DIR, original_name)
+                    dest_path = os.path.join(LOGIN_FAILED_DIR, export_final_name(file_path, original_name))
                     if os.path.exists(file_path):
                         if os.path.exists(dest_path):
                             os.remove(dest_path)
@@ -3195,7 +3234,7 @@ def get_screen_capture(device):
                 DEVICE_RESTART_PLAY8.pop(serial_fc, None)
                 if original_name:
                     fc_src  = os.path.join(INPUT_DIR, original_name)
-                    fc_dest = os.path.join(FILE_ERROR_DIR, original_name)
+                    fc_dest = os.path.join(FILE_ERROR_DIR, export_final_name(fc_src, original_name))
                     if os.path.exists(fc_src):
                         try:
                             if os.path.exists(fc_dest):
@@ -3220,7 +3259,7 @@ def get_screen_capture(device):
                 DEVICE_RESTART_PLAY8.pop(serial_un, None)
                 if original_name:
                     un_src  = os.path.join(INPUT_DIR, original_name)
-                    un_dest = os.path.join(FILE_ERROR_DIR, original_name)
+                    un_dest = os.path.join(FILE_ERROR_DIR, export_final_name(un_src, original_name))
                     if os.path.exists(un_src):
                         try:
                             if os.path.exists(un_dest):
@@ -3257,7 +3296,7 @@ def get_screen_capture(device):
                 original_name = DEVICE_FILE_ASSIGNMENTS.get(device.serial)
                 if original_name:
                     file_path = os.path.join(INPUT_DIR, original_name)
-                    dest_path = os.path.join(FILE_ERROR_DIR, original_name)
+                    dest_path = os.path.join(FILE_ERROR_DIR, export_final_name(file_path, original_name))
                     if os.path.exists(file_path):
                         if os.path.exists(dest_path):
                             os.remove(dest_path)
@@ -4009,6 +4048,47 @@ def extar_img_confirm(img, hero_name, serial, step_tag="Extar", cache=None):
         cache[ckey] = False
     return False
 
+# ── FIND_IMG: สแกนหาตัวด้วยรูป (ทั้งโฟลเดอร์ img/find-img/) แทน OCR ──────────
+FIND_IMG_EXTS = (".png", ".bmp", ".jpg", ".jpeg")
+
+def find_img_templates():
+    """คืน [(ชื่อ, path รูป), ...] ของ "ทุกไฟล์" ในโฟลเดอร์ img/<FIND_IMG_DIR>/
+    ชื่อ = ชื่อไฟล์รูปที่ตัดนามสกุลออก — ตัวนี้แหละที่จะเอาไปตั้งชื่อไฟล์ .dat ตอน export
+    (อ่านสดทุกครั้ง → เพิ่ม/ลบรูปในโฟลเดอร์ได้เลย ไม่ต้องรีสตาร์ทบอท)"""
+    d = os.path.join(IMG_DIR, FIND_IMG_DIR)
+    if not os.path.isdir(d):
+        return []
+    out = []
+    for fn in sorted(os.listdir(d)):
+        stem, ext = os.path.splitext(fn)
+        if stem and ext.lower() in FIND_IMG_EXTS:
+            out.append((stem, os.path.join(d, fn)))
+    return out
+
+def scan_find_img(img, serial):
+    """สแกนรูป "ทั้งโฟลเดอร์ทีเดียว" จากเฟรมเดียว — เจอรูปไหน = เจอตัวนั้น
+    คืน list ชื่อพร้อมเอาไปต่อชื่อไฟล์ เช่น ["Messi", "Mbappex2"]
+    (เจอรูปเดียวกันหลายจุดบนจอ → xN / ไม่เจอเลย → [])"""
+    if img is None:
+        return []
+    templates = find_img_templates()
+    if not templates:
+        gui_log(serial, f"⚠️ ไม่มีรูปในโฟลเดอร์ {os.path.join(IMG_DIR, FIND_IMG_DIR)} — สแกนรูปไม่ได้",
+                step="FindImg Empty")
+        return []
+    found = []
+    for name, path in templates:
+        # ใช้ _match_single ตรงๆ (ไม่ผ่าน ROI cache) — ROI คืนจุดเดียวเสมอ จะนับ xN ผิด
+        pts = _match_single(img, path, FIND_IMG_THRESHOLD)
+        if not pts:
+            continue
+        n = len(pts)
+        found.append(f"{name}x{n}" if n > 1 else name)
+        gui_log(serial, f"IMG Match: {name}" + (f" x{n}" if n > 1 else ""), step=f"⭐ {name}")
+    if not found:
+        gui_log(serial, f"สแกนรูปครบ {len(templates)} รูป — ไม่เจอใครเลย", step="FindImg Miss")
+    return found
+
 def parse_hero_config(config_list):
     """
     Parses a list of hero configurations.
@@ -4196,16 +4276,26 @@ def apply_coin_tag(name, coin):
     return f"[{coin}]-{base_name}"
 
 def carry_coin_tag(final_name, original_name, coin=None):
-    """ติด coin tag ให้ "ชื่อปลายทางที่ประกอบเสร็จแล้ว" (ต้องเรียกหลังต่อ hero prefix เสมอ
-    ไม่งั้นเลขจะไปค้างกลางชื่อ)
+    """ติด/ลบ coin tag ให้ "ชื่อปลายทางที่ประกอบเสร็จแล้ว"
 
-    coin มีค่า        → ใช้เลขที่สแกนสดมา (จดทับของเก่า)
-    coin ว่าง/None    → ใช้เลขเดิมที่ติดมากับ original_name (ถ้ามี) — ย้ายมาไว้หน้าให้
-    ไม่มีเลขทั้งคู่   → คืนชื่อเดิมเฉยๆ
+    CHECK_COIN = 0 → ลบ [ ] ทิ้งให้หมด (ไม่ยกเลขเก่าที่ติดมากับไฟล์มาใช้ต่ออีกแล้ว)
+    CHECK_COIN = 1 → ใช้ "เลขที่สแกนสดรอบนี้" อัปเดตทับของเก่า
+                     สแกนไม่ได้ (coin ว่าง) → ไม่ใส่ [ ] เลย ดีกว่าติดเลขเก่าที่ไม่ตรงความจริง
+    original_name: เก็บไว้ให้ signature เดิมใช้ได้ (ไม่ได้ยกเลขเก่ามาใช้แล้ว)
     """
-    if coin is None or str(coin).strip() == "":
-        coin = find_coin_tag(original_name)
+    if CHECK_COIN != 1:
+        return strip_coin_tag(final_name)
     return apply_coin_tag(final_name, coin)
+
+
+def export_final_name(file_path, original_name, coin=None):
+    """ชื่อไฟล์ตอน export — กฎเดียวใช้ทั้งบอททุกโฟลเดอร์ปลายทาง:
+       "เหลือแค่ UID" เสมอ (ชื่อนักเตะ/ชื่อเก่าที่ติดมากับชื่อไฟล์ ลบทิ้งหมด)
+         CHECK_COIN = 0 → UID.dat
+         CHECK_COIN = 1 → [เลขที่สแกนสดรอบนี้]-UID.dat  (สแกนไม่ได้ → UID.dat เฉยๆ)
+    """
+    return carry_coin_tag(export_base_name(file_path, original_name, strip_dash=True),
+                          original_name, coin)
 
 def export_base_name(file_path, original_name, strip_dash=False):
     """ชื่อไฟล์ที่จะใช้ตอน export — ดึง user_code "จากข้างในไฟล์" มาเป็นชื่อ
@@ -4221,11 +4311,11 @@ def export_base_name(file_path, original_name, strip_dash=False):
     uc = extract_user_code(file_path) if file_path else None
     if uc:
         return f"{uc}.dat"
-    if "+" in clean:
-        clean = clean.split("+")[-1]
-    elif strip_dash and "-" in clean:
-        clean = clean.split("-")[-1]
-    return clean
+    # อ่าน user_code ไม่ได้ → เอา "ท่อนท้ายสุด" ของชื่อเดิมเป็น UID ชื่ออื่นตัดทิ้งให้หมด
+    #   Hero+UID.dat / [300]-Hero-UID.dat / Hero+Hero2+UID.dat → UID.dat
+    base, ext = os.path.splitext(clean)
+    base = base.split("+")[-1].split("-")[-1].strip()
+    return f"{base}{ext}" if base else clean
 
 _NET_TIME_OFFSET   = 0.0     # วินาที = (เวลาโลกจริง) - (เวลาเครื่อง)
 _NET_TIME_SYNCED   = False
@@ -4801,7 +4891,7 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
     
     time.sleep(3) # Let screen settle
 
-    # 6. OCR Scanning (Lock 1, Lock 2 & Lock 3 with Robust Two-Pass Double Check)
+    # 6. สแกนหาตัว — มี 2 โหมด: รูป (FIND_IMG=1) หรือ OCR (FIND_IMG=0, ค่าเริ่มต้น)
     found_heroes = []
     last_lock1_text = ""
     last_lock2_text = ""
@@ -4810,82 +4900,98 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
     target_config = parse_hero_config(target_list)
     target_heroes = list(target_config.keys())
 
-    for pass_num in range(1, 3):
-        found_heroes.clear()
+    # 6a. โหมดสแกนด้วยรูป (FIND_IMG=1) — เอารูปทั้งโฟลเดอร์ img/find-img/ มาเทียบทีเดียว
+    #     เจอรูปไหน → ใช้ "ชื่อไฟล์รูป" เป็นชื่อตัว แล้ว export เหมือน OCR ทุกอย่าง
+    if FIND_IMG:
+        gui_log(serial, f"FIND_IMG=1 — สแกนด้วยรูปจาก {os.path.join(IMG_DIR, FIND_IMG_DIR)} (ไม่ใช้ OCR)",
+                step="Scan IMG")
+        for pass_num in range(1, 3):
+            img = get_screen_capture(device)
+            found_heroes = scan_find_img(img, serial)
+            if found_heroes:
+                break
+            if pass_num == 1:
+                gui_log(serial, "รอบ 1 ไม่เจอรูป — รอจอนิ่ง 2 วิ แล้วสแกนใหม่อีกรอบ", step="IMG Retry")
+                time.sleep(2.0)
+
+    # 6b. OCR Scanning (Lock 1/2/3, Two-Pass) — ใช้เมื่อ FIND_IMG=0 เท่านั้น
+    else:
+        for pass_num in range(1, 3):
+            found_heroes.clear()
         
-        # Capture screen once for this pass (maximum speed, zero mismatch)
-        img = get_screen_capture(device)
-        if img is not None:
-            lock1_matches = set()
-            lock2_matches = set()
-            lock3_matches = set()
-            # เฟรมเดียวกันทั้ง 3 lock → เทียบรูป EXTAR_FIND ครั้งเดียวพอ (ใช้ผลซ้ำ)
-            extar_cache = {}
+            # Capture screen once for this pass (maximum speed, zero mismatch)
+            img = get_screen_capture(device)
+            if img is not None:
+                lock1_matches = set()
+                lock2_matches = set()
+                lock3_matches = set()
+                # เฟรมเดียวกันทั้ง 3 lock → เทียบรูป EXTAR_FIND ครั้งเดียวพอ (ใช้ผลซ้ำ)
+                extar_cache = {}
 
-            # Lock 1 Scanning
-            lock1_region = Region(154, 134, 679, 39)
-            lock1_text = read_screen_text(img, region=lock1_region, serial=serial)
-            last_lock1_text = lock1_text if lock1_text else ""
-            gui_log(serial, f"Lock 1 OCR: {lock1_text if lock1_text else '<EMPTY>'}", step="Scan Lock 1")
-            for h in target_heroes:
-                if is_hero_match(h, lock1_text):
-                    # อยู่ใน EXTAR_FIND → ต้องเจอรูปในจอด้วย ถึงจะนับ
-                    if not extar_img_confirm(img, h, serial, step_tag="Extar L1", cache=extar_cache):
-                        continue
-                    lock1_matches.add(h)
-                    gui_log(serial, f"Lock 1 Match: {h}", step=f"⭐ {h}")
+                # Lock 1 Scanning
+                lock1_region = Region(154, 134, 679, 39)
+                lock1_text = read_screen_text(img, region=lock1_region, serial=serial)
+                last_lock1_text = lock1_text if lock1_text else ""
+                gui_log(serial, f"Lock 1 OCR: {lock1_text if lock1_text else '<EMPTY>'}", step="Scan Lock 1")
+                for h in target_heroes:
+                    if is_hero_match(h, lock1_text):
+                        # อยู่ใน EXTAR_FIND → ต้องเจอรูปในจอด้วย ถึงจะนับ
+                        if not extar_img_confirm(img, h, serial, step_tag="Extar L1", cache=extar_cache):
+                            continue
+                        lock1_matches.add(h)
+                        gui_log(serial, f"Lock 1 Match: {h}", step=f"⭐ {h}")
 
-            # Lock 2 Scanning
-            lock2_region = Region(156, 249, 646, 34)
-            lock2_text = read_screen_text(img, region=lock2_region, serial=serial)
-            last_lock2_text = lock2_text if lock2_text else ""
-            gui_log(serial, f"Lock 2 OCR: {lock2_text if lock2_text else '<EMPTY>'}", step="Scan Lock 2")
-            for h in target_heroes:
-                if is_hero_match(h, lock2_text):
-                    if not extar_img_confirm(img, h, serial, step_tag="Extar L2", cache=extar_cache):
-                        continue
-                    lock2_matches.add(h)
-                    gui_log(serial, f"Lock 2 Match: {h}", step=f"⭐ {h}")
+                # Lock 2 Scanning
+                lock2_region = Region(156, 249, 646, 34)
+                lock2_text = read_screen_text(img, region=lock2_region, serial=serial)
+                last_lock2_text = lock2_text if lock2_text else ""
+                gui_log(serial, f"Lock 2 OCR: {lock2_text if lock2_text else '<EMPTY>'}", step="Scan Lock 2")
+                for h in target_heroes:
+                    if is_hero_match(h, lock2_text):
+                        if not extar_img_confirm(img, h, serial, step_tag="Extar L2", cache=extar_cache):
+                            continue
+                        lock2_matches.add(h)
+                        gui_log(serial, f"Lock 2 Match: {h}", step=f"⭐ {h}")
 
-            # Lock 3 Scanning
-            lock3_region = Region(157, 360, 658, 34)
-            lock3_text = read_screen_text(img, region=lock3_region, serial=serial)
-            last_lock3_text = lock3_text if lock3_text else ""
-            gui_log(serial, f"Lock 3 OCR: {lock3_text if lock3_text else '<EMPTY>'}", step="Scan Lock 3")
-            for h in target_heroes:
-                if is_hero_match(h, lock3_text):
-                    if not extar_img_confirm(img, h, serial, step_tag="Extar L3", cache=extar_cache):
-                        continue
-                    lock3_matches.add(h)
-                    gui_log(serial, f"Lock 3 Match: {h}", step=f"⭐ {h}")
+                # Lock 3 Scanning
+                lock3_region = Region(157, 360, 658, 34)
+                lock3_text = read_screen_text(img, region=lock3_region, serial=serial)
+                last_lock3_text = lock3_text if lock3_text else ""
+                gui_log(serial, f"Lock 3 OCR: {lock3_text if lock3_text else '<EMPTY>'}", step="Scan Lock 3")
+                for h in target_heroes:
+                    if is_hero_match(h, lock3_text):
+                        if not extar_img_confirm(img, h, serial, step_tag="Extar L3", cache=extar_cache):
+                            continue
+                        lock3_matches.add(h)
+                        gui_log(serial, f"Lock 3 Match: {h}", step=f"⭐ {h}")
 
-            # Aggregate matches from the three locks
-            from collections import Counter
-            pass_matches = list(lock1_matches) + list(lock2_matches) + list(lock3_matches)
-            if pass_matches:
-                counts = Counter(pass_matches)
-                pass_valid_heroes = []
-                for h, count in counts.items():
-                    req = target_config.get(h, 1)
-                    if count >= req:
-                        # ชื่อที่เขียนลงชื่อไฟล์ — เอาชื่อร่างที่รูป match จริงในเฟรมนี้ก่อน
-                        # (extar_img_confirm เก็บไว้ใน extar_cache) ไม่มีค่อย fallback ชื่อ custom เดี่ยว
-                        disp = extar_cache.get(str(h).strip().lower())
-                        if not isinstance(disp, str):
-                            disp = hero_export_name(h)
-                        if count > 1:
-                            pass_valid_heroes.append(f"{disp}x{count}")
-                        else:
-                            pass_valid_heroes.append(disp)
+                # Aggregate matches from the three locks
+                from collections import Counter
+                pass_matches = list(lock1_matches) + list(lock2_matches) + list(lock3_matches)
+                if pass_matches:
+                    counts = Counter(pass_matches)
+                    pass_valid_heroes = []
+                    for h, count in counts.items():
+                        req = target_config.get(h, 1)
+                        if count >= req:
+                            # ชื่อที่เขียนลงชื่อไฟล์ — เอาชื่อร่างที่รูป match จริงในเฟรมนี้ก่อน
+                            # (extar_img_confirm เก็บไว้ใน extar_cache) ไม่มีค่อย fallback ชื่อ custom เดี่ยว
+                            disp = extar_cache.get(str(h).strip().lower())
+                            if not isinstance(disp, str):
+                                disp = hero_export_name(h)
+                            if count > 1:
+                                pass_valid_heroes.append(f"{disp}x{count}")
+                            else:
+                                pass_valid_heroes.append(disp)
                 
-                if pass_valid_heroes:
-                    found_heroes.extend(pass_valid_heroes)
-                    break
+                    if pass_valid_heroes:
+                        found_heroes.extend(pass_valid_heroes)
+                        break
             
-        # If we failed to find any hero in Pass 1, wait 2s and scan one more time!
-        if pass_num == 1:
-            gui_log(serial, "No hero found on Pass 1. Retrying in 2s for screen to settle...", step="OCR Retry")
-            time.sleep(2.0)
+            # If we failed to find any hero in Pass 1, wait 2s and scan one more time!
+            if pass_num == 1:
+                gui_log(serial, "No hero found on Pass 1. Retrying in 2s for screen to settle...", step="OCR Retry")
+                time.sleep(2.0)
 
     # 7. Shutdown and Move
     device.shell("am force-stop jp.konami.pesam")
@@ -4907,6 +5013,7 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
         dest_dir = os.path.join(FOUND_HERO_DIR, subfolder)
         os.makedirs(dest_dir, exist_ok=True)
 
+        # ชื่อไฟล์ = ชื่อที่ match รอบนี้ + UID  (ชื่อเก่าที่ติดมากับไฟล์ถูกตัดทิ้งไปแล้วใน clean_orig)
         hero_prefix = "+".join(found_heroes)
         final_name = f"{hero_prefix}+{clean_orig}"
         gui_log(serial, f"⭐ MATCH: {hero_prefix}", step=f"⭐ {hero_prefix}")
@@ -4932,7 +5039,9 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
         # ไม่ match hero อะไรเลย → ส่งไป no-hero เสมอ (ไม่ว่าจะ verify empty state ได้หรือไม่)
         dest_dir = NO_HERO_DIR
         final_name = clean_orig
-        if is_empty_state:
+        if FIND_IMG:
+            gui_log(serial, "ไม่เจอรูปไหนใน find-img → no-hero.", step="No Match")
+        elif is_empty_state:
             gui_log(serial, "No hero match found (Verified empty state).", step="No Match")
         else:
             gui_log(serial, "No hero match found (OCR unverified) → no-hero.", step="No Match")
@@ -5316,7 +5425,8 @@ def _g500_check_coin_and_collect(device, cycle_start, serial, original_name, fil
     gui_log(serial, f"🪙 อ่าน coin (ที่ new-gacha1) = {coin_val} | เกณฑ์เก็บ {COIN_GACHA_THRESHOLD}", step="G500-Coin")
     if coin_val < COIN_GACHA_THRESHOLD:
         return
-    final_name = apply_coin_tag(original_name, coin_val)
+    # ชื่อไฟล์ = UID ล้วน + เลข coin ที่เพิ่งสแกนสด (โฟลเดอร์นี้เก็บตามเลข coin โดยเฉพาะ)
+    final_name = apply_coin_tag(export_base_name(file_path, original_name, strip_dash=True), coin_val)
     coin_dir = f"coin{COIN_GACHA_THRESHOLD}+"
     device.shell("am force-stop jp.konami.pesam")
     time.sleep(1)
@@ -5722,7 +5832,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path, coin_
             gui_log(serial, f"[Loop {loop_num}] gachafree2 not found in 15s → file-error", step="Error")
             device.shell("am force-stop jp.konami.pesam")
             time.sleep(1)
-            dest = os.path.join(FILE_ERROR_DIR, original_name)
+            dest = os.path.join(FILE_ERROR_DIR, export_final_name(file_path, original_name))
             if os.path.exists(file_path):
                 try:
                     if os.path.exists(dest):
@@ -5990,6 +6100,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path, coin_
             dest_dir = os.path.join(BACKUP_ID_DIR, subfolder)
             os.makedirs(dest_dir, exist_ok=True)
 
+            # ชื่อไฟล์ = ชื่อที่ match รอบนี้ + UID
             hero_prefix = "+".join(found_heroes)
             final_name = f"{hero_prefix}+{clean_orig}"
             gui_log(serial, f"⭐ GachaFree Match: {hero_prefix}", step=f"⭐ {hero_prefix}")
@@ -6062,7 +6173,7 @@ def check_coin_mode(device, cycle_start, serial, original_name, file_path, coin_
             device.shell("am force-stop jp.konami.pesam")
             time.sleep(1)
             dest_dir = RANDOM_FAIL_DIR
-            final_name = original_name
+            final_name = export_final_name(file_path, original_name, coin_prefix)
             dest = os.path.join(dest_dir, final_name)
             if os.path.exists(file_path):
                 time.sleep(2)
@@ -6094,7 +6205,7 @@ def check_coin_mode(device, cycle_start, serial, original_name, file_path, coin_
         coin_number = "0"
 
     # 2. Rename file — ติดเลข coin ไว้หน้าชื่อ (ลบ tag เก่าทั้งหน้า/ท้ายออกก่อน กันเลขซ้อน)
-    final_name = apply_coin_tag(original_name, coin_number)
+    final_name = apply_coin_tag(export_base_name(file_path, original_name, strip_dash=True), coin_number)
     gui_log(serial, f"🪙 Coins: {coin_number} -> {final_name}", step="Coin Match")
     cprint(f"[{serial}] Coin Scan Result: {coin_number} -> file: {final_name}")
 
@@ -6327,7 +6438,7 @@ def process_device_login(device):
                             gui_log(serial, "LOGIN_FAST: checkpointlogin found — clearing app and moving to next file.", step="Fast Done", status="working")
                             device.shell("am force-stop jp.konami.pesam")
                             time.sleep(0.5)
-                            dest = os.path.join(LOGIN_SUCCESS_DIR, original_name)
+                            dest = os.path.join(LOGIN_SUCCESS_DIR, export_final_name(file_path, original_name))
                             if os.path.exists(file_path):
                                 save_result(file_path, dest)
                             release_file(original_name)
@@ -6406,7 +6517,7 @@ def process_device_login(device):
                     gui_log(serial, "LOGIN_FAST: (fixout→cancel) — clearing app and moving to next file.", step="Fast Done", status="working")
                     device.shell("am force-stop jp.konami.pesam")
                     time.sleep(0.5)
-                    dest = os.path.join(LOGIN_SUCCESS_DIR, original_name)
+                    dest = os.path.join(LOGIN_SUCCESS_DIR, export_final_name(file_path, original_name))
                     if os.path.exists(file_path):
                         save_result(file_path, dest)
                     release_file(original_name)
@@ -8602,7 +8713,7 @@ def process_device_login(device):
                 elif gacha_hero_found:
                     dest_dir = os.path.join(BACKUP_ID_DIR, "hero1")
                     os.makedirs(dest_dir, exist_ok=True)
-                    final_name = f"{gacha_hero_found}-{clean_orig}"
+                    final_name = f"{gacha_hero_found}+{clean_orig}"   # ชื่อที่ match + UID
                     gui_log(serial, f"⭐ HERO MATCH: {gacha_hero_found}", step=f"⭐ {gacha_hero_found}")
                 else:
                     dest_dir = NO_HERO_DIR
@@ -8658,7 +8769,8 @@ def process_device_login(device):
                 try:
                     src_file = os.path.join(INPUT_DIR, original_name)
                     if os.path.exists(src_file):
-                        save_result(src_file, os.path.join(TIMEOUT_DIR, original_name))
+                        save_result(src_file, os.path.join(TIMEOUT_DIR,
+                                    export_final_name(src_file, original_name)))
                         gui_log(serial, f"Moved {original_name} to timeout/", step="Timeout Move")
                 except Exception as e:
                     gui_log(serial, f"Failed to move {original_name} to timeout: {e}", step="Timeout Error")
@@ -8753,7 +8865,7 @@ def _disable_console_quickedit():
 def apply_config_now(reason=""):
     """โหลด config.py ใหม่แล้วอัปเดตตัวแปร runtime ทันที (ใช้ได้ทุกที่ ทุกเวลา)
     คืน True ถ้าสำเร็จ — ตัวนี้คือหัวใจของ 'แก้ config ปุ๊บ มีผลปั๊บ'"""
-    global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA, NEW_GACHA_SWIPE, GACHA_LOOP_LIMIT, GACHA500, COIN_GACHA_THRESHOLD, ONE_GACHA500, HERO_LIST, HERO_LIST_FREE, EXTAR_FIND, EXTAR_FIND_THRESHOLD, AUTO_RESTART_OFFLINE, OFFLINE_RESTART_AFTER, OFFLINE_BOOT_WAIT, OFFLINE_RESTART_COOLDOWN, SCREENCAP_MAX_CONCURRENT, SCREENCAP_INTERVAL, _MIN_SCREENCAP_INTERVAL, IMG_ROI_CACHE, IMG_ROI_PAD
+    global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA, NEW_GACHA_SWIPE, GACHA_LOOP_LIMIT, GACHA500, COIN_GACHA_THRESHOLD, ONE_GACHA500, HERO_LIST, HERO_LIST_FREE, EXTAR_FIND, EXTAR_FIND_THRESHOLD, FIND_IMG, FIND_IMG_DIR, FIND_IMG_THRESHOLD, AUTO_RESTART_OFFLINE, OFFLINE_RESTART_AFTER, OFFLINE_BOOT_WAIT, OFFLINE_RESTART_COOLDOWN, SCREENCAP_MAX_CONCURRENT, SCREENCAP_INTERVAL, _MIN_SCREENCAP_INTERVAL, IMG_ROI_CACHE, IMG_ROI_PAD
     try:
         import importlib
         import config as cfg
@@ -8793,6 +8905,10 @@ def apply_config_now(reason=""):
         # EXTAR_FIND (ยืนยันด้วยรูป) — แก้ใน config แล้วมีผลทันทีเหมือนกัน
         EXTAR_FIND = getattr(cfg, 'EXTAR_FIND', getattr(cfg, 'extar_find', {})) or {}
         EXTAR_FIND_THRESHOLD = getattr(cfg, 'EXTAR_FIND_THRESHOLD', 0.8)
+        # FIND_IMG (สแกนหาตัวด้วยรูปแทน OCR) — สลับโหมดได้สดจาก config
+        FIND_IMG = getattr(cfg, 'FIND_IMG', 0)
+        FIND_IMG_DIR = getattr(cfg, 'FIND_IMG_DIR', 'find-img')
+        FIND_IMG_THRESHOLD = getattr(cfg, 'FIND_IMG_THRESHOLD', 0.85)
         # Auto restart เครื่องที่ adb หลุด
         AUTO_RESTART_OFFLINE = getattr(cfg, 'AUTO_RESTART_OFFLINE', 1)
         OFFLINE_RESTART_AFTER = getattr(cfg, 'OFFLINE_RESTART_AFTER', 90)
