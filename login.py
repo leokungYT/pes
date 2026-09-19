@@ -250,6 +250,9 @@ DEVICE_FILE_ASSIGNMENTS = {}
 DEVICE_DISABLE_FIXEVENT = {}
 DEVICE_IN_GACHA      = {}     # serial -> True ระหว่างอยู่ใน sequence กาชา → เปิดหา ad-rewardfix1 แบบลอยๆ ทุกเฟรม
 _GACHA_BACKHOME_SEEN = {}     # serial -> เวลาที่เริ่มเห็น backhome ค้างบนจอ (เฉพาะช่วงกาชา)
+DEVICE_IN_FINDHERO   = {}     # serial -> True ระหว่างอยู่ใน sequence หาตัว → เปิดหา unlock-hero1 แบบลอยๆ ทุกเฟรม
+_UNLOCK_HERO_SEEN    = {}     # serial -> เวลาที่เริ่มเห็น unlock-hero1 ค้างบนจอ (ช่วงกาชา/หาตัว)
+UNLOCK_HERO_STUCK_SECS = 8.0  # วิ — unlock-hero1 ค้างบนจอนานเกินนี้ = ป็อปอัพไม่ยอมไปเอง → กดปิดให้
 GACHA_BACKHOME_STUCK_SECS = 7.0   # วิ — ระหว่างสุ่มกาชา ถ้า backhome ค้างบนจอนานเกินนี้ = ไปต่อไม่ได้ → กดกลับ Home
 DEVICE_IN_NEWSTAGE   = {}     # serial -> True ระหว่างทำ new-stageplay8 อยู่ (กัน floating check เรียกซ้ำซ้อนตัวเอง)
 DEVICE_NEWSTAGE_DONE = {}     # serial -> True ถ้าอีเวนต์ new stage ถูกจัดการไปแล้วใน cycle นี้ (ข้ามการรอซ้ำ)
@@ -3451,6 +3454,26 @@ def get_screen_capture(device):
                     time.sleep(1.5)
                     img = fast_screencap(device)
 
+            # === unlock-hero1 floating check (ช่วง sequence กาชา + หาตัว) ===
+            #     ป็อปอัพปลดล็อกฮีโร่เด้งมาตอนไหนก็ได้ — หาแบบลอยๆ ทุกเฟรม ไม่บล็อกขั้นตอน
+            #     เห็นแวบเดียวแล้วหายเอง = ไม่กด / ค้างครบ UNLOCK_HERO_STUCK_SECS วิ → กด Back ปิดให้
+            if img is not None and (DEVICE_IN_GACHA.get(device.serial, False)
+                                    or DEVICE_IN_FINDHERO.get(device.serial, False)):
+                _sr_uh = device.serial
+                if img_search(img, os.path.join(IMG_DIR, "unlock-hero1.bmp")):
+                    _uh_since = _UNLOCK_HERO_SEEN.get(_sr_uh)
+                    if _uh_since is None:
+                        _UNLOCK_HERO_SEEN[_sr_uh] = time.time()
+                    elif time.time() - _uh_since >= UNLOCK_HERO_STUCK_SECS:
+                        device.shell("input keyevent 4")
+                        gui_log(_sr_uh, f"Floating: unlock-hero1 ค้าง {UNLOCK_HERO_STUCK_SECS:.0f}s — กดปิด (Back)",
+                                step="Unlock-Hero")
+                        time.sleep(2.0)
+                        _UNLOCK_HERO_SEEN[_sr_uh] = time.time()   # กดแล้วยังไม่หาย → รออีกรอบค่อยกดซ้ำ
+                        img = fast_screencap(device)
+                else:
+                    _UNLOCK_HERO_SEEN.pop(_sr_uh, None)           # ไม่เห็นแล้ว = ไม่ค้าง → รีเซ็ตตัวจับเวลา
+
             # === backhome floating check (เฉพาะช่วง sequence กาชา) ===
             #     ระหว่างสุ่มกาชา ถ้า backhome "ค้าง" บนจอเกิน GACHA_BACKHOME_STUCK_SECS วิ
             #     = ลูปสุ่มไปต่อไม่ได้แล้ว → กดกลับ Home ให้เอง (แล้วเคลียร์ backhome1 ที่เด้งตามมาด้วย)
@@ -4359,6 +4382,8 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
     coin_prefix: ถ้าส่งเลขเหรียญมา (จากโหมด Gacha+Find + CHECK_COIN) จะแนบ "[เลข]+"
                  ไว้หน้าชื่อไฟล์ตอน export.
     """
+    DEVICE_IN_FINDHERO[serial] = True    # เปิดหา unlock-hero1 แบบลอยๆ ตลอด sequence หาตัว
+    _UNLOCK_HERO_SEEN.pop(serial, None)  # เริ่มนับ unlock-hero1 ค้างใหม่ทุกครั้งที่เข้าหาตัว
     gui_log(serial, "Find Hero sequence started...", step="Find Hero", status="working")
 
     # ปิด floating fixout ตลอด sequence fin (fin1..fin13)
@@ -6119,6 +6144,8 @@ def process_device_login(device):
             DEVICE_DISABLE_FIXOUT[serial] = False   # เริ่ม cycle ใหม่ → เปิด fixout check กลับ (ช่วง login ต้องใช้)
             DEVICE_IN_GACHA[serial] = False         # เริ่ม cycle ใหม่ → ยังไม่เข้ากาชา (กันค้างจากรอบก่อนที่หลุด exception)
             _GACHA_BACKHOME_SEEN.pop(serial, None)
+            DEVICE_IN_FINDHERO[serial] = False       # เริ่ม cycle ใหม่ → ยังไม่เข้าหาตัว
+            _UNLOCK_HERO_SEEN.pop(serial, None)
             DEVICE_IN_NEWSTAGE[serial] = False      # เริ่ม cycle ใหม่ → เคลียร์ธงกัน new-stage ซ้อน
             DEVICE_NEWSTAGE_DONE[serial] = False    # ไฟล์ใหม่ = ยังไม่ได้ทำอีเวนต์ new stage ของรอบนี้
             check_device_reset(serial)
@@ -7583,6 +7610,7 @@ def process_device_login(device):
                 # เปิดหา ad-rewardfix1 แบบลอยๆ ตลอด sequence กาชา — เจอเมื่อไหร่กดปิดทันที
                 DEVICE_IN_GACHA[serial] = True
                 _GACHA_BACKHOME_SEEN.pop(serial, None)   # เริ่มนับ backhome ค้างใหม่ทุกครั้งที่เข้ากาชา
+                _UNLOCK_HERO_SEEN.pop(serial, None)      # เริ่มนับ unlock-hero1 ค้างใหม่ทุกครั้งที่เข้ากาชา
                 
                 while True:
                     try:
