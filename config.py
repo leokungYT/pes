@@ -31,7 +31,7 @@ NEW_GACHA_SWIPE = 0
 # ── Custom Gacha Loop Mode ──────────────────────────
 # 1 = เปิดโหมด Custom Gacha (loopgacha1 -> gacha4 -> gacha5 -> loop จนเจอ outloop)
 # 0 = ปิดโหมด
-CUSTOM_GACHA = 1
+CUSTOM_GACHA = 0
 
 # ── Custom Gacha Loop Limit (ใช้คู่กับ "สุ่มจน coin หมด") ──
 # 0  = สุ่มจนหมด (จนเจอ nocions/outloop) — พฤติกรรมเดิม
@@ -48,7 +48,7 @@ GACHA_LOOP_LIMIT = 0
 #              → gacha500 → gacha500v1 → nocions (Back 1 ครั้ง) / checkpointgacha (กด next จนหาย)
 #              เจอ out900 เมื่อไหร่ = ข้าม step ที่เหลือทันที
 # 0 = ปิด → สุ่ม loop แบบปกติ (ไม่เช็ค coin / ไม่หา gacha500)
-GACHA500 = 1
+GACHA500 = 0
 # เกณฑ์ coin ที่จะ "เก็บ" (>= ค่านี้เก็บ, < ค่านี้สุ่มต่อ) — ชื่อโฟลเดอร์จะเป็น coin<ค่านี้>+
 COIN_GACHA_THRESHOLD = 800
 
@@ -56,6 +56,16 @@ COIN_GACHA_THRESHOLD = 800
 # 1 = ทำ step v2/gacha500 รอบเดียว → จบลูปสุ่มทันที (ไม่วนไปทำ gacha4 ต่อ)
 # 0 = ทำ v2/gacha500 รอบเดียว แล้ววน gacha4 ต่อจนครบ GACHA_LOOP_LIMIT (ค่าเดิม)
 ONE_GACHA500 = 0
+
+# ── ONLY_GACHA500: สุ่มเฉพาะ 500 รอบเดียวจบ ──────────
+# 1 = เอา "เฉพาะ step2" ของ GACHA500 — สุ่ม gacha500 รอบเดียวแล้วเลิกสุ่มทันที
+#     • step1 ยัง "อ่าน coin เหมือนเดิม" (log ไว้ที่หน้า new-gacha1)
+#       แต่ไม่เก็บไฟล์เข้า coin<threshold>+ / ไม่จบบัญชีกลางทาง — ทุกไฟล์ได้สุ่มแล้วไปหาตัวต่อ
+#     • บังคับทำ v2 → gacha500 รอบเดียว แล้วออกจากลูปสุ่มเลย (ไม่วนกด gacha4 ต่อ)
+#     • เปิดคู่กับ FIND_HERO = 1 → สุ่ม 500 เสร็จไปหาตัวต่อทันทีโดยไม่ปิดแอป
+#     *** ต้องเปิด GACHA500 = 1 ด้วย ***
+# 0 = ปิด (ใช้พฤติกรรมตาม GACHA500 / ONE_GACHA500 ตามปกติ)
+ONLY_GACHA500 = 1
 
 # ── Gacha + Check Mode ──────────────────────────────
 # 1 = สุ่มกาชาเสร็จแล้วกด backhome ต่อด้วยค้นหาฮีโร่ทันที

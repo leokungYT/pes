@@ -221,6 +221,11 @@ try:
     from config import ONE_GACHA500
 except ImportError:
     ONE_GACHA500 = 0
+# ONLY_GACHA500 = 1 → สุ่ม gacha500 รอบเดียวจบ (ยังอ่าน coin เหมือนเดิม แต่ไม่เก็บเข้า coin<threshold>+)
+try:
+    from config import ONLY_GACHA500
+except ImportError:
+    ONLY_GACHA500 = 0
 
 
 def cprint(*args, **kwargs):
@@ -1585,6 +1590,7 @@ if GUI_ENABLED:
                     ("chk", "└ Gacha500 (step1 coin + step2)", "GACHA500"),
                     ("ent", "  └ Coin เก็บ (>= → coin+)",  "COIN_GACHA_THRESHOLD"),
                     ("chk", "  └ One Gacha500 (รอบเดียวจบ)", "ONE_GACHA500"),
+                    ("chk", "  └ Only 500 (สุ่มรอบเดียว ไม่เก็บ coin+)", "ONLY_GACHA500"),
                     ("chk", "Gacha + Find + Check Coin", "GACHA_FIND"),
                 ],
                 "🆓 Gacha Free": [
@@ -5421,12 +5427,19 @@ def _g500_checkpoint_then_next(device, cycle_start, serial, cp_secs=30, next_sec
     gui_log(serial, "ไม่เจอ next.bmp", step=f"{tag} Next Miss")
     return False
 
-def _g500_check_coin_and_collect(device, cycle_start, serial, original_name, file_path, img):
+def _g500_check_coin_and_collect(device, cycle_start, serial, original_name, file_path, img, collect=True):
     """GACHA500 step1: สแกน coin จากภาพ img (region 52,10,106,41).
     coin >= COIN_GACHA_THRESHOLD → เก็บไฟล์เข้า coin<threshold>+ (ชื่อ [coin]-เดิม) + release
       แล้ว raise GachaCoinCollectedException (จบบัญชี ไม่สุ่ม)
-    coin <  COIN_GACHA_THRESHOLD → return เฉยๆ (ไปสุ่ม loop ต่อ)"""
+    coin <  COIN_GACHA_THRESHOLD → return เฉยๆ (ไปสุ่ม loop ต่อ)
+
+    collect=False (ONLY_GACHA500=1) → "อ่าน coin อย่างเดียว" อ่านแล้ว log ไว้เหมือนเดิม
+      แต่ไม่เก็บเข้า coin<threshold>+ / ไม่จบบัญชี — ทุกไฟล์ได้ไปสุ่ม 500 แล้วไปหาตัวต่อ"""
     coin_val = _read_coin_from_img(img, serial)
+    if not collect:
+        gui_log(serial, f"🪙 อ่าน coin (ที่ new-gacha1) = {coin_val} | ONLY_GACHA500 → อ่านอย่างเดียว ไม่เก็บ",
+                step="G500-Coin")
+        return
     gui_log(serial, f"🪙 อ่าน coin (ที่ new-gacha1) = {coin_val} | เกณฑ์เก็บ {COIN_GACHA_THRESHOLD}", step="G500-Coin")
     if coin_val < COIN_GACHA_THRESHOLD:
         return
@@ -7834,8 +7847,10 @@ def process_device_login(device):
                                                 if pts:
                                                     # GACHA500 step1: สแกน coin ที่หน้า new-gacha1 (จอนี้ coin อ่านได้ชัด) ก่อนกด
                                                     #   coin >= เกณฑ์ → เก็บเข้า coin<threshold>+ แล้วจบบัญชี | < เกณฑ์ → สุ่มต่อ
+                                                    #   ONLY_GACHA500 = 1 → ยังอ่าน coin เหมือนเดิม แต่ไม่เก็บ/ไม่จบบัญชี
                                                     if GACHA500 == 1:
-                                                        _g500_check_coin_and_collect(device, cycle_start, serial, original_name, file_path, img)
+                                                        _g500_check_coin_and_collect(device, cycle_start, serial, original_name, file_path, img,
+                                                                                     collect=(ONLY_GACHA500 != 1))
                                                     x, y = pts[0]
                                                     device.shell(f"input swipe {x} {y} {x} {y} 100")
                                                     gui_log(serial, f"✅ new-gacha1 found! Clicked ({x},{y})", step="NewG Found")
@@ -8008,7 +8023,7 @@ def process_device_login(device):
                                 #  *** ONE_GACHA500 = 0 → v2/gacha500 ทำ "รอบเดียว" แล้ววน gacha4 ต่อ
                                 #      ONE_GACHA500 = 1 → ทำ "เฉพาะ v2 + gacha500" เท่านั้น ปิด flow gacha4 ทิ้งเลย
                                 #                         (จบเมื่อ gacha500 ทำงานได้ / เจอ out900 / ครบจำนวนรอบ) ***
-                                if GACHA500 == 1 and (ONE_GACHA500 == 1 or not g500_done):
+                                if GACHA500 == 1 and (ONE_GACHA500 == 1 or ONLY_GACHA500 == 1 or not g500_done):
                                     g500_done = True   # (ONE_GACHA500=0) ทำครั้งเดียว — รอบถัดไปวน gacha4 ปกติ
                                     g500_out900 = False   # เจอ out900 เมื่อไหร่ = ข้าม step ที่เหลือทั้งหมดทันที
                                     g500_worked = False   # gacha500 "กดได้จริง" หรือยัง — ONE_GACHA500 นับจากตัวนี้เท่านั้น
@@ -8243,8 +8258,8 @@ def process_device_login(device):
                                     #    ONE_GACHA500 = 1 → จบลูปสุ่มทันที (ทำรอบเดียวพอ)
                                     #    ONE_GACHA500 = 0 → ข้ามไปวน gacha4 ต่อตาม GACHA_LOOP_LIMIT (เหมือนเคส nocions)
                                     if g500_out900:
-                                        if ONE_GACHA500 == 1:
-                                            gui_log(serial, "out900 + ONE_GACHA500=1 → จบลูปสุ่ม (Back รัวๆ → ไป find ต่อ)", step="G500 Out900")
+                                        if ONE_GACHA500 == 1 or ONLY_GACHA500 == 1:
+                                            gui_log(serial, "out900 + สุ่มรอบเดียวจบ → เลิกสุ่ม (Back รัวๆ → ไป find ต่อ)", step="G500 Out900")
                                             found_g4 = False
                                             break
                                         gui_log(serial, "out900 + ONE_GACHA500=0 → ข้ามไปวน gacha4 ต่อ", step="G500 Out900")
@@ -8252,13 +8267,13 @@ def process_device_login(device):
 
                                     # ── ONE_GACHA500 = 1 → จบลูปสุ่มเลย "เฉพาะเมื่อ gacha500 ทำงานได้จริง" ──
                                     #    (gacha4v2/gacha5v2 และ step1 coin ไม่นับ — ทำได้ก็ไม่เป็นไร แต่ยังไม่จบ)
-                                    if ONE_GACHA500 == 1:
+                                    if ONE_GACHA500 == 1 or ONLY_GACHA500 == 1:
                                         if g500_worked:
-                                            gui_log(serial, "ONE_GACHA500=1 + gacha500 ทำงานแล้ว → จบลูปสุ่มเลย", step="G500 One")
+                                            gui_log(serial, "สุ่ม gacha500 ครบ 1 รอบแล้ว → จบลูปสุ่มเลย", step="G500 One")
                                             found_g4 = False
                                             break
                                         # ยังไม่ได้ทำ gacha500 → วน "v2/gacha500" ใหม่ (ไม่แตะ flow gacha4 เลย)
-                                        gui_log(serial, "ONE_GACHA500=1 ยังไม่ได้ทำ gacha500 (v2 ไม่นับ) — วน v2/gacha500 ใหม่", step="G500 One Retry")
+                                        gui_log(serial, "ยังไม่ได้กด gacha500 จริง (v2 ไม่นับ) — วน v2/gacha500 ใหม่", step="G500 One Retry")
                                         continue
 
                                     gui_log(serial, "จบขั้น v2/gacha500 (ทำแล้ว 1 รอบ) — รอบถัดไปกลับไปวนคลิก gacha4 ปกติ", step="G500 Done")
@@ -8899,7 +8914,7 @@ def _disable_console_quickedit():
 def apply_config_now(reason=""):
     """โหลด config.py ใหม่แล้วอัปเดตตัวแปร runtime ทันที (ใช้ได้ทุกที่ ทุกเวลา)
     คืน True ถ้าสำเร็จ — ตัวนี้คือหัวใจของ 'แก้ config ปุ๊บ มีผลปั๊บ'"""
-    global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA, NEW_GACHA_SWIPE, GACHA_LOOP_LIMIT, GACHA500, COIN_GACHA_THRESHOLD, ONE_GACHA500, HERO_LIST, HERO_LIST_FREE, EXTAR_FIND, EXTAR_FIND_THRESHOLD, FIND_IMG, FIND_IMG_DIR, FIND_IMG_THRESHOLD, PLAY8_STUCK_SECS, AUTO_RESTART_OFFLINE, OFFLINE_RESTART_AFTER, OFFLINE_BOOT_WAIT, OFFLINE_RESTART_COOLDOWN, SCREENCAP_MAX_CONCURRENT, SCREENCAP_INTERVAL, _MIN_SCREENCAP_INTERVAL, IMG_ROI_CACHE, IMG_ROI_PAD
+    global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA, NEW_GACHA_SWIPE, GACHA_LOOP_LIMIT, GACHA500, COIN_GACHA_THRESHOLD, ONE_GACHA500, ONLY_GACHA500, HERO_LIST, HERO_LIST_FREE, EXTAR_FIND, EXTAR_FIND_THRESHOLD, FIND_IMG, FIND_IMG_DIR, FIND_IMG_THRESHOLD, PLAY8_STUCK_SECS, AUTO_RESTART_OFFLINE, OFFLINE_RESTART_AFTER, OFFLINE_BOOT_WAIT, OFFLINE_RESTART_COOLDOWN, SCREENCAP_MAX_CONCURRENT, SCREENCAP_INTERVAL, _MIN_SCREENCAP_INTERVAL, IMG_ROI_CACHE, IMG_ROI_PAD
     try:
         import importlib
         import config as cfg
@@ -8933,6 +8948,7 @@ def apply_config_now(reason=""):
         GACHA500 = getattr(cfg, 'GACHA500', 0)
         COIN_GACHA_THRESHOLD = getattr(cfg, 'COIN_GACHA_THRESHOLD', 700)
         ONE_GACHA500 = getattr(cfg, 'ONE_GACHA500', 0)
+        ONLY_GACHA500 = getattr(cfg, 'ONLY_GACHA500', 0)
         # รายชื่อฮีโร่ก็อัปเดตสดด้วย (แก้ list ใน config แล้วมีผลทันที)
         HERO_LIST = getattr(cfg, 'HERO_LIST', HERO_LIST)
         HERO_LIST_FREE = getattr(cfg, 'HERO_LIST_FREE', HERO_LIST_FREE)
