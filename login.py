@@ -277,6 +277,7 @@ DEVICE_IN_FINDHERO   = {}     # serial -> True ระหว่างอยู่
 _UNLOCK_HERO_SEEN    = {}     # serial -> เวลาที่เริ่มเห็น unlock-hero1 ค้างบนจอ (ช่วงกาชา/หาตัว)
 UNLOCK_HERO_STUCK_SECS = 8.0  # วิ — unlock-hero1 ค้างบนจอนานเกินนี้ = ป็อปอัพไม่ยอมไปเอง → กดปิดให้
 GACHA_BACKHOME_STUCK_SECS = 7.0   # วิ — ระหว่างสุ่มกาชา ถ้า backhome ค้างบนจอนานเกินนี้ = ไปต่อไม่ได้ → กดกลับ Home
+FIX_GOOGLEPLAY_FIND_SECS = 10.0   # วิ — ตอนเปิดเกม หา fix-googleplay นานแค่ไหน (เจอ = กด 641,111 สามรอบ)
 DEVICE_IN_NEWSTAGE   = {}     # serial -> True ระหว่างทำ new-stageplay8 อยู่ (กัน floating check เรียกซ้ำซ้อนตัวเอง)
 DEVICE_NEWSTAGE_DONE = {}     # serial -> True ถ้าอีเวนต์ new stage ถูกจัดการไปแล้วใน cycle นี้ (ข้ามการรอซ้ำ)
 DEVICE_CYCLE_START   = {}     # serial -> เวลาเริ่ม cycle ปัจจุบัน (ให้ floating check ใช้เช็ค timeout รวมได้)
@@ -6359,58 +6360,23 @@ def process_device_login(device):
 
 
 
-            # 3. Launch with Black Screen Check (45s check, threshold > 85% dark -> force-stop & relaunch)
+            # 3. Launch — ตัด black-screen check ทิ้งแล้ว (ไม่ได้ใช้แล้ว)
+            #    ของเดิมรอจอสว่าง 45 วิ ไม่สว่างก็ force-stop เปิดใหม่ — หน้า Google Play
+            #    เด้งมาบนจอดำเลยถูกนับเป็น "จอค้าง" → โดนปิดแอพทิ้งก่อนจะได้กดปิด popup
             gui_log(serial, "Launching PES...", step="Launch", status="working")
-            
-            for black_attempt in range(3):
-                launch_game(device, settle=0)   # cooldown กัน cold-start ซ้อนถี่ (settle=0 เพราะมี black-check ตามหลังอยู่แล้ว)
-                black_start = time.time()
-                is_stuck = False
-                while time.time() - black_start < 45:
-                    check_device_reset(serial, cycle_start)
-                    img = get_screen_capture(device)
-                    if img is not None:
-                        try:
-                            # Convert to grayscale for thresholding
-                            if len(img.shape) == 3:
-                                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                            else:
-                                gray = img
-                            _, thresh = cv2.threshold(gray, 50, 255, cv2.THRESH_BINARY_INV)
-                            num_black = cv2.countNonZero(thresh)
-                            total = gray.shape[0] * gray.shape[1]
-                            black_ratio = num_black / total
-                            if black_ratio < 0.85:
-                                # จอสว่างแล้ว (>15% pixels not black)
-                                gui_log(serial, "Screen OK! (app loaded)", step="Launch OK")
-                                is_stuck = False
-                                break
-                            else:
-                                is_stuck = True
-                        except Exception:
-                            is_stuck = True
-                    else:
-                        is_stuck = True
-                    time.sleep(1)
-                
-                if is_stuck:
-                    gui_log(serial, f"[BLACK] Dark screen detected! (attempt {black_attempt+1}/3) Restarting app...", step="Black Stuck")
-                    device.shell("am force-stop jp.konami.pesam")
-                    time.sleep(5)   # settle หลัง force-stop เกมหนัก (เดิม 2 วิ) ก่อน relaunch
-                else:
-                    break
-            
-            time.sleep(8)
+            launch_game(device, settle=0)
+            time.sleep(3)   # ให้แอพขึ้นจอก่อนเริ่มหา fix-googleplay
 
-            # 3.5 fix-googleplay (หลังเกมโหลดเสร็จ) — หา 10 วิ
-            #     เจอ  → กดที่ (641,111) 3 รอบ แล้วไปต่อ
-            #     ไม่เจอครบ 10 วิ → ไปต่อเฉยๆ (ไม่บล็อกขั้นตอน)
-            gui_log(serial, "หา fix-googleplay (10 วิ)...", step="FixGooglePlay")
-            _gp_deadline = time.time() + 10
+            # 3.5 fix-googleplay — หาตั้งแต่เพิ่งเปิดเกม (popup เด้งตั้งแต่จอยังดำอยู่)
+            #     เจอ  → กดที่ (641,111) 3 รอบ แล้วไปต่อทันที
+            #     ไม่เจอจนหมดเวลา → ไปต่อเฉยๆ (ไม่บล็อกขั้นตอน)
+            #     ใช้ fast_screencap (เฟรมดิบๆ) — ช่วงเปิดแอพยังไม่นิ่ง ไม่ควรให้ floating check มาแทรก
+            gui_log(serial, f"หา fix-googleplay ({FIX_GOOGLEPLAY_FIND_SECS:.0f} วิ)...", step="FixGooglePlay")
+            _gp_deadline = time.time() + FIX_GOOGLEPLAY_FIND_SECS
             while time.time() < _gp_deadline:
                 check_device_reset(serial, cycle_start)
-                img = get_screen_capture(device)
-                if img is not None and img_search(img, os.path.join(IMG_DIR, "fix-googleplay.bmp")):
+                _img_gp = fast_screencap(device)
+                if _img_gp is not None and img_search(_img_gp, os.path.join(IMG_DIR, "fix-googleplay.bmp")):
                     gui_log(serial, "เจอ fix-googleplay! กด (641,111) 3 รอบ", step="FixGooglePlay")
                     for _gp_i in range(3):
                         device.shell("input swipe 641 111 641 111 100")
@@ -6418,7 +6384,7 @@ def process_device_login(device):
                     break
                 time.sleep(0.5)
             else:
-                gui_log(serial, "ไม่เจอ fix-googleplay ใน 10 วิ — ไปต่อ", step="FixGooglePlay Skip")
+                gui_log(serial, f"ไม่เจอ fix-googleplay ใน {FIX_GOOGLEPLAY_FIND_SECS:.0f} วิ — ไปต่อ", step="FixGooglePlay Skip")
 
             # 4 & 5. Wait for checkpointlogin (pressing play8/play8fix along the way)
             #    *** ไม่ยอมแพ้: ลูปนี้ออกได้ทางเดียวคือเจอ checkpointlogin เท่านั้น ***
