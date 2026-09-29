@@ -5150,14 +5150,15 @@ def navigate_home_then_find_hero(device, cycle_start, serial, original_name, fil
     return find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_prefix=coin_prefix)
 
 
-def scan_coin_number(device, cycle_start, serial):
+def scan_coin_number(device, cycle_start, serial, timeout=60):
     """
     รอ checkpointcoin.bmp → OCR ที่ Region(52, 10, 106, 41) → คืนค่าเลขเหรียญ (string)
     หรือ None ถ้าหา checkpointcoin ไม่เจอ. (สแกนอย่างเดียว ไม่ย้ายไฟล์/ไม่ปิดแอป)
+    timeout: รอหน้า checkpointcoin กี่วิ (ตอนเรียกซ้ำหลายรอบให้ตั้งสั้นลง)
     """
     import re
     gui_log(serial, "Waiting checkpointcoin (Gacha+Find)...", step="Coin Wait", status="working")
-    deadline = time.time() + 60
+    deadline = time.time() + timeout
     found_cp = False
     while time.time() < deadline:
         check_device_reset(serial, cycle_start)
@@ -5194,6 +5195,25 @@ def scan_coin_number(device, cycle_start, serial):
     gui_log(serial, f"🪙 Coins scanned & remembered: {coin_number}", step="Coin Match")
     cprint(f"[{serial}] Gacha+Find Coin Scan: {coin_number}")
     return coin_number
+
+
+def scan_coin_after_box(device, cycle_start, serial):
+    """สแกนเหรียญ "หลังรับของ box เสร็จ" — เลขจะรวมของที่เพิ่งรับมาแล้ว
+    หน้าจออาจยังค้างที่หน้ารางวัล/กล่อง → ไม่เจอ checkpointcoin รอบแรก
+    ก็กด Back ไล่ปิดหน้าค้างแล้วลองใหม่ (รวม 3 รอบ รอบละ 20 วิ)"""
+    for attempt in range(1, 4):
+        coin = scan_coin_number(device, cycle_start, serial, timeout=20)
+        if coin is not None:
+            return coin
+        if attempt < 3:
+            gui_log(serial, f"ยังไม่เจอหน้าเหรียญ (รอบ {attempt}/3) — กด Back ไล่ปิดหน้าค้างแล้วลองใหม่",
+                    step="Coin Retry")
+            for _ in range(3):
+                check_device_reset(serial, cycle_start)
+                device.shell("input keyevent 4")
+                time.sleep(1.2)
+    gui_log(serial, "สแกนเหรียญหลังรับของไม่สำเร็จ — จะใช้เลข 0", step="Coin Fail")
+    return None
 
 
 def _read_coin_from_img(img, serial):
@@ -6171,59 +6191,20 @@ def check_coin_mode(device, cycle_start, serial, original_name, file_path, coin_
     # 1. ใช้เลขเหรียญที่สแกนไว้ก่อนหน้า (ถ้ามี) — ไม่ต้องสแกนซ้ำ
     coin_number = coin_prefix
 
-    # 1b. กรณีไม่มีเลขที่สแกนไว้ → สแกนสด ณ จุดนี้ (fallback)
+    # 1b. ไม่มีเลขที่สแกนไว้ → สแกนสดตรงนี้ (มี Back ไล่ปิดหน้าค้างให้ด้วย)
+    #     สแกนไม่ได้จริงๆ ก็ใช้เลข 0 แล้ว "ส่งเข้า check-coin เหมือนเดิม"
+    #     (ของเดิมโยนไฟล์ไป random-fail — เลยดูเหมือนเช็คทองไม่ทำงาน)
     if not coin_number:
-        gui_log(serial, "No pre-scanned coin — waiting checkpointcoin...", step="Coin Wait", status="working")
-        deadline = time.time() + 60
-        found_cp = False
-        while time.time() < deadline:
-            check_device_reset(serial, cycle_start)
-            img = get_screen_capture(device)
-            if img is not None:
-                pts = img_search(img, os.path.join(IMG_DIR, "checkpointcoin.bmp"))
-                if pts:
-                    found_cp = True
-                    break
-            time.sleep(1)
-
-        if not found_cp:
-            gui_log(serial, "checkpointcoin.bmp not found! Moving to random-fail.", step="Coin Timeout")
-            device.shell("am force-stop jp.konami.pesam")
-            time.sleep(1)
-            dest_dir = RANDOM_FAIL_DIR
-            final_name = export_final_name(file_path, original_name, coin_prefix)
-            dest = os.path.join(dest_dir, final_name)
-            if os.path.exists(file_path):
-                time.sleep(2)
-                try:
-                    if os.path.exists(dest):
-                        os.remove(dest)
-                    _safe_copy(file_path, dest)
-                    os.remove(file_path)
-                except Exception as e:
-                    cprint(f"[{serial}] Failed to move file to random-fail: {e}")
-            release_file(original_name)
-            return True
-
-        gui_log(serial, "checkpointcoin detected! Scanning coins...", step="Scanning Coin")
-        for attempt in range(3):
-            check_device_reset(serial, cycle_start)
-            img = get_screen_capture(device)
-            if img is not None:
-                coin_region = Region(52, 10, 106, 41)
-                ocr_text = read_screen_text(img, region=coin_region, serial=serial)
-                digits = "".join(re.findall(r"\d+", ocr_text))
-                if digits:
-                    coin_number = digits
-                    break
-            time.sleep(1)
+        gui_log(serial, "ยังไม่มีเลขเหรียญที่สแกนไว้ — สแกนตอนนี้เลย", step="Coin Scan", status="working")
+        coin_number = scan_coin_after_box(device, cycle_start, serial)
 
     if not coin_number:
         gui_log(serial, "Could not read coins via OCR! Using '0'", step="OCR Fail")
         coin_number = "0"
 
-    # 2. Rename file — ติดเลข coin ไว้หน้าชื่อ (ลบ tag เก่าทั้งหน้า/ท้ายออกก่อน กันเลขซ้อน)
-    final_name = apply_coin_tag(export_base_name(file_path, original_name, strip_dash=True), coin_number)
+    # 2. ตั้งชื่อไฟล์ = [เลขเหรียญหลังรับของ]+ชื่อเดิม.dat
+    #    (ลบ coin tag เก่าทั้งหน้า/ท้ายออกก่อน กันเลขซ้อนตอนไฟล์วนกลับมารันซ้ำ)
+    final_name = f"[{coin_number}]+{strip_coin_tag(original_name)}"
     gui_log(serial, f"🪙 Coins: {coin_number} -> {final_name}", step="Coin Match")
     cprint(f"[{serial}] Coin Scan Result: {coin_number} -> file: {final_name}")
 
@@ -6650,7 +6631,15 @@ def process_device_login(device):
             coin_prefix = None
             # coin_low = เหรียญที่สแกนได้ "น้อยกว่า" เกณฑ์ GACHA_MIN_COIN → จะใช้ข้ามการสุ่ม
             coin_low = False
-            if CHECK_COIN == 1:
+            # โหมดกาชาต้องรู้เลขเหรียญ "ก่อน" (ไว้ตัดสิน coin_low = ข้ามสุ่ม) → สแกนก่อนเสมอ
+            # ไม่มีกาชาแต่เปิด box → เลื่อนไปสแกน "หลังรับของเสร็จ" แทน เลขจะได้รวมของที่เพิ่งรับ
+            _gacha_on = (DO_GACHA == 1 or NEW_GACHA == 1 or GACHA_FREE == 1
+                         or GACHA_CHECK == 1 or GACHA_FIND == 1)
+            _coin_after_box = (CHECK_COIN == 1 and DO_BOX == 1 and not _gacha_on)
+            if _coin_after_box:
+                gui_log(serial, "Check Coin + Box → จะสแกนเหรียญ 'หลังรับของเสร็จ' (เลขรวมของที่เพิ่งรับ)",
+                        step="Coin After Box")
+            if CHECK_COIN == 1 and not _coin_after_box:
                 gui_log(serial, "Check Coin enabled → scanning coins first (before other steps)...", step="Coin First", status="working")
                 coin_prefix = scan_coin_number(device, cycle_start, serial)
                 if coin_prefix is not None:
@@ -7695,6 +7684,11 @@ def process_device_login(device):
                     time.sleep(1)
 
             DEVICE_DISABLE_FIXEVENT[serial] = True
+
+            # 7.3.4 รับของ box เสร็จแล้ว → ค่อยสแกนเหรียญ (เลขจะรวมของที่เพิ่งรับมาด้วย)
+            if _coin_after_box:
+                gui_log(serial, "รับของเสร็จ → สแกนเหรียญตอนนี้", step="Coin After Box", status="working")
+                coin_prefix = scan_coin_after_box(device, cycle_start, serial)
 
             # 7.3.5 CheckCoin + FindHero (ไม่มี gacha) → ใช้เลขเหรียญที่สแกนไว้ก่อนแล้ว → หา hero
             #       เลขเหรียญที่สแกนได้จะ "เขียนทับ" เลขเดิมใน -[เลข] (ไม่ต่อเพิ่มจนชื่อยาว)
