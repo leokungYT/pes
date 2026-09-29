@@ -16,12 +16,12 @@ DO_BOX = 1
 # ── Gacha Sequence (login.py) ──────────────────────
 # 1 = สุ่มกาชา (ต่อจากจบ box4)
 # 0 = ไม่สุ่มกาชา (จบงานปกติ)
-DO_GACHA = 1
+DO_GACHA = 0
 
 # ── New Gacha Sequence (login.py) ──────────────────
 # 1 = เปิดการทำงาน new-gacha1 -> เลื่อนหา new-gacha1 -> ข้ามไป gacha4.bmp
 # 0 = ปิด
-NEW_GACHA = 1
+NEW_GACHA = 0
 
 # ── New Gacha Swipe (เลื่อนหน้าจอ) ──────────────────
 # 1 = เปิดการเลื่อนหน้าจอ (swipe 144,243 -> 699,233) ตอนหา new-gacha1
@@ -66,7 +66,7 @@ ONE_GACHA500 = 0
 #     • เปิดคู่กับ FIND_HERO = 1 → สุ่ม 500 เสร็จไปหาตัวต่อทันทีโดยไม่ปิดแอป
 #     *** ต้องเปิด GACHA500 = 1 ด้วย ***
 # 0 = ปิด (ใช้พฤติกรรมตาม GACHA500 / ONE_GACHA500 ตามปกติ)
-ONLY_GACHA500 = 1
+ONLY_GACHA500 = 0
 
 # ── Gacha + Check Mode ──────────────────────────────
 # 1 = สุ่มกาชาเสร็จแล้วกด backhome ต่อด้วยค้นหาฮีโร่ทันที
@@ -97,7 +97,7 @@ LOGIN_SUCCESS_DIR = "login-success"
 # ── Find Hero Sequence ─────────────────────────────
 # 1 = ทำงาน fin1-fin8 และค้นหาฮีโร่ตามภาพ
 # 0 = ข้าม
-FIND_HERO = 1
+FIND_HERO = 0
 
 # แมพไฟล์ภาพฮีโร่เข้ากับชื่อฮีโร่
 HERO_IMG_MAP = {
