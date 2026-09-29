@@ -277,7 +277,12 @@ DEVICE_IN_FINDHERO   = {}     # serial -> True ระหว่างอยู่
 _UNLOCK_HERO_SEEN    = {}     # serial -> เวลาที่เริ่มเห็น unlock-hero1 ค้างบนจอ (ช่วงกาชา/หาตัว)
 UNLOCK_HERO_STUCK_SECS = 8.0  # วิ — unlock-hero1 ค้างบนจอนานเกินนี้ = ป็อปอัพไม่ยอมไปเอง → กดปิดให้
 GACHA_BACKHOME_STUCK_SECS = 7.0   # วิ — ระหว่างสุ่มกาชา ถ้า backhome ค้างบนจอนานเกินนี้ = ไปต่อไม่ได้ → กดกลับ Home
-FIX_GOOGLEPLAY_FIND_SECS = 10.0   # วิ — ตอนเปิดเกม หา fix-googleplay นานแค่ไหน (เจอ = กด 641,111 สามรอบ)
+DEVICE_WATCH_GPLAY   = {}     # serial -> True ช่วงเปิดเกม → หา fix-googleplay ลอยๆ ทุกเฟรม (หยุดเมื่อเจอ play8)
+# popup "Google Play Games": ห้ามกด Cancel — กดแล้วเกมเด้งออก
+# → แตะที่ว่างมุมซ้ายบนแทน (นอกกรอบ dialog ไม่โดนปุ่มไหน) กดซ้ำๆ จนกว่า popup จะหาย/เจอ play8
+# ตรวจจากหน้าจอจริงแล้ว: (60,60) ดำสนิท ไม่มีปุ่ม และอยู่นอกกรอบ dialog (dialog เริ่มที่ x=157)
+GPLAY_TAP_X = 60              # px — จุดที่แตะตอนเจอ popup (มุมซ้ายบนของจอ)
+GPLAY_TAP_Y = 60
 DEVICE_IN_NEWSTAGE   = {}     # serial -> True ระหว่างทำ new-stageplay8 อยู่ (กัน floating check เรียกซ้ำซ้อนตัวเอง)
 DEVICE_NEWSTAGE_DONE = {}     # serial -> True ถ้าอีเวนต์ new stage ถูกจัดการไปแล้วใน cycle นี้ (ข้ามการรอซ้ำ)
 DEVICE_CYCLE_START   = {}     # serial -> เวลาเริ่ม cycle ปัจจุบัน (ให้ floating check ใช้เช็ค timeout รวมได้)
@@ -3493,6 +3498,22 @@ def get_screen_capture(device):
                         gui_log(device.serial, f"questfive: {os.path.basename(_cur_path)} ค้าง 15s → กดซ้ำ", step="QuestFive")
                         # loop จะวนกลับไปคลิกอีกรอบอัตโนมัติ
 
+            # === fix-googleplay floating check (ช่วงเปิดเกม จนกว่าจะเจอ play8) ===
+            #     popup "Google Play Games" เด้งตอนไหนก็แตะปิดทันที — หาลอยๆ ทุกเฟรม
+            #     *** ห้ามกดปุ่ม Cancel — กดแล้วเกมเด้งออก ***
+            #     แตะที่ว่างมุมซ้ายบนแทน — เจอกี่เฟรมก็แตะซ้ำไปเรื่อยๆ จนกว่าจะเจอ play8
+            if DEVICE_WATCH_GPLAY.get(device.serial, False) and img is not None:
+                pts_gp = img_search(img, os.path.join(IMG_DIR, "fix-googleplay.bmp"))
+                if pts_gp:
+                    gx_gp, gy_gp = pts_gp[0]
+                    gui_log(device.serial,
+                            f"Floating: เจอ fix-googleplay ที่ ({gx_gp},{gy_gp}) → แตะมุมซ้ายบน ({GPLAY_TAP_X},{GPLAY_TAP_Y}) 3 รอบ",
+                            step="FixGooglePlay")
+                    for _gp_i in range(3):
+                        device.shell(f"input swipe {GPLAY_TAP_X} {GPLAY_TAP_Y} {GPLAY_TAP_X} {GPLAY_TAP_Y} 100")
+                        time.sleep(0.6)
+                    img = fast_screencap(device)
+
             # === ad-rewardfix1 floating check (เฉพาะช่วง sequence กาชา) ===
             #     ป็อปอัพรับรางวัลโฆษณาเด้งมาตอนไหนก็กดปิดทันที — หาแบบลอยๆ ทุกเฟรม
             #     ไม่มีการรอ/ไม่บล็อกขั้นตอน ไม่เจอก็ผ่านไปเฉยๆ
@@ -6253,6 +6274,7 @@ def process_device_login(device):
         try:
             DEVICE_DISABLE_FIXEVENT[serial] = False
             DEVICE_DISABLE_FIXOUT[serial] = False   # เริ่ม cycle ใหม่ → เปิด fixout check กลับ (ช่วง login ต้องใช้)
+            DEVICE_WATCH_GPLAY[serial] = False      # เริ่ม cycle ใหม่ → ยังไม่เปิดเกม (กันธงค้างจากรอบก่อน)
             DEVICE_IN_GACHA[serial] = False         # เริ่ม cycle ใหม่ → ยังไม่เข้ากาชา (กันค้างจากรอบก่อนที่หลุด exception)
             _GACHA_BACKHOME_SEEN.pop(serial, None)
             DEVICE_IN_FINDHERO[serial] = False       # เริ่ม cycle ใหม่ → ยังไม่เข้าหาตัว
@@ -6365,26 +6387,11 @@ def process_device_login(device):
             #    เด้งมาบนจอดำเลยถูกนับเป็น "จอค้าง" → โดนปิดแอพทิ้งก่อนจะได้กดปิด popup
             gui_log(serial, "Launching PES...", step="Launch", status="working")
             launch_game(device, settle=0)
-            time.sleep(3)   # ให้แอพขึ้นจอก่อนเริ่มหา fix-googleplay
+            time.sleep(3)   # settle หลังสั่งเปิดเกม
 
-            # 3.5 fix-googleplay — หาตั้งแต่เพิ่งเปิดเกม (popup เด้งตั้งแต่จอยังดำอยู่)
-            #     เจอ  → กดที่ (641,111) 3 รอบ แล้วไปต่อทันที
-            #     ไม่เจอจนหมดเวลา → ไปต่อเฉยๆ (ไม่บล็อกขั้นตอน)
-            #     ใช้ fast_screencap (เฟรมดิบๆ) — ช่วงเปิดแอพยังไม่นิ่ง ไม่ควรให้ floating check มาแทรก
-            gui_log(serial, f"หา fix-googleplay ({FIX_GOOGLEPLAY_FIND_SECS:.0f} วิ)...", step="FixGooglePlay")
-            _gp_deadline = time.time() + FIX_GOOGLEPLAY_FIND_SECS
-            while time.time() < _gp_deadline:
-                check_device_reset(serial, cycle_start)
-                _img_gp = fast_screencap(device)
-                if _img_gp is not None and img_search(_img_gp, os.path.join(IMG_DIR, "fix-googleplay.bmp")):
-                    gui_log(serial, "เจอ fix-googleplay! กด (641,111) 3 รอบ", step="FixGooglePlay")
-                    for _gp_i in range(3):
-                        device.shell("input swipe 641 111 641 111 100")
-                        time.sleep(1.0)
-                    break
-                time.sleep(0.5)
-            else:
-                gui_log(serial, f"ไม่เจอ fix-googleplay ใน {FIX_GOOGLEPLAY_FIND_SECS:.0f} วิ — ไปต่อ", step="FixGooglePlay Skip")
+            # 3.5 เปิดหา fix-googleplay แบบลอยๆ — ทำงานใน get_screen_capture ทุกเฟรม
+            #     จนกว่าจะเจอ play8 (หรือจบเฟส login) ค่อยปิด
+            DEVICE_WATCH_GPLAY[serial] = True
 
             # 4 & 5. Wait for checkpointlogin (pressing play8/play8fix along the way)
             #    *** ไม่ยอมแพ้: ลูปนี้ออกได้ทางเดียวคือเจอ checkpointlogin เท่านั้น ***
@@ -6466,6 +6473,7 @@ def process_device_login(device):
 
                     if pts_8:
                         play8_miss = 0   # เจอ play8 แล้ว รีเซ็ตตัวนับ
+                        DEVICE_WATCH_GPLAY[serial] = False   # เจอ play8 แล้ว → เลิกหา fix-googleplay
                         p8_seen_since = time.time()
                         p8_rescue_n = 0
 
@@ -6521,6 +6529,7 @@ def process_device_login(device):
             # ผ่านหน้า login (เจอ checkpoint) แล้ว → mark ไว้: ถ้าหลังจากนี้เจอ fixclear
             # จะ restart "ตั้งแต่ play8" (เก็บ login เดิม) แทนการ push ไฟล์ + login ใหม่
             DEVICE_PAST_LOGIN[serial] = True
+            DEVICE_WATCH_GPLAY[serial] = False   # จบเฟส login แล้ว → หยุดหา fix-googleplay แน่นอน
 
             if LOGIN_FAST:
                 if p8_cancel_done:
