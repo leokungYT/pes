@@ -128,7 +128,7 @@ PLAY8_STUCK_SECS = 90
 #     *** ชื่อไฟล์ที่ export = UID ล้วนเสมอ ไม่มีชื่อนักเตะ (ดูหัวข้อ "ชื่อไฟล์ตอน export")
 #     ชื่อไฟล์รูปใช้โชว์ใน log ว่าเจอใคร เช่น  img/find-img/Messi.png
 #     ไม่เจอรูปไหนเลย → ไป no-hero เหมือนเดิม
-FIND_IMG = 1
+FIND_IMG = 0
 
 # โฟลเดอร์ย่อยใน img/ ที่เก็บรูปไว้สแกน (รองรับ .png .bmp .jpg)
 FIND_IMG_DIR = "find-img"
