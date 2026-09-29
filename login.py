@@ -6402,6 +6402,24 @@ def process_device_login(device):
             
             time.sleep(8)
 
+            # 3.5 fix-googleplay (หลังเกมโหลดเสร็จ) — หา 10 วิ
+            #     เจอ  → กดที่ (641,111) 3 รอบ แล้วไปต่อ
+            #     ไม่เจอครบ 10 วิ → ไปต่อเฉยๆ (ไม่บล็อกขั้นตอน)
+            gui_log(serial, "หา fix-googleplay (10 วิ)...", step="FixGooglePlay")
+            _gp_deadline = time.time() + 10
+            while time.time() < _gp_deadline:
+                check_device_reset(serial, cycle_start)
+                img = get_screen_capture(device)
+                if img is not None and img_search(img, os.path.join(IMG_DIR, "fix-googleplay.bmp")):
+                    gui_log(serial, "เจอ fix-googleplay! กด (641,111) 3 รอบ", step="FixGooglePlay")
+                    for _gp_i in range(3):
+                        device.shell("input swipe 641 111 641 111 100")
+                        time.sleep(1.0)
+                    break
+                time.sleep(0.5)
+            else:
+                gui_log(serial, "ไม่เจอ fix-googleplay ใน 10 วิ — ไปต่อ", step="FixGooglePlay Skip")
+
             # 4 & 5. Wait for checkpointlogin (pressing play8/play8fix along the way)
             #    *** ไม่ยอมแพ้: ลูปนี้ออกได้ทางเดียวคือเจอ checkpointlogin เท่านั้น ***
             #    (กด play8 / fallback ไปเรื่อยๆ จนกว่าจะเจอ แล้วค่อยไปขั้นตอนกด Back รัวๆ)
