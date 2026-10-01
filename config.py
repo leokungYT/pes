@@ -48,7 +48,7 @@ GACHA_LOOP_LIMIT = 0
 #              → gacha500 → gacha500v1 → nocions (Back 1 ครั้ง) / checkpointgacha (กด next จนหาย)
 #              เจอ out900 เมื่อไหร่ = ข้าม step ที่เหลือทันที
 # 0 = ปิด → สุ่ม loop แบบปกติ (ไม่เช็ค coin / ไม่หา gacha500)
-GACHA500 = 0
+GACHA500 = 1
 # เกณฑ์ coin ที่จะ "เก็บ" (>= ค่านี้เก็บ, < ค่านี้สุ่มต่อ) — ชื่อโฟลเดอร์จะเป็น coin<ค่านี้>+
 COIN_GACHA_THRESHOLD = 800
 
@@ -97,7 +97,7 @@ LOGIN_SUCCESS_DIR = "login-success"
 # ── Find Hero Sequence ─────────────────────────────
 # 1 = ทำงาน fin1-fin8 และค้นหาฮีโร่ตามภาพ
 # 0 = ข้าม
-FIND_HERO = 0
+FIND_HERO = 1
 
 # แมพไฟล์ภาพฮีโร่เข้ากับชื่อฮีโร่
 HERO_IMG_MAP = {
@@ -128,7 +128,7 @@ PLAY8_STUCK_SECS = 90
 #     *** ชื่อไฟล์ที่ export = UID ล้วนเสมอ ไม่มีชื่อนักเตะ (ดูหัวข้อ "ชื่อไฟล์ตอน export")
 #     ชื่อไฟล์รูปใช้โชว์ใน log ว่าเจอใคร เช่น  img/find-img/Messi.png
 #     ไม่เจอรูปไหนเลย → ไป no-hero เหมือนเดิม
-FIND_IMG = 0
+FIND_IMG = 1
 
 # โฟลเดอร์ย่อยใน img/ ที่เก็บรูปไว้สแกน (รองรับ .png .bmp .jpg)
 FIND_IMG_DIR = "find-img"
@@ -281,7 +281,7 @@ DEBUG_CONSOLE = 0
 # ── Check Coin Sequence ───────────────────────────
 # 1 = ทำงานสแกนเหรียญ (หา checkpointcoin.bmp → OCR สแกนหาเลขเหรียญที่ Region(52, 10, 106, 41) → บันทึกลง check-coin)
 # 0 = ข้าม
-CHECK_COIN = 1
+CHECK_COIN = 0
 
 # ── Min Coin to Gacha (ใช้ร่วมกับ Check Coin) ──────
 # เลขเหรียญขั้นต่ำที่จะ "สุ่ม" — ถ้าสแกนเหรียญได้ "น้อยกว่า" ค่านี้:
