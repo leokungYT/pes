@@ -16,7 +16,7 @@ powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $
 timeout /t 2 /nobreak >nul
 
 echo [2/3] Running silent update (mode from SILENT_UPDATE_MODE in config.py) ...
-py auto_update.py --silent --force
+py auto_update.py --silent --force --no-relaunch
 
 echo [3/3] Making sure the bot is running again ...
 timeout /t 15 /nobreak >nul

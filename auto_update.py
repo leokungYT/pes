@@ -303,7 +303,7 @@ def show_custom_info_popup(title, message):
 
     root.mainloop()
 
-def update(silent=False, force=False):
+def update(silent=False, force=False, no_relaunch=False):
     print("[Updater] Checking for latest release on GitHub...")
     latest_version, zip_url = get_latest_release()
 
@@ -429,6 +429,11 @@ def update(silent=False, force=False):
             # ส่ง Exit Code 10 เพื่อบอกให้ batch ไฟล์หยุดการรันบอท (ให้ผู้ใช้เปิดใหม่เอง)
             sys.exit(10)
         else:
+            # --no-relaunch: ถูกเรียกจาก force-update.bat ซึ่งมี step [3/3] เปิด login.bat ให้เองอยู่แล้ว
+            #   ถ้า auto_update เปิดซ้ำตรงนี้ด้วย = ได้ login.bat 2 หน้าต่าง (บั๊ก cmd ซ้ำ 2 รอบ)
+            if no_relaunch:
+                print("[Updater] Silent update completed! (--no-relaunch → ปล่อยให้ force-update.bat เปิด login.bat เอง)")
+                sys.exit(0)
             print("[Updater] Silent update completed! Re-launching login.bat...")
             os.chdir(os.path.dirname(os.path.abspath(__file__)))
             if os.name == 'nt':
@@ -450,4 +455,5 @@ def update(silent=False, force=False):
 if __name__ == "__main__":
     is_silent = "--silent" in sys.argv or "-s" in sys.argv
     is_force = "--force" in sys.argv or "-f" in sys.argv
-    update(silent=is_silent, force=is_force)
+    is_no_relaunch = "--no-relaunch" in sys.argv
+    update(silent=is_silent, force=is_force, no_relaunch=is_no_relaunch)
