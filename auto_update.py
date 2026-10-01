@@ -303,20 +303,25 @@ def show_custom_info_popup(title, message):
 
     root.mainloop()
 
-def update(silent=False):
+def update(silent=False, force=False):
     print("[Updater] Checking for latest release on GitHub...")
     latest_version, zip_url = get_latest_release()
-    
+
     if not latest_version or not zip_url:
         sys.exit(0)
 
     local_version = get_local_version()
-    
+
     if local_version == latest_version:
-        print(f"[Updater] You are already on the latest version ({latest_version}).")
-        sys.exit(0)
-        
-    print(f"[Updater] New version found: {latest_version}.")
+        if force:
+            # --force: ดึงโค้ด+config ล่าสุดมาทับใหม่ แม้เลขเวอร์ชันจะตรงกัน
+            #   (ใช้ตอนกดปุ่ม "อัปเดตบอท" ในหน้า remote แล้วอยากให้ sync โค้ดสดทุกครั้ง)
+            print(f"[Updater] Already on {latest_version}, but --force set → re-downloading anyway.")
+        else:
+            print(f"[Updater] You are already on the latest version ({latest_version}).")
+            sys.exit(0)
+    else:
+        print(f"[Updater] New version found: {latest_version}.")
     
     if silent or is_unattended():
         # โหมดอัตโนมัติ (เงียบ / ไม่ถาม): อ่านโหมดจาก config.py — ไม่มีหน้าต่างให้กด
@@ -444,4 +449,5 @@ def update(silent=False):
 
 if __name__ == "__main__":
     is_silent = "--silent" in sys.argv or "-s" in sys.argv
-    update(silent=is_silent)
+    is_force = "--force" in sys.argv or "-f" in sys.argv
+    update(silent=is_silent, force=is_force)
