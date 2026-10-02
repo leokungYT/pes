@@ -11,7 +11,7 @@ EVENT_IMG = 0
 # ── Box Sequence (main-pes.py) ────────────────────
 # 1 = เปิดกล่อง (ทำ play26-play31 และ box1-box4)
 # 0 = ข้ามการเปิดกล่อง (จบที่ play25 แล้วส่งไฟล์เลย)
-DO_BOX = 0
+DO_BOX = 1
 
 # ── Gacha Sequence (login.py) ──────────────────────
 # 1 = สุ่มกาชา (ต่อจากจบ box4)
@@ -31,12 +31,12 @@ NEW_GACHA_SWIPE = 0
 # ── Custom Gacha Loop Mode ──────────────────────────
 # 1 = เปิดโหมด Custom Gacha (loopgacha1 -> gacha4 -> gacha5 -> loop จนเจอ outloop)
 # 0 = ปิดโหมด
-CUSTOM_GACHA = 0
+CUSTOM_GACHA = 1
 
 # ── Custom Gacha Loop Limit (ใช้คู่กับ "สุ่มจน coin หมด") ──
 # 0  = สุ่มจนหมด (จนเจอ nocions/outloop) — พฤติกรรมเดิม
 # >0 = Custom: สุ่มไม่เกินกี่รอบแล้ว break ออกเลย (เช่น 5 = สุ่มแค่ 5 รอบ)
-GACHA_LOOP_LIMIT = 0
+GACHA_LOOP_LIMIT = 1
 
 # ── GACHA500: step พิเศษ (หลังเจอ checkpoint-gacha4) ──
 # *** ไม่ต้องเปิด CUSTOM_GACHA แล้ว — GACHA500 = 1 เข้า flow นี้ได้เอง ***
@@ -48,7 +48,7 @@ GACHA_LOOP_LIMIT = 0
 #              → gacha500 → gacha500v1 → nocions (Back 1 ครั้ง) / checkpointgacha (กด next จนหาย)
 #              เจอ out900 เมื่อไหร่ = ข้าม step ที่เหลือทันที
 # 0 = ปิด → สุ่ม loop แบบปกติ (ไม่เช็ค coin / ไม่หา gacha500)
-GACHA500 = 1
+GACHA500 = 0
 # เกณฑ์ coin ที่จะ "เก็บ" (>= ค่านี้เก็บ, < ค่านี้สุ่มต่อ) — ชื่อโฟลเดอร์จะเป็น coin<ค่านี้>+
 COIN_GACHA_THRESHOLD = 800
 
@@ -66,7 +66,7 @@ ONE_GACHA500 = 0
 #     • เปิดคู่กับ FIND_HERO = 1 → สุ่ม 500 เสร็จไปหาตัวต่อทันทีโดยไม่ปิดแอป
 #     *** ต้องเปิด GACHA500 = 1 ด้วย ***
 # 0 = ปิด (ใช้พฤติกรรมตาม GACHA500 / ONE_GACHA500 ตามปกติ)
-ONLY_GACHA500 = 1
+ONLY_GACHA500 = 0
 
 # ── Gacha + Check Mode ──────────────────────────────
 # 1 = สุ่มกาชาเสร็จแล้วกด backhome ต่อด้วยค้นหาฮีโร่ทันที
@@ -281,7 +281,7 @@ DEBUG_CONSOLE = 0
 # ── Check Coin Sequence ───────────────────────────
 # 1 = ทำงานสแกนเหรียญ (หา checkpointcoin.bmp → OCR สแกนหาเลขเหรียญที่ Region(52, 10, 106, 41) → บันทึกลง check-coin)
 # 0 = ข้าม
-CHECK_COIN = 0
+CHECK_COIN = 1
 
 # ── Min Coin to Gacha (ใช้ร่วมกับ Check Coin) ──────
 # เลขเหรียญขั้นต่ำที่จะ "สุ่ม" — ถ้าสแกนเหรียญได้ "น้อยกว่า" ค่านี้:
