@@ -226,6 +226,11 @@ try:
     from config import ONLY_GACHA500
 except ImportError:
     ONLY_GACHA500 = 0
+# ความแม่นตอนเช็ค checkpoint-gacha4 ("ใช่ตู้นี้ไหม") — ของเดิมใช้ค่า default 0.8 ซึ่งหลวมเกิน
+try:
+    from config import CP_GACHA4_THRESHOLD
+except ImportError:
+    CP_GACHA4_THRESHOLD = 0.95
 
 
 def cprint(*args, **kwargs):
@@ -1597,6 +1602,7 @@ if GUI_ENABLED:
                     ("ent", "  └ Coin เก็บ (>= → coin+)",  "COIN_GACHA_THRESHOLD"),
                     ("chk", "  └ One Gacha500 (รอบเดียวจบ)", "ONE_GACHA500"),
                     ("chk", "  └ Only 500 (สุ่มรอบเดียว ไม่เก็บ coin+)", "ONLY_GACHA500"),
+                    ("entf", "└ ความแม่น checkpoint-gacha4", "CP_GACHA4_THRESHOLD"),
                     ("chk", "Gacha + Find + Check Coin", "GACHA_FIND"),
                 ],
                 "🆓 Gacha Free": [
@@ -3758,13 +3764,30 @@ def img_search(gray_img, find_path, threshold=0.8):
     return points
 
 
-def fixout_click_if_stuck(device, serial, img, stuck_since, secs=8.0, step="FixOut", skip_if=None):
+def img_match_score(gray_img, find_path):
+    """คืน "คะแนนสูงสุด" ที่เทมเพลตนั้นเทียบกับจอได้ (0.0-1.0) — ไว้ log ตอนเช็คไม่ผ่าน
+    จะได้รู้ว่าควรตั้ง threshold เท่าไหร่ (ไม่ต้องเดา)"""
+    try:
+        tmpl = load_template(find_path)
+        if gray_img is None or tmpl is None:
+            return 0.0
+        th, tw = tmpl.shape
+        if gray_img.shape[0] < th or gray_img.shape[1] < tw:
+            return 0.0
+        res = cv2.matchTemplate(gray_img, tmpl, cv2.TM_CCOEFF_NORMED)
+        return float(res.max())
+    except Exception:
+        return 0.0
+
+
+def fixout_click_if_stuck(device, serial, img, stuck_since, secs=8.0, step="FixOut", skip_if=None,
+                          skip_if_threshold=0.8):
     """ค้างอยู่หน้าเดิมครบ `secs` วิ → หา fixout ในภาพ เจอแล้ว "กดเฉยๆ" (ไม่ Back spam ไม่ทำอะไรต่อ)
     แล้วให้ลูปเดิมทำงานตามปกติ. คืนค่า stuck_since ใหม่ (รีเซ็ตนาฬิกาเมื่อครบรอบเช็ค)
     skip_if: path รูป — ถ้าเจอรูปนี้ในเฟรม จะ "ไม่กด fixout" (เช่น checkpoint-gacha4 = หน้าจอถูกต้องแล้ว)"""
     if img is None or time.time() - stuck_since < secs:
         return stuck_since
-    if skip_if and img_search(img, skip_if):
+    if skip_if and img_search(img, skip_if, threshold=skip_if_threshold):
         gui_log(serial, f"ค้าง {secs:.0f}s แต่เจอ {os.path.basename(skip_if)} — ไม่กด fixout", step=step)
         return time.time()
     pts_fo = img_search(img, os.path.join(IMG_DIR, "fixout.bmp"), threshold=0.85)
@@ -7781,7 +7804,8 @@ def process_device_login(device):
 
                                                 # ค้างหา new-gacha1 ครบ 8 วิ → เจอ fixout ให้กดปิดเฉยๆ แล้วหาต่อตามปกติ
                                                 newg1_stuck_since = fixout_click_if_stuck(device, serial, img, newg1_stuck_since, step="NewG FixOut",
-                                                                                          skip_if=os.path.join(IMG_DIR, "ch", "checkpoint-gacha4.png"))
+                                                                                          skip_if=os.path.join(IMG_DIR, "ch", "checkpoint-gacha4.png"),
+                                                                                          skip_if_threshold=CP_GACHA4_THRESHOLD)
 
                                                 # 1. เช็ค fixswap.bmp ก่อน (หาแบบลอยๆ ตลอดเวลา)
                                                 pts_fixswap = img_search(img, os.path.join(IMG_DIR, "fixswap.bmp"))
@@ -7868,9 +7892,11 @@ def process_device_login(device):
                                                     continue
                                                 # ค้างหา new-gacha1 ครบ 8 วิ → เจอ fixout ให้กดปิดเฉยๆ แล้วหาต่อตามปกติ
                                                 newg_stuck_since = fixout_click_if_stuck(device, serial, img, newg_stuck_since, step="NewG FixOut",
-                                                                                skip_if=os.path.join(IMG_DIR, "ch", "checkpoint-gacha4.png"))
+                                                                                skip_if=os.path.join(IMG_DIR, "ch", "checkpoint-gacha4.png"),
+                                                                                skip_if_threshold=CP_GACHA4_THRESHOLD)
                                                 # *** เจอ checkpoint-gacha4 = อยู่หน้ากาชาแล้ว → ไป step ถัดไป (gacha4v2/gacha4) ทันที ***
-                                                pts_cp4 = img_search(img, os.path.join(IMG_DIR, "ch", "checkpoint-gacha4.png"))
+                                                pts_cp4 = img_search(img, os.path.join(IMG_DIR, "ch", "checkpoint-gacha4.png"),
+                                                                     threshold=CP_GACHA4_THRESHOLD)
                                                 pts = img_search(img, os.path.join(IMG_DIR, "ch", "new-gacha1.bmp"), threshold=0.95)
                                                 if pts_cp4:
                                                     if pts:
@@ -7888,7 +7914,8 @@ def process_device_login(device):
                                                     device.shell(f"input swipe {x_ng} {y_ng} {x_ng} {y_ng} 100")
                                                     cp_wait_n += 1
                                                     if cp_wait_n % 5 == 1:
-                                                        gui_log(serial, f"เจอ new-gacha1 → กด ({x_ng},{y_ng}) แต่ยังไม่เจอ checkpoint-gacha4 ({cp_wait_n}) — รอต่อ...", step="NewG Wait CP")
+                                                        _cp4_sc = img_match_score(img, os.path.join(IMG_DIR, "ch", "checkpoint-gacha4.png"))
+                                                        gui_log(serial, f"เจอ new-gacha1 → กด ({x_ng},{y_ng}) แต่ checkpoint-gacha4 ยังไม่ผ่าน (คะแนน {_cp4_sc:.2f} / เกณฑ์ {CP_GACHA4_THRESHOLD}) ({cp_wait_n}) — รอต่อ...", step="NewG Wait CP")
                                                     time.sleep(1.0)
                                                 else:
                                                     swipe_count += 1
@@ -8330,7 +8357,8 @@ def process_device_login(device):
                                                 check_device_reset(serial, cycle_start)
                                                 img_cp4 = get_screen_capture(device)
                                                 if img_cp4 is not None:
-                                                    pts_cp4 = img_search(img_cp4, os.path.join(IMG_DIR, "ch", "checkpoint-gacha4.png"))
+                                                    pts_cp4 = img_search(img_cp4, os.path.join(IMG_DIR, "ch", "checkpoint-gacha4.png"),
+                                                                         threshold=CP_GACHA4_THRESHOLD)
                                                     if pts_cp4:
                                                         verified = True
                                                         pts_fresh = img_search_any(img_cp4, ["gacha4.bmp", "gacha4v2.bmp"])
@@ -8353,7 +8381,10 @@ def process_device_login(device):
                                                     break
                                                 continue
                                             else:
-                                                gui_log(serial, "checkpoint-gacha4.png not found in 8s! Proceeding to Gacha5...", step="G4-Failed")
+                                                _cp4_score = img_match_score(img_cp4 if img_cp4 is not None else fast_screencap(device),
+                                                                            os.path.join(IMG_DIR, "ch", "checkpoint-gacha4.png"))
+                                                gui_log(serial, f"checkpoint-gacha4 ไม่ผ่านใน 8s (คะแนนสูงสุด {_cp4_score:.2f} / เกณฑ์ {CP_GACHA4_THRESHOLD}) — ข้ามไป Gacha5",
+                                                        step="G4-Failed")
                                                 # รอหา fixgachanew2.bmp สูงสุด 5 วิ เจอแล้วกดซ้ำจนหายก่อนไปต่อ
                                                 fg2_deadline = time.time() + 5
                                                 while time.time() < fg2_deadline:
@@ -8543,7 +8574,8 @@ def process_device_login(device):
                                             check_device_reset(serial, cycle_start)
                                             img_cp4 = get_screen_capture(device)
                                             if img_cp4 is not None:
-                                                pts_cp4 = img_search(img_cp4, os.path.join(IMG_DIR, "ch", "checkpoint-gacha4.png"))
+                                                pts_cp4 = img_search(img_cp4, os.path.join(IMG_DIR, "ch", "checkpoint-gacha4.png"),
+                                                                     threshold=CP_GACHA4_THRESHOLD)
                                                 if pts_cp4:
                                                     verified = True
                                                     pts_fresh = img_search_any(img_cp4, ["gacha4.bmp", "gacha4v2.bmp"])
@@ -8562,7 +8594,10 @@ def process_device_login(device):
                                             deadline_g4 = time.time() + 10
                                             continue
                                         else:
-                                            gui_log(serial, "checkpoint-gacha4.png not found in 8s! Proceeding to Gacha5...", step="G4-Failed")
+                                            _cp4_score = img_match_score(img_cp4 if img_cp4 is not None else fast_screencap(device),
+                                                                        os.path.join(IMG_DIR, "ch", "checkpoint-gacha4.png"))
+                                            gui_log(serial, f"checkpoint-gacha4 ไม่ผ่านใน 8s (คะแนนสูงสุด {_cp4_score:.2f} / เกณฑ์ {CP_GACHA4_THRESHOLD}) — ข้ามไป Gacha5",
+                                                    step="G4-Failed")
                                             # รอหา fixgachanew2.bmp สูงสุด 5 วิ เจอแล้วกดซ้ำจนหายก่อนไปต่อ
                                             fg2_deadline = time.time() + 5
                                             while time.time() < fg2_deadline:
@@ -8908,7 +8943,7 @@ def _disable_console_quickedit():
 def apply_config_now(reason=""):
     """โหลด config.py ใหม่แล้วอัปเดตตัวแปร runtime ทันที (ใช้ได้ทุกที่ ทุกเวลา)
     คืน True ถ้าสำเร็จ — ตัวนี้คือหัวใจของ 'แก้ config ปุ๊บ มีผลปั๊บ'"""
-    global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA, NEW_GACHA_SWIPE, GACHA_LOOP_LIMIT, GACHA500, COIN_GACHA_THRESHOLD, ONE_GACHA500, ONLY_GACHA500, HERO_LIST, HERO_LIST_FREE, EXTAR_FIND, EXTAR_FIND_THRESHOLD, FIND_IMG, FIND_IMG_DIR, FIND_IMG_THRESHOLD, PLAY8_STUCK_SECS, AUTO_RESTART_OFFLINE, OFFLINE_RESTART_AFTER, OFFLINE_BOOT_WAIT, OFFLINE_RESTART_COOLDOWN, SCREENCAP_MAX_CONCURRENT, SCREENCAP_INTERVAL, _MIN_SCREENCAP_INTERVAL, IMG_ROI_CACHE, IMG_ROI_PAD
+    global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA, NEW_GACHA_SWIPE, GACHA_LOOP_LIMIT, GACHA500, COIN_GACHA_THRESHOLD, ONE_GACHA500, ONLY_GACHA500, CP_GACHA4_THRESHOLD, HERO_LIST, HERO_LIST_FREE, EXTAR_FIND, EXTAR_FIND_THRESHOLD, FIND_IMG, FIND_IMG_DIR, FIND_IMG_THRESHOLD, PLAY8_STUCK_SECS, AUTO_RESTART_OFFLINE, OFFLINE_RESTART_AFTER, OFFLINE_BOOT_WAIT, OFFLINE_RESTART_COOLDOWN, SCREENCAP_MAX_CONCURRENT, SCREENCAP_INTERVAL, _MIN_SCREENCAP_INTERVAL, IMG_ROI_CACHE, IMG_ROI_PAD
     try:
         import importlib
         import config as cfg
@@ -8943,6 +8978,7 @@ def apply_config_now(reason=""):
         COIN_GACHA_THRESHOLD = getattr(cfg, 'COIN_GACHA_THRESHOLD', 700)
         ONE_GACHA500 = getattr(cfg, 'ONE_GACHA500', 0)
         ONLY_GACHA500 = getattr(cfg, 'ONLY_GACHA500', 0)
+        CP_GACHA4_THRESHOLD = getattr(cfg, 'CP_GACHA4_THRESHOLD', 0.95)
         # รายชื่อฮีโร่ก็อัปเดตสดด้วย (แก้ list ใน config แล้วมีผลทันที)
         HERO_LIST = getattr(cfg, 'HERO_LIST', HERO_LIST)
         HERO_LIST_FREE = getattr(cfg, 'HERO_LIST_FREE', HERO_LIST_FREE)
