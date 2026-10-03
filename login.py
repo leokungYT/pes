@@ -3834,6 +3834,15 @@ def img_search_any(gray_img, names, threshold=0.8):
     return []
 
 
+def img_search_any_named(gray_img, names, threshold=0.8):
+    """เหมือน img_search_any แต่คืน (ชื่อไฟล์ที่เจอ, จุด) — ไว้ส่ง path ต่อให้ click_img_until_gone"""
+    for n in names:
+        pts = img_search(gray_img, os.path.join(IMG_DIR, n), threshold)
+        if pts:
+            return n, pts
+    return None, []
+
+
 def click_cancel_until_gone(device, serial, x, y, gone_secs=3.0, step="Cancel", timeout=30.0):
     """
     คลิก cancel.bmp ที่ (x,y) แล้วเช็คซ้ำ: ถ้ายังเจอ cancel.bmp อยู่ ให้กดซ้ำเรื่อยๆ
@@ -8368,18 +8377,19 @@ def process_device_login(device):
                                                 time.sleep(0.2)
                                             
                                             if verified:
+                                                # กด gacha4 "ซ้ำๆ จนกว่ารูปจะหายไป" แล้วค่อยไป Gacha5
+                                                _g4n, _g4p = img_search_any_named(img_cp4 if img_cp4 is not None else img,
+                                                                                  ["gacha4.bmp", "gacha4v2.bmp"])
+                                                if _g4p:
+                                                    pts = _g4p
                                                 x, y = pts[0]
-                                                device.shell(f"input swipe {x} {y} {x} {y} 100")
                                                 g4_click_count += 1
-                                                gui_log(serial, f"Clicking gacha4.bmp... (count: {g4_click_count})", step="G4-Click")
-                                                time.sleep(0.8)
+                                                click_img_until_gone(device, cycle_start, serial,
+                                                                     os.path.join(IMG_DIR, _g4n or "gacha4.bmp"), x, y,
+                                                                     stuck_secs=2.0, timeout=40.0, settle=1.0,
+                                                                     tag="G4-Click")
                                                 found_g4 = True
-                                                # กด gacha4 ครบ 5 ครั้งแล้วยังไปต่อไม่ได้ (จอไม่เปลี่ยน)
-                                                # → เลิกกดวน ไปทำ step Gacha5/gacha500 ต่อเลย
-                                                if g4_click_count >= 5:
-                                                    gui_log(serial, "กด gacha4 ครบ 5 ครั้งแล้วไปต่อไม่ได้ — ข้ามไป Gacha5/gacha500 เลย", step="G4-Limit")
-                                                    break
-                                                continue
+                                                break
                                             else:
                                                 _cp4_score = img_match_score(img_cp4 if img_cp4 is not None else fast_screencap(device),
                                                                             os.path.join(IMG_DIR, "ch", "checkpoint-gacha4.png"))
@@ -8438,12 +8448,15 @@ def process_device_login(device):
                                             gui_log(serial, "loopgacha1.bmp detected during Gacha5 (Custom)! Proceeding.", step="G5-Skip")
                                             break
 
-                                        pts = img_search_any(img, ["gacha5.bmp", "gacha5v2.bmp"])
+                                        _g5n, pts = img_search_any_named(img, ["gacha5.bmp", "gacha5v2.bmp"])
                                         if pts:
+                                            # กด gacha5 "ซ้ำๆ จนกว่ารูปจะหายไป" — หน้า Payment Confirmation
+                                            # กดทีเดียวมักไม่ติด แล้วค้างคาหน้ายืนยันอยู่อย่างนั้น
                                             x, y = pts[0]
-                                            device.shell(f"input swipe {x} {y} {x} {y} 100")
-                                            gui_log(serial, "Clicking gacha5.bmp... (Custom)", step="G5-Click")
-                                            time.sleep(1.5)
+                                            click_img_until_gone(device, cycle_start, serial,
+                                                                 os.path.join(IMG_DIR, _g5n or "gacha5.bmp"), x, y,
+                                                                 stuck_secs=2.0, timeout=40.0, settle=1.5,
+                                                                 tag="G5-Click")
                                             break
 
                                         if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
@@ -8585,14 +8598,19 @@ def process_device_login(device):
                                             time.sleep(0.2)
                                         
                                         if verified:
+                                            # กด gacha4 "ซ้ำๆ จนกว่ารูปจะหายไป" แล้วค่อยไป Gacha5
+                                            _g4n, _g4p = img_search_any_named(img_cp4 if img_cp4 is not None else img,
+                                                                              ["gacha4.bmp", "gacha4v2.bmp"])
+                                            if _g4p:
+                                                pts = _g4p
                                             x, y = pts[0]
-                                            device.shell(f"input swipe {x} {y} {x} {y} 100")
                                             g4_click_count += 1
-                                            gui_log(serial, f"Clicking gacha4.bmp... (count: {g4_click_count})", step="G4-Click")
-                                            time.sleep(0.8)
+                                            click_img_until_gone(device, cycle_start, serial,
+                                                                 os.path.join(IMG_DIR, _g4n or "gacha4.bmp"), x, y,
+                                                                 stuck_secs=2.0, timeout=40.0, settle=1.0,
+                                                                 tag="G4-Click")
                                             found_g4 = True
-                                            deadline_g4 = time.time() + 10
-                                            continue
+                                            break
                                         else:
                                             _cp4_score = img_match_score(img_cp4 if img_cp4 is not None else fast_screencap(device),
                                                                         os.path.join(IMG_DIR, "ch", "checkpoint-gacha4.png"))
@@ -8679,12 +8697,14 @@ def process_device_login(device):
                                             found_g4 = True
                                             break
 
-                                        pts = img_search_any(img, ["gacha5.bmp", "gacha5v2.bmp"])
+                                        _g5n, pts = img_search_any_named(img, ["gacha5.bmp", "gacha5v2.bmp"])
                                         if pts:
+                                            # กด gacha5 "ซ้ำๆ จนกว่ารูปจะหายไป" (หน้า Payment Confirmation)
                                             x, y = pts[0]
-                                            device.shell(f"input swipe {x} {y} {x} {y} 100")
-                                            gui_log(serial, "Clicking gacha5.bmp...", step="G5-Click")
-                                            time.sleep(1.5)
+                                            click_img_until_gone(device, cycle_start, serial,
+                                                                 os.path.join(IMG_DIR, _g5n or "gacha5.bmp"), x, y,
+                                                                 stuck_secs=2.0, timeout=40.0, settle=1.5,
+                                                                 tag="G5-Click")
                                             found_g4 = True # ติ๊กให้ทำ checkpointgacha ต่อ
                                             break
 
