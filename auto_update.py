@@ -351,41 +351,137 @@ def update(silent=False, force=False, no_relaunch=False):
 
     try:
         zip_bytes = download_update_zip(zip_url)
-        if True:
-            with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zip_ref:
-                # ไฟล์ zip จาก GitHub จะมีโฟลเดอร์หลักครอบอยู่ 1 ชั้นเสมอ
-                root_folder = zip_ref.namelist()[0]
-                
-                for member in zip_ref.namelist():
-                    if member == root_folder:
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zip_ref:
+            # ไฟล์ zip จาก GitHub จะมีโฟลเดอร์หลักครอบอยู่ 1 ชั้นเสมอ
+            root_folder = zip_ref.namelist()[0]
+            zip_files = {}        # path ในรีโป (ตัดโฟลเดอร์ครอบออก) -> ชื่อ member ใน zip
+            zip_dirs = set()      # โฟลเดอร์ที่รีโปเป็นเจ้าของ (ใช้ตอนลบไฟล์ที่ถูกถอดออกไปแล้ว)
+
+            for member in zip_ref.namelist():
+                if member == root_folder or not member.startswith(root_folder):
+                    continue
+                rel = member[len(root_folder):].replace("\\", "/")
+                if not rel:
+                    continue
+                if rel.endswith("/"):
+                    zip_dirs.add(rel.rstrip("/"))
+                    continue
+                zip_files[rel] = member
+                d = os.path.dirname(rel)
+                while d:
+                    zip_dirs.add(d)
+                    d = os.path.dirname(d)
+
+            written, same, failed = [], 0, []
+
+            def _put(rel, member):
+                """เขียนไฟล์เดียวจาก zip ลงที่เดิม — คืน 'new' / 'same' หรือ raise"""
+                full = os.path.join(os.getcwd(), rel.replace("/", os.sep))
+                with zip_ref.open(member) as src:
+                    data = src.read()
+                if os.path.isfile(full):
+                    try:
+                        with open(full, "rb") as f:
+                            if f.read() == data:
+                                return "same"   # เหมือนเดิม ไม่ต้องเขียนทับ (เร็วกว่า + ไม่ไปชนไฟล์ที่ถูกล็อก)
+                    except Exception:
+                        pass
+                os.makedirs(os.path.dirname(full) or ".", exist_ok=True)
+                with open(full, "wb") as f:
+                    f.write(data)
+                return "new"
+
+            for rel, member in zip_files.items():
+                # version.txt จัดการตอนท้ายเอง — ถ้ามีไฟล์อัปเดตไม่สำเร็จจะต้องคงเลขเก่าไว้
+                # ให้รอบหน้าลองใหม่ ถ้าปล่อยให้ zip เขียนทับตรงนี้ เลขจะกลายเป็นใหม่ทั้งที่ยังไม่ครบ
+                if rel == "version.txt":
+                    continue
+                # ข้ามการเขียนทับไฟล์ config.py เพื่อป้องกันการตั้งค่าของคุณหาย
+                if rel.endswith("config.py") and os.path.exists(rel.replace("/", os.sep)):
+                    if not OVERWRITE_CONFIG_ON_UPDATE:
+                        print(f"[Updater] Skipping {rel} to preserve your settings.")
                         continue
-                    
-                    # ตัดชื่อโฟลเดอร์หลักออก เพื่อให้แตกไฟล์ลงที่โฟลเดอร์ปัจจุบันได้พอดี
-                    target_path = member[len(root_folder):]
-                    if not target_path:
-                        continue
-                        
-                    # ข้ามการเขียนทับไฟล์ config.py เพื่อป้องกันการตั้งค่าของคุณหาย
-                    if target_path.endswith("config.py") and os.path.exists(target_path):
-                        if not OVERWRITE_CONFIG_ON_UPDATE:
-                            print(f"[Updater] Skipping {target_path} to preserve your settings.")
-                            continue
-                        else:
-                            print(f"[Updater] Overwriting {target_path} to synchronize with mother machine.")
-                        
-                    target_full_path = os.path.join(os.getcwd(), target_path)
-                    
-                    if member.endswith('/'):
-                        os.makedirs(target_full_path, exist_ok=True)
+                    print(f"[Updater] Overwriting {rel} to synchronize with mother machine.")
+                # *** ของเดิมไม่มี try ตรงนี้ — ไฟล์เดียวที่ถูกล็อก (dll ของ adb / รูปที่โปรแกรมอื่นเปิดค้าง)
+                #     ทำให้ loop พังกลางทาง ไฟล์ที่เหลือ "ทั้งหมด" ไม่ได้อัปเดต แล้วเงียบ ไม่มี error โชว์
+                #     = อาการ "กด force-update แล้วโค้ด/รูปไม่อัปเดต" ***
+                try:
+                    if _put(rel, member) == "same":
+                        same += 1
                     else:
-                        os.makedirs(os.path.dirname(target_full_path), exist_ok=True)
-                        with zip_ref.open(member) as source, open(target_full_path, "wb") as target:
-                            shutil.copyfileobj(source, target)
-                            
-        with open(VERSION_FILE, "w") as f:
-            f.write(latest_version)
-            
-        print(f"[Updater] Successfully updated to {latest_version}!")
+                        written.append(rel)
+                except Exception as e:
+                    failed.append((rel, str(e)))
+
+            # ไฟล์ที่ติดล็อกตอนแรกมักหลุดล็อกหลังโปรเซสตายสนิท — ลองซ้ำอีก 2 รอบ
+            for attempt in (1, 2):
+                if not failed:
+                    break
+                import time as _t
+                _t.sleep(3)
+                retry, failed = failed, []
+                print(f"[Updater] ลองเขียนไฟล์ที่ติดล็อกอีกครั้ง (รอบ {attempt}) - {len(retry)} ไฟล์")
+                for rel, _err in retry:
+                    try:
+                        if _put(rel, zip_files[rel]) == "same":
+                            same += 1
+                        else:
+                            written.append(rel)
+                    except Exception as e:
+                        failed.append((rel, str(e)))
+
+            # ── ลบไฟล์ที่ "ถูกถอดออกจากรีโปแล้ว" ─────────────────────────────
+            # ของเดิมแค่เขียนทับ/เพิ่ม ไม่เคยลบ → พอเอารูปออกจาก img/find-img
+            # เครื่องลูกยังเก็บรูปเก่าไว้ตลอด บอทเลยยังเจอรูปที่ถอดออกไปแล้ว
+            # ลบแค่ในโฟลเดอร์ที่รีโปเป็นเจ้าของ (img/, zip/) โดยเทียบกับรายชื่อใน zip
+            # โฟลเดอร์ข้อมูล (input-id, backup, found-hero, logs ...) ไม่ได้อยู่ใน zip จึงไม่ถูกแตะ
+            PRUNE_SKIP = {"adb", "__pycache__", ".git"}
+            removed = []
+            prune_roots = sorted({d.split("/")[0] for d in zip_dirs if d} - PRUNE_SKIP)
+            for top in prune_roots:
+                if not os.path.isdir(top):
+                    continue
+                for cur, dirs, files in os.walk(top):
+                    dirs[:] = [x for x in dirs if x not in PRUNE_SKIP]
+                    for fn in files:
+                        full = os.path.join(cur, fn)
+                        rel = os.path.relpath(full, os.getcwd()).replace(os.sep, "/")
+                        if rel in zip_files:
+                            continue
+                        try:
+                            os.remove(full)
+                            removed.append(rel)
+                        except Exception as e:
+                            failed.append((rel, f"ลบไม่ได้: {e}"))
+
+        # ── สรุปผล: เขียนลงไฟล์ด้วย เพราะหน้าต่าง force-update ปิดเร็วเกินจะอ่านทัน ──
+        summary = [
+            f"[{latest_version}] mode={mode}",
+            f"  update/add  : {len(written)} ไฟล์",
+            f"  same        : {same} ไฟล์",
+            f"  deleted     : {len(removed)} ไฟล์ (ถูกถอดออกจากรีโป)",
+            f"  failed      : {len(failed)} ไฟล์",
+        ]
+        for rel in removed[:20]:
+            summary.append(f"    - del {rel}")
+        for rel, err in failed[:20]:
+            summary.append(f"    ! {rel}: {err[:90]}")
+        for line in summary:
+            print("[Updater] " + line)
+        try:
+            with open("last-update.log", "w", encoding="utf-8") as f:
+                f.write("\n".join(summary) + "\n")
+        except Exception:
+            pass
+
+        if failed:
+            # ยังมีไฟล์ที่เขียนไม่ได้ → ไม่บันทึกเลขเวอร์ชัน เพื่อให้รอบหน้าลองอัปเดตซ้ำอีก
+            print(f"[Updater] ! ยังมี {len(failed)} ไฟล์ที่อัปเดตไม่ได้ - ไม่บันทึกเวอร์ชัน รอบหน้าจะลองใหม่")
+            print(f"[Updater] Updated to {latest_version} PARTIALLY ({len(failed)} file(s) failed) - see last-update.log")
+        else:
+            with open(VERSION_FILE, "w") as f:
+                f.write(latest_version)
+            print(f"[Updater] Successfully updated to {latest_version}!")
 
         # จัดการโฟลเดอร์ข้อมูลตามโหมดที่ผู้ใช้เลือก
         if mode == "clean":
