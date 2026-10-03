@@ -355,7 +355,6 @@ def update(silent=False, force=False, no_relaunch=False):
             # ไฟล์ zip จาก GitHub จะมีโฟลเดอร์หลักครอบอยู่ 1 ชั้นเสมอ
             root_folder = zip_ref.namelist()[0]
             zip_files = {}        # path ในรีโป (ตัดโฟลเดอร์ครอบออก) -> ชื่อ member ใน zip
-            zip_dirs = set()      # โฟลเดอร์ที่รีโปเป็นเจ้าของ (ใช้ตอนลบไฟล์ที่ถูกถอดออกไปแล้ว)
 
             for member in zip_ref.namelist():
                 if member == root_folder or not member.startswith(root_folder):
@@ -364,13 +363,28 @@ def update(silent=False, force=False, no_relaunch=False):
                 if not rel:
                     continue
                 if rel.endswith("/"):
-                    zip_dirs.add(rel.rstrip("/"))
                     continue
                 zip_files[rel] = member
-                d = os.path.dirname(rel)
-                while d:
-                    zip_dirs.add(d)
-                    d = os.path.dirname(d)
+
+            # ── ล้างโฟลเดอร์ที่รีโปเป็นเจ้าของทั้งก้อน แล้วค่อยวางของใหม่จาก zip ──
+            # img/ เป็นรูปของบอทล้วนๆ ไม่มีข้อมูลผู้ใช้ → ลบทิ้งทั้งโฟลเดอร์ง่ายกว่า
+            # และชัวร์กว่าการไล่เทียบทีละไฟล์ (รูปที่ถอดออกจากรีโปแล้วไม่มีทางค้าง)
+            # ลบหลังโหลด zip สำเร็จเท่านั้น (zip อยู่ในหน่วยความจำแล้ว) โหลดไม่ได้ = ไม่ลบอะไร
+            WIPE_DIRS = ("img",)
+            wiped = []
+            for d in WIPE_DIRS:
+                # กันพลาด: ถ้า zip ไม่มีไฟล์ในโฟลเดอร์นี้เลย (zip เพี้ยน) ห้ามลบ
+                if not any(r == d or r.startswith(d + "/") for r in zip_files):
+                    print(f"[Updater] ข้าม {d}/ - ไม่มีไฟล์ของโฟลเดอร์นี้ใน zip (กันลบแล้วไม่มีของมาแทน)")
+                    continue
+                if os.path.isdir(d):
+                    before = sum(len(f) for _c, _dd, f in os.walk(d))
+                    shutil.rmtree(d, ignore_errors=True)
+                    left = sum(len(f) for _c, _dd, f in os.walk(d)) if os.path.isdir(d) else 0
+                    wiped.append((d, before, left))
+                    print(f"[Updater] ล้างโฟลเดอร์ {d}/ ทิ้ง ({before} ไฟล์"
+                          + (f", ลบไม่ได้ {left} ไฟล์" if left else "") + ")")
+                os.makedirs(d, exist_ok=True)
 
             written, same, failed = [], 0, []
 
@@ -430,40 +444,16 @@ def update(silent=False, force=False, no_relaunch=False):
                     except Exception as e:
                         failed.append((rel, str(e)))
 
-            # ── ลบไฟล์ที่ "ถูกถอดออกจากรีโปแล้ว" ─────────────────────────────
-            # ของเดิมแค่เขียนทับ/เพิ่ม ไม่เคยลบ → พอเอารูปออกจาก img/find-img
-            # เครื่องลูกยังเก็บรูปเก่าไว้ตลอด บอทเลยยังเจอรูปที่ถอดออกไปแล้ว
-            # ลบแค่ในโฟลเดอร์ที่รีโปเป็นเจ้าของ (img/, zip/) โดยเทียบกับรายชื่อใน zip
-            # โฟลเดอร์ข้อมูล (input-id, backup, found-hero, logs ...) ไม่ได้อยู่ใน zip จึงไม่ถูกแตะ
-            PRUNE_SKIP = {"adb", "__pycache__", ".git"}
-            removed = []
-            prune_roots = sorted({d.split("/")[0] for d in zip_dirs if d} - PRUNE_SKIP)
-            for top in prune_roots:
-                if not os.path.isdir(top):
-                    continue
-                for cur, dirs, files in os.walk(top):
-                    dirs[:] = [x for x in dirs if x not in PRUNE_SKIP]
-                    for fn in files:
-                        full = os.path.join(cur, fn)
-                        rel = os.path.relpath(full, os.getcwd()).replace(os.sep, "/")
-                        if rel in zip_files:
-                            continue
-                        try:
-                            os.remove(full)
-                            removed.append(rel)
-                        except Exception as e:
-                            failed.append((rel, f"ลบไม่ได้: {e}"))
-
         # ── สรุปผล: เขียนลงไฟล์ด้วย เพราะหน้าต่าง force-update ปิดเร็วเกินจะอ่านทัน ──
         summary = [
             f"[{latest_version}] mode={mode}",
             f"  update/add  : {len(written)} ไฟล์",
             f"  same        : {same} ไฟล์",
-            f"  deleted     : {len(removed)} ไฟล์ (ถูกถอดออกจากรีโป)",
             f"  failed      : {len(failed)} ไฟล์",
         ]
-        for rel in removed[:20]:
-            summary.append(f"    - del {rel}")
+        for d, before, left in wiped:
+            summary.append(f"    wiped {d}/ : ลบเก่า {before} ไฟล์"
+                           + (f" (ลบไม่ได้ {left})" if left else "") + " แล้ววางใหม่จาก zip")
         for rel, err in failed[:20]:
             summary.append(f"    ! {rel}: {err[:90]}")
         for line in summary:
