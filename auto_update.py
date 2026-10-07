@@ -87,6 +87,13 @@ def get_local_version():
             return f.read().strip()
     return None
 
+def _login_is_pes():
+    try:
+        with open("login.py", "r", encoding="utf-8", errors="replace") as f:
+            return "jp.konami.pesam" in f.read()
+    except Exception:
+        return False
+
 def get_update_mode():
     """โหมดอัปเดตจาก config: 'keep' = เก็บข้อมูลเดิม (ดีฟอลต์) / 'clean' = ล้างทั้งหมด"""
     try:
@@ -311,6 +318,12 @@ def update(silent=False, force=False, no_relaunch=False):
         sys.exit(0)
 
     local_version = get_local_version()
+
+    # login.py ต้องเป็นของ PES — เคยโดนไฟล์บอท LINE Rangers (repo main) ทับ แล้วเลขเวอร์ชันยังตรง
+    # updater เลยไม่โหลดใหม่ บอทเปิด LINE Rangers แทน PES → เช็คเนื้อไฟล์ ไม่ตรงให้บังคับโหลดทับ
+    if not force and not _login_is_pes():
+        print("[Updater] login.py ไม่ใช่ของ PES (โดนไฟล์บอทอื่นทับ) → บังคับโหลดใหม่")
+        force = True
 
     if local_version == latest_version:
         if force:
