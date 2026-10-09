@@ -118,6 +118,15 @@ try:
     from config import PLAY8_STUCK_SECS
 except ImportError:
     PLAY8_STUCK_SECS = 90
+# ── VPN (WireGuard): เปิดให้ก่อนเปิดเกมทุกครั้ง ──
+try:
+    from config import VPN_ENABLE
+except ImportError:
+    VPN_ENABLE = 0
+try:
+    from config import VPN_TUNNEL
+except ImportError:
+    VPN_TUNNEL = "lgr"
 # ── Auto restart เครื่องที่ adb หลุด (offline ค้าง) ──
 try:
     from config import AUTO_RESTART_OFFLINE
@@ -1626,6 +1635,8 @@ if GUI_ENABLED:
                     ("chk", "Skip Animation",            "SKIPANIMATION"),
                     ("chk", "Event Image (play22→31)",   "EVENT_IMG"),
                     ("chk", "Auto Run on Launch",        "AUTORUN"),
+                    ("chk", "VPN (WireGuard) เปิดก่อนเข้าเกม", "VPN_ENABLE"),
+                    ("ents", "└ ชื่อ tunnel",              "VPN_TUNNEL"),
                     ("chk", "Timeout Mode (กันค้าง)",     "TIMEOUT_ENABLE"),
                     ("ent", "Timeout (นาที)",            "TIMEOUT_MINUTES"),
                 ],
@@ -2655,10 +2666,85 @@ _MIN_GLOBAL_LAUNCH_GAP = 6.0            # วินาที — ระยะข
 _LAUNCH_GATE_LOCK = threading.Lock()
 _GLOBAL_LAST_LAUNCH_TS = [0.0]
 
+WG_PKG = "com.wireguard.android"
+
+def _vpn_is_up(device):
+    """VPN ขึ้นอยู่ไหม — ดูจาก network interface: ชื่อ tunnel (kernel/root backend)
+    หรือ tun* (userspace backend)"""
+    try:
+        out = device.shell("ls /sys/class/net") or ""
+    except Exception:
+        return False
+    names = out.split()
+    return VPN_TUNNEL in names or any(n.startswith("tun") for n in names)
+
+def _vpn_tap_switch_via_ui(device, serial):
+    """เปิดแอพ WireGuard แล้วกดสวิตช์ของ tunnel ผ่าน uiautomator
+    (+ กด OK ให้ถ้าเด้งหน้าขออนุญาต VPN ของ Android)"""
+    import re as _re
+    device.shell(f"monkey -p {WG_PKG} -c android.intent.category.LAUNCHER 1")
+    time.sleep(2.5)
+    for _ in range(3):
+        xml = device.shell("uiautomator dump /sdcard/wg_ui.xml >/dev/null 2>&1; cat /sdcard/wg_ui.xml") or ""
+        # หน้าขออนุญาต VPN ของ Android (Connection request) → กด OK
+        m_ok = _re.search(r'resource-id="android:id/button1"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', xml)
+        if m_ok:
+            x1, y1, x2, y2 = map(int, m_ok.groups())
+            device.shell(f"input tap {(x1 + x2) // 2} {(y1 + y2) // 2}")
+            gui_log(serial, "VPN: กด OK หน้าขออนุญาต VPN", step="VPN")
+            time.sleep(2)
+            continue
+        # สวิตช์ที่ยังปิดอยู่ (checked="false") → กด
+        for node in _re.findall(r'<node [^>]*>', xml):
+            if "Switch" in node and 'checked="false"' in node:
+                m = _re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', node)
+                if m:
+                    x1, y1, x2, y2 = map(int, m.groups())
+                    device.shell(f"input tap {(x1 + x2) // 2} {(y1 + y2) // 2}")
+                    gui_log(serial, f"VPN: กดสวิตช์ {VPN_TUNNEL} ในแอพ WireGuard", step="VPN")
+                    time.sleep(2.5)
+                    break
+        else:
+            break
+        if _vpn_is_up(device):
+            break
+
+def ensure_vpn(device):
+    """เช็คว่า VPN (WireGuard) เปิดอยู่ — ปิดอยู่ก็เปิดให้ก่อน (เรียกก่อนเปิดเกมทุกครั้ง)
+    1) ลองสั่งผ่าน intent ของ WireGuard ก่อน (ต้องเปิด 'Allow remote control apps' ในแอพ)
+    2) ไม่ขึ้น → เปิดแอพแล้วกดสวิตช์ให้ผ่าน uiautomator
+    เปิดไม่ได้จริงๆ ก็แค่ log เตือน ไม่บล็อกรอบ"""
+    if not VPN_ENABLE:
+        return True
+    serial = device.serial
+    if _vpn_is_up(device):
+        return True
+    gui_log(serial, f"VPN ปิดอยู่ — กำลังเปิด tunnel '{VPN_TUNNEL}'...", step="VPN", status="working")
+    try:
+        device.shell(f"am broadcast -a com.wireguard.android.action.SET_TUNNEL_UP "
+                     f"-n {WG_PKG}/.model.TunnelManager\\$IntentReceiver -e tunnel {VPN_TUNNEL}")
+        for _ in range(8):
+            time.sleep(1)
+            if _vpn_is_up(device):
+                gui_log(serial, "VPN เปิดแล้ว ✅", step="VPN OK")
+                return True
+        _vpn_tap_switch_via_ui(device, serial)
+        for _ in range(8):
+            if _vpn_is_up(device):
+                gui_log(serial, "VPN เปิดแล้ว ✅", step="VPN OK")
+                return True
+            time.sleep(1)
+    except Exception as e:
+        gui_log(serial, f"VPN error: {e}", step="VPN Error")
+    gui_log(serial, f"⚠️ เปิด VPN '{VPN_TUNNEL}' ไม่สำเร็จ — เปิดเกมต่อไปก่อน", step="VPN Fail", status="stuck")
+    return False
+
+
 def launch_game(device, settle=14.0):
     """Cold-start เกมแบบมี cooldown ต่อเครื่อง + global gate ทั้งระบบ —
     กัน relaunch ซ้อนถี่/หลายเครื่องบูตพร้อมกันจน MuMu ค้าง (ANR)."""
     serial = device.serial
+    ensure_vpn(device)   # เปิด VPN ให้ก่อนเสมอ (VPN_ENABLE=1)
     elapsed = time.time() - _LAST_LAUNCH_TS.get(serial, 0.0)
     if elapsed < _MIN_LAUNCH_INTERVAL:
         wait = _MIN_LAUNCH_INTERVAL - elapsed
@@ -8963,7 +9049,7 @@ def _disable_console_quickedit():
 def apply_config_now(reason=""):
     """โหลด config.py ใหม่แล้วอัปเดตตัวแปร runtime ทันที (ใช้ได้ทุกที่ ทุกเวลา)
     คืน True ถ้าสำเร็จ — ตัวนี้คือหัวใจของ 'แก้ config ปุ๊บ มีผลปั๊บ'"""
-    global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA, NEW_GACHA_SWIPE, GACHA_LOOP_LIMIT, GACHA500, COIN_GACHA_THRESHOLD, ONE_GACHA500, ONLY_GACHA500, CP_GACHA4_THRESHOLD, HERO_LIST, HERO_LIST_FREE, EXTAR_FIND, EXTAR_FIND_THRESHOLD, FIND_IMG, FIND_IMG_DIR, FIND_IMG_THRESHOLD, PLAY8_STUCK_SECS, AUTO_RESTART_OFFLINE, OFFLINE_RESTART_AFTER, OFFLINE_BOOT_WAIT, OFFLINE_RESTART_COOLDOWN, SCREENCAP_MAX_CONCURRENT, SCREENCAP_INTERVAL, _MIN_SCREENCAP_INTERVAL, IMG_ROI_CACHE, IMG_ROI_PAD
+    global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA, NEW_GACHA_SWIPE, GACHA_LOOP_LIMIT, GACHA500, COIN_GACHA_THRESHOLD, ONE_GACHA500, ONLY_GACHA500, CP_GACHA4_THRESHOLD, HERO_LIST, HERO_LIST_FREE, EXTAR_FIND, EXTAR_FIND_THRESHOLD, FIND_IMG, FIND_IMG_DIR, FIND_IMG_THRESHOLD, PLAY8_STUCK_SECS, VPN_ENABLE, VPN_TUNNEL, AUTO_RESTART_OFFLINE, OFFLINE_RESTART_AFTER, OFFLINE_BOOT_WAIT, OFFLINE_RESTART_COOLDOWN, SCREENCAP_MAX_CONCURRENT, SCREENCAP_INTERVAL, _MIN_SCREENCAP_INTERVAL, IMG_ROI_CACHE, IMG_ROI_PAD
     try:
         import importlib
         import config as cfg
@@ -9010,6 +9096,8 @@ def apply_config_now(reason=""):
         FIND_IMG_DIR = getattr(cfg, 'FIND_IMG_DIR', 'find-img')
         FIND_IMG_THRESHOLD = getattr(cfg, 'FIND_IMG_THRESHOLD', 0.85)
         PLAY8_STUCK_SECS = getattr(cfg, 'PLAY8_STUCK_SECS', 90)
+        VPN_ENABLE = getattr(cfg, 'VPN_ENABLE', 0)
+        VPN_TUNNEL = getattr(cfg, 'VPN_TUNNEL', 'lgr')
         # Auto restart เครื่องที่ adb หลุด
         AUTO_RESTART_OFFLINE = getattr(cfg, 'AUTO_RESTART_OFFLINE', 1)
         OFFLINE_RESTART_AFTER = getattr(cfg, 'OFFLINE_RESTART_AFTER', 90)
