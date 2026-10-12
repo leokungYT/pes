@@ -5370,12 +5370,14 @@ def _read_coin_from_img(img, serial):
 
 def click_img_until_gone(device, cycle_start, serial, img_path, x, y,
                          stuck_secs=3.0, timeout=60.0, tag="Click", threshold=0.8,
-                         label=None, settle=1.5, gone_secs=0.0):
+                         label=None, settle=1.5, gone_secs=0.0, stop_imgs=None):
     """กดรูปที่ (x,y) แล้วเฝ้าดู — ถ้ารูปยัง "ค้าง" อยู่เกิน `stuck_secs` วิ ให้กดซ้ำ
     วนจนกว่ารูปจะหายไป (หรือครบ timeout กันค้าง). คืน True ถ้าหายแล้ว
     timeout=None → ไม่ยอมแพ้ กดซ้ำจนกว่ารูปจะหายไปจริงๆ
     gone_secs → ต้องหาไม่เจอ "ติดต่อกันครบ gone_secs วิ" ถึงจะถือว่าหายจริง
-                (กัน false-negative จาก animation/กระพริบเฟรมเดียว) — 0 = หายเฟรมเดียวก็ไปต่อ"""
+                (กัน false-negative จาก animation/กระพริบเฟรมเดียว) — 0 = หายเฟรมเดียวก็ไปต่อ
+    stop_imgs → รายชื่อรูปใน img/ ที่ถ้าเจอ = "จุดหยุด" (เช่น popup เหรียญไม่พอ)
+                เลิกกดทันที คืนค่า "stop" (ไม่งั้นจะกดรูปที่ยังค้างอยู่หลัง popup ไปจน timeout)"""
     name = label or os.path.basename(img_path)
     device.shell(f"input swipe {x} {y} {x} {y} 100")
     gui_log(serial, f"กด {name} ({x},{y})", step=tag)
@@ -5387,6 +5389,11 @@ def click_img_until_gone(device, cycle_start, serial, img_path, x, y,
         check_device_reset(serial, cycle_start)
         img_c = get_screen_capture(device)
         if img_c is not None:
+            if stop_imgs:
+                _stop = next((n for n in stop_imgs if img_search(img_c, os.path.join(IMG_DIR, n))), None)
+                if _stop:
+                    gui_log(serial, f"เจอ {_stop} — หยุดกด {name} ทันที", step=f"{tag} Stop")
+                    return "stop"
             pts_c = img_search(img_c, img_path, threshold=threshold)
             if not pts_c:
                 # ไม่เจอรูป — ยืนยันว่าหายจริงเมื่อหาไม่เจอครบ gone_secs วิ
@@ -8470,11 +8477,12 @@ def process_device_login(device):
                                                     pts = _g4p
                                                 x, y = pts[0]
                                                 g4_click_count += 1
-                                                click_img_until_gone(device, cycle_start, serial,
+                                                _r4 = click_img_until_gone(device, cycle_start, serial,
                                                                      os.path.join(IMG_DIR, _g4n or "gacha4.bmp"), x, y,
                                                                      stuck_secs=2.0, timeout=40.0, settle=1.0,
-                                                                     tag="G4-Click")
-                                                found_g4 = True
+                                                                     tag="G4-Click", stop_imgs=["nocions.bmp", "not-coin.bmp"])
+                                                # เจอ popup เหรียญไม่พอ (Unable to Sign) = จุดหยุด → ออกจากลูปสุ่มเลย
+                                                found_g4 = "nocoin" if _r4 == "stop" else True
                                                 break
                                             else:
                                                 _cp4_score = img_match_score(img_cp4 if img_cp4 is not None else fast_screencap(device),
@@ -8539,10 +8547,12 @@ def process_device_login(device):
                                             # กด gacha5 "ซ้ำๆ จนกว่ารูปจะหายไป" — หน้า Payment Confirmation
                                             # กดทีเดียวมักไม่ติด แล้วค้างคาหน้ายืนยันอยู่อย่างนั้น
                                             x, y = pts[0]
-                                            click_img_until_gone(device, cycle_start, serial,
+                                            _r5 = click_img_until_gone(device, cycle_start, serial,
                                                                  os.path.join(IMG_DIR, _g5n or "gacha5.bmp"), x, y,
                                                                  stuck_secs=2.0, timeout=40.0, settle=1.5,
-                                                                 tag="G5-Click")
+                                                                 tag="G5-Click", stop_imgs=["nocions.bmp", "not-coin.bmp"])
+                                            if _r5 == "stop":
+                                                found_g4 = "nocoin"
                                             break
 
                                         if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
@@ -8691,11 +8701,12 @@ def process_device_login(device):
                                                 pts = _g4p
                                             x, y = pts[0]
                                             g4_click_count += 1
-                                            click_img_until_gone(device, cycle_start, serial,
+                                            _r4 = click_img_until_gone(device, cycle_start, serial,
                                                                  os.path.join(IMG_DIR, _g4n or "gacha4.bmp"), x, y,
                                                                  stuck_secs=2.0, timeout=40.0, settle=1.0,
-                                                                 tag="G4-Click")
-                                            found_g4 = True
+                                                                 tag="G4-Click", stop_imgs=["nocions.bmp", "not-coin.bmp"])
+                                            # เจอ popup เหรียญไม่พอ (Unable to Sign) = จุดหยุด → ออกจากลูปสุ่มเลย
+                                            found_g4 = "nocoin" if _r4 == "stop" else True
                                             break
                                         else:
                                             _cp4_score = img_match_score(img_cp4 if img_cp4 is not None else fast_screencap(device),
@@ -8787,11 +8798,12 @@ def process_device_login(device):
                                         if pts:
                                             # กด gacha5 "ซ้ำๆ จนกว่ารูปจะหายไป" (หน้า Payment Confirmation)
                                             x, y = pts[0]
-                                            click_img_until_gone(device, cycle_start, serial,
+                                            _r5 = click_img_until_gone(device, cycle_start, serial,
                                                                  os.path.join(IMG_DIR, _g5n or "gacha5.bmp"), x, y,
                                                                  stuck_secs=2.0, timeout=40.0, settle=1.5,
-                                                                 tag="G5-Click")
-                                            found_g4 = True # ติ๊กให้ทำ checkpointgacha ต่อ
+                                                                 tag="G5-Click", stop_imgs=["nocions.bmp", "not-coin.bmp"])
+                                            # เหรียญไม่พอ → False = ข้าม checkpointgacha/OCR (เหมือนเคส nocions เดิม)
+                                            found_g4 = False if _r5 == "stop" else True # True = ทำ checkpointgacha ต่อ
                                             break
 
                                         if img_search(img, os.path.join(IMG_DIR, "nocions.bmp")):
