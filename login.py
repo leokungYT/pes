@@ -5766,11 +5766,11 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path, coin_
             break
         gui_log(serial, f"=== Gacha Free Loop {loop_num}/{GACHA_FREE_LOOPS} ===", step=f"Loop {loop_num}")
 
-        # 2a. เลื่อนหา gachafree1.bmp (เช็คก่อน → ไม่เจอ → เลื่อน, ครบ 10 รอบ = ข้าม loop นี้)
+        # 2a. เลื่อนหา gachafree1.bmp (เช็คก่อน → ไม่เจอ → เลื่อน, ครบ max_miss รอบ = break ไป step ต่อไป)
         gui_log(serial, f"[Loop {loop_num}] Looking for gachafree1.bmp...", step="Swipe Free")
         found_free = False
         miss_count = 0
-        max_miss = 10
+        max_miss = GACHA_FREE_LOOPS if GACHA_FREE_LOOPS > 0 else 5
         next_first_seen = None  # ติดตาม next.bmp ค้าง
         endswip_first_seen = None  # ติดตาม endswip.bmp ค้าง
         nocoin_free_handled = False  # กด Back ปิด no-coingachafree1 ไปแล้วหรือยัง (กดรอบเดียว)
@@ -5874,14 +5874,12 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path, coin_
                     break
             miss_count += 1
             gui_log(serial, f"[Loop {loop_num}] gachafree1 not here, swiping... ({miss_count}/{max_miss})", step="Swipe")
-            device.shell("input swipe 618 308 54 306 6000")
+            device.shell("input swipe 618 308 54 306 1200")
             time.sleep(2.0)
 
         if not found_free:
-            if end_swip_detected or end_gachafree_detected:
-                break
-            gui_log(serial, f"[Loop {loop_num}] gachafree1 not found after {max_miss} swipes, skipping loop", step="Skip")
-            continue  # ข้ามไป loop ถัดไป (หรือจบถ้า loop 2)
+            gui_log(serial, f"[Loop {loop_num}] เลื่อนครบ {max_miss} รอบแล้วไม่เจอ gachafree1 → break ไป step ถัดไป", step="Free Done")
+            break
 
         # 2b. รอ gachafree2.bmp → กดจนกว่าจะหายไป (timeout 15s → file-error)
         #     แวะหา no-coingachafree1 ด้วย — เจอ = กด Back 1 ครั้ง แล้วกลับไปเลื่อนหาใหม่ (ไม่ใช่ file-error)

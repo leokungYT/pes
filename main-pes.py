@@ -1197,7 +1197,7 @@ def gacha_free_mode_mainpes(device, cycle_start, serial):
         gui_log(serial, f"[Loop {loop_num}] Looking for gachafree1.bmp...", step="Swipe Free")
         found_free = False
         miss_count = 0
-        max_miss = 10
+        max_miss = GACHA_FREE_LOOPS if GACHA_FREE_LOOPS > 0 else 5
         next_first_seen = None
 
         while miss_count < max_miss:
@@ -1258,13 +1258,13 @@ def gacha_free_mode_mainpes(device, cycle_start, serial):
                     break
             miss_count += 1
             gui_log(serial, f"[Loop {loop_num}] gachafree1 not here, swiping... ({miss_count}/{max_miss})", step="Swipe")
-            device.shell("input swipe 618 308 54 306 5000")
+            device.shell("input swipe 618 308 54 306 1200")
             time.sleep(2)
             _check_fixcoin()
 
         if not found_free:
-            gui_log(serial, f"[Loop {loop_num}] gachafree1 not found after {max_miss} swipes, skipping", step="Skip")
-            continue
+            gui_log(serial, f"[Loop {loop_num}] เลื่อนครบ {max_miss} รอบแล้วไม่เจอ gachafree1 → break ไป step ถัดไป", step="Free Done")
+            break
 
         # 2b. Wait gachafree2
         gui_log(serial, f"[Loop {loop_num}] Waiting gachafree2.bmp...", step="gachafree2")
