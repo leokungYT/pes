@@ -4693,7 +4693,12 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
                 if _check_fixteam(img):
                     continue
 
-                if img_search(img, os.path.join(IMG_DIR, name_next), threshold=0.95):
+                fin1_visible = (
+                    name_curr == "fin1.bmp"
+                    and img_search(img, os.path.join(IMG_DIR, name_curr), threshold=0.95)
+                )
+                if (not fin1_visible
+                        and img_search(img, os.path.join(IMG_DIR, name_next), threshold=0.95)):
                     gui_log(serial, f"{name_next} detected! Proceeding to next step.", step=f"{name_next} Seen")
                     break
 
@@ -4746,7 +4751,8 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
                 pts = img_search(img, os.path.join(IMG_DIR, name_curr), threshold=0.95)
                 if pts:
                     now = time.time()
-                    if now - last_click_time >= 5.0:
+                    click_interval = 0.5 if name_curr == "fin1.bmp" else 5.0
+                    if now - last_click_time >= click_interval:
                         x, y = pts[0]
                         device.shell(f"input swipe {x} {y} {x} {y} 100")
                         gui_log(serial, f"Clicked {name_curr}", step=f"{name_curr} Click")
