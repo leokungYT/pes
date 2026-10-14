@@ -2656,6 +2656,18 @@ _GLOBAL_LAST_LAUNCH_TS = [0.0]
 
 _PES_ACTIVITY_CACHE = {}
 
+def _run_device_shell(device, command, timeout=5):
+    """Run a device shell command through adb with a real host-side timeout."""
+    kwargs = {'creationflags': 0x08000000} if os.name == 'nt' else {}
+    try:
+        result = subprocess.run(
+            [adb_path, "-s", device.serial, "shell", command],
+            capture_output=True, text=True, timeout=timeout, **kwargs
+        )
+        return result.stdout.strip()
+    except Exception:
+        return ""
+
 def get_pes_launcher_component(device):
     """หา component name ของเกม PES แบบ dynamic และ cache ไว้"""
     serial = device.serial
@@ -2663,61 +2675,41 @@ def get_pes_launcher_component(device):
         return _PES_ACTIVITY_CACHE[serial]
 
     # วิธีที่ 1: cmd package resolve-activity
-    try:
-        out = device.shell("cmd package resolve-activity --brief jp.konami.pesam")
-        if out:
-            for line in out.splitlines():
-                line = line.strip()
-                if "/" in line and not line.startswith("priority="):
-                    _PES_ACTIVITY_CACHE[serial] = line
-                    return line
-    except Exception:
-        pass
+    out = _run_device_shell(device, "cmd package resolve-activity --brief jp.konami.pesam", timeout=3)
+    if out:
+        for line in out.splitlines():
+            line = line.strip()
+            if "/" in line and not line.startswith("priority="):
+                _PES_ACTIVITY_CACHE[serial] = line
+                return line
 
     # วิธีที่ 2: dumpsys package
-    try:
-        out = device.shell("dumpsys package jp.konami.pesam")
-        if out:
-            for line in out.splitlines():
-                if "jp.konami.pesam/" in line and ("MainActivity" in line or "SplashActivity" in line or "UnityPlayerActivity" in line):
-                    parts = line.strip().split()
-                    for p in parts:
-                        if p.startswith("jp.konami.pesam/"):
-                            _PES_ACTIVITY_CACHE[serial] = p
-                            return p
-    except Exception:
-        pass
+    out = _run_device_shell(device, "dumpsys package jp.konami.pesam", timeout=3)
+    if out:
+        for line in out.splitlines():
+            if "jp.konami.pesam/" in line and ("MainActivity" in line or "SplashActivity" in line or "UnityPlayerActivity" in line):
+                parts = line.strip().split()
+                for part in parts:
+                    if part.startswith("jp.konami.pesam/"):
+                        _PES_ACTIVITY_CACHE[serial] = part
+                        return part
 
     return None
 
 def check_game_pid(device):
-    """เช็ค PID ของเกมว่ารันอยู่จริงไหม (รวดเร็วผ่าน socket shell ก่อน)"""
-    try:
-        out = device.shell("pidof jp.konami.pesam")
-        if out:
-            pid = out.strip().split()[0]
-            if pid.isdigit():
-                return pid
-    except Exception:
-        pass
-    try:
-        kwargs = {'creationflags': 0x08000000} if os.name == 'nt' else {}
-        r = subprocess.run([adb_path, "-s", device.serial, "shell", "pidof jp.konami.pesam"],
-                           capture_output=True, text=True, timeout=3, **kwargs)
-        pid = r.stdout.strip().split()[0] if r.stdout.strip() else ""
-        if pid.isdigit():
-            return pid
-    except Exception:
-        pass
+    """Return the game's PID, with a bounded ADB call."""
+    out = _run_device_shell(device, "pidof jp.konami.pesam", timeout=2)
+    pid = out.split()[0] if out else ""
+    if pid.isdigit():
+        return pid
     return None
 
 def start_pes_app(device):
     """เปิดเกม PES แบบ Clean Intent (am start) พร้อม fallback monkey และตรวจสอบ PID จริง"""
     comp = get_pes_launcher_component(device)
-    if comp:
-        device.shell(f"am start -n {comp}")
-    else:
-        device.shell("am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p jp.konami.pesam")
+    launch_cmd = (f"am start -n {comp}" if comp else
+                  "am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p jp.konami.pesam")
+    _run_device_shell(device, launch_cmd, timeout=5)
 
     # ตรวจสอบทันทีว่ามี PID ขึ้นไหม
     for _ in range(3):
@@ -2726,15 +2718,15 @@ def start_pes_app(device):
             return True
 
     # Fallback 1: am start package intent
-    device.shell("am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p jp.konami.pesam")
-    for _ in range(2):
-        time.sleep(0.5)
-        if check_game_pid(device):
-            return True
+    fallback = "am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p jp.konami.pesam"
+    _run_device_shell(device, fallback, timeout=5)
+    time.sleep(0.5)
+    if check_game_pid(device):
+        return True
 
     # Fallback 2: monkey
-    device.shell("monkey -p jp.konami.pesam -c android.intent.category.LAUNCHER 1")
-    time.sleep(0.8)
+    _run_device_shell(device, "monkey -p jp.konami.pesam -c android.intent.category.LAUNCHER 1", timeout=5)
+    time.sleep(0.5)
     return bool(check_game_pid(device))
 
 def launch_game(device, settle=0.0):
@@ -2750,8 +2742,22 @@ def launch_game(device, settle=0.0):
         gap = _MIN_GLOBAL_LAUNCH_GAP - (time.time() - _GLOBAL_LAST_LAUNCH_TS[0])
         if gap > 0:
             time.sleep(gap)
-        started = start_pes_app(device)
+        _run_device_shell(
+            device,
+            "am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p jp.konami.pesam",
+            timeout=5,
+        )
         _GLOBAL_LAST_LAUNCH_TS[0] = time.time()
+
+    # Keep slow process checks outside the global gate so other emulators can start.
+    started = False
+    for _ in range(4):
+        time.sleep(0.5)
+        if check_game_pid(device):
+            started = True
+            break
+    if not started:
+        started = start_pes_app(device)
 
     now = time.time()
     _LAST_LAUNCH_TS[serial] = now
