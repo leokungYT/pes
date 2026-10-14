@@ -117,7 +117,7 @@ except ImportError:
 try:
     from config import PLAY8_STUCK_SECS
 except ImportError:
-    PLAY8_STUCK_SECS = 90
+    PLAY8_STUCK_SECS = 45
 # ── Auto restart เครื่องที่ adb หลุด (offline ค้าง) ──
 try:
     from config import AUTO_RESTART_OFFLINE
@@ -2644,37 +2644,124 @@ class _DynamicGate:
 
 _SCREENCAP_GATE = _DynamicGate(SCREENCAP_MAX_CONCURRENT)
 
-# Launch cooldown: ห้าม cold-start เกมถี่เกินไป/เครื่อง — cold-start คือคำสั่งที่หนัก
-# ที่สุดสำหรับ MuMu (โหลด asset + init 3D ใหม่) ถ้า relaunch ซ้อนถี่ๆ → ANR
-_MIN_LAUNCH_INTERVAL = 20.0             # วินาที — เว้นระยะ cold-start ขั้นต่ำ/เครื่อง
+# Launch cooldown: ห้าม cold-start เกมถี่เกินไป/เครื่อง (ลดลงเหลือ 5s เพื่อความเร็ว)
+_MIN_LAUNCH_INTERVAL = 5.0             # วินาที — เว้นระยะ cold-start ขั้นต่ำ/เครื่อง (เดิม 20s)
 _LAST_LAUNCH_TS = {}
 
-# Global cold-start gate: เว้นระยะ cold-start ระหว่าง "คนละเครื่อง" ด้วย — กันหลาย instance
-# บูต/โหลด asset พร้อมกันจน CPU/GPU/RAM ของโฮสต์แขวนทั้งเครื่อง (Windows ANR ทั้งวง)
-_MIN_GLOBAL_LAUNCH_GAP = 6.0            # วินาที — ระยะขั้นต่ำระหว่าง cold-start ของทุกเครื่อง
+# Global cold-start gate: เว้นระยะ cold-start ระหว่าง "คนละเครื่อง"
+# ลดเหลือ 1.5s เพื่อไม่ให้เกิดคอขวดต่อคิวนานเมื่อเปิดหลายจอ (เดิม 6.0s)
+_MIN_GLOBAL_LAUNCH_GAP = 1.5           # วินาที — ระยะขั้นต่ำระหว่าง cold-start ของทุกเครื่อง
 _LAUNCH_GATE_LOCK = threading.Lock()
 _GLOBAL_LAST_LAUNCH_TS = [0.0]
 
-def launch_game(device, settle=14.0):
-    """Cold-start เกมแบบมี cooldown ต่อเครื่อง + global gate ทั้งระบบ —
-    กัน relaunch ซ้อนถี่/หลายเครื่องบูตพร้อมกันจน MuMu ค้าง (ANR)."""
+_PES_ACTIVITY_CACHE = {}
+
+def get_pes_launcher_component(device):
+    """หา component name ของเกม PES แบบ dynamic และ cache ไว้"""
+    serial = device.serial
+    if serial in _PES_ACTIVITY_CACHE:
+        return _PES_ACTIVITY_CACHE[serial]
+
+    # วิธีที่ 1: cmd package resolve-activity
+    try:
+        out = device.shell("cmd package resolve-activity --brief jp.konami.pesam")
+        if out:
+            for line in out.splitlines():
+                line = line.strip()
+                if "/" in line and not line.startswith("priority="):
+                    _PES_ACTIVITY_CACHE[serial] = line
+                    return line
+    except Exception:
+        pass
+
+    # วิธีที่ 2: dumpsys package
+    try:
+        out = device.shell("dumpsys package jp.konami.pesam")
+        if out:
+            for line in out.splitlines():
+                if "jp.konami.pesam/" in line and ("MainActivity" in line or "SplashActivity" in line or "UnityPlayerActivity" in line):
+                    parts = line.strip().split()
+                    for p in parts:
+                        if p.startswith("jp.konami.pesam/"):
+                            _PES_ACTIVITY_CACHE[serial] = p
+                            return p
+    except Exception:
+        pass
+
+    return None
+
+def check_game_pid(device):
+    """เช็ค PID ของเกมว่ารันอยู่จริงไหม (รวดเร็วผ่าน socket shell ก่อน)"""
+    try:
+        out = device.shell("pidof jp.konami.pesam")
+        if out:
+            pid = out.strip().split()[0]
+            if pid.isdigit():
+                return pid
+    except Exception:
+        pass
+    try:
+        kwargs = {'creationflags': 0x08000000} if os.name == 'nt' else {}
+        r = subprocess.run([adb_path, "-s", device.serial, "shell", "pidof jp.konami.pesam"],
+                           capture_output=True, text=True, timeout=3, **kwargs)
+        pid = r.stdout.strip().split()[0] if r.stdout.strip() else ""
+        if pid.isdigit():
+            return pid
+    except Exception:
+        pass
+    return None
+
+def start_pes_app(device):
+    """เปิดเกม PES แบบ Clean Intent (am start) พร้อม fallback monkey และตรวจสอบ PID จริง"""
+    comp = get_pes_launcher_component(device)
+    if comp:
+        device.shell(f"am start -n {comp}")
+    else:
+        device.shell("am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p jp.konami.pesam")
+
+    # ตรวจสอบทันทีว่ามี PID ขึ้นไหม
+    for _ in range(3):
+        time.sleep(0.5)
+        if check_game_pid(device):
+            return True
+
+    # Fallback 1: am start package intent
+    device.shell("am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p jp.konami.pesam")
+    for _ in range(2):
+        time.sleep(0.5)
+        if check_game_pid(device):
+            return True
+
+    # Fallback 2: monkey
+    device.shell("monkey -p jp.konami.pesam -c android.intent.category.LAUNCHER 1")
+    time.sleep(0.8)
+    return bool(check_game_pid(device))
+
+def launch_game(device, settle=0.0):
+    """Cold-start เกมแบบเร็ว + ปลอดภัย มี gate 1.5s และเช็ค PID จริงทันที."""
     serial = device.serial
     elapsed = time.time() - _LAST_LAUNCH_TS.get(serial, 0.0)
     if elapsed < _MIN_LAUNCH_INTERVAL:
         wait = _MIN_LAUNCH_INTERVAL - elapsed
-        gui_log(serial, f"Launch cooldown — waiting {wait:.0f}s before relaunch...", step="Launch CD")
+        gui_log(serial, f"Launch cooldown — waiting {wait:.1f}s before relaunch...", step="Launch CD")
         time.sleep(wait)
-    # global gate: เว้นระยะ cold-start ระหว่างทุกเครื่องอย่างน้อย _MIN_GLOBAL_LAUNCH_GAP วิ
-    # (ถือ lock ระหว่างเว้นระยะ → คิว cold-start ของเครื่องอื่นไว้ กันบูตพร้อมกันจนโฮสต์แขวน)
+
     with _LAUNCH_GATE_LOCK:
         gap = _MIN_GLOBAL_LAUNCH_GAP - (time.time() - _GLOBAL_LAST_LAUNCH_TS[0])
         if gap > 0:
             time.sleep(gap)
-        device.shell("monkey -p jp.konami.pesam -c android.intent.category.LAUNCHER 1")
+        started = start_pes_app(device)
         _GLOBAL_LAST_LAUNCH_TS[0] = time.time()
+
     now = time.time()
     _LAST_LAUNCH_TS[serial] = now
     DEVICE_LAST_GAME_CHECK[serial] = now
+
+    if started:
+        gui_log(serial, "PES launched & confirmed running", step="Launch OK", status="working")
+    else:
+        gui_log(serial, "⚠️ PES launch command sent (checking screen...)", step="Launch Sent", status="working")
+
     if settle > 0:
         time.sleep(settle)
 
@@ -2746,24 +2833,27 @@ def _screencap_io(device):
         pass
     return None
 
-def is_game_running(device):
-    """Check if jp.konami.pesam is running on the device (throttled every 30s)."""
+def is_game_running(device, max_age=8.0):
+    """Check if jp.konami.pesam is running on the device (throttled every 8s)."""
     serial = device.serial
     now = time.time()
     last_check = DEVICE_LAST_GAME_CHECK.get(serial, 0)
-    if now - last_check < 30:
+    if now - last_check < max_age:
         return True  # ยังไม่ถึงเวลาเช็ค ถือว่าออนอยู่
     DEVICE_LAST_GAME_CHECK[serial] = now
+
+    pid = check_game_pid(device)
+    if pid:
+        return True
+
+    # เช็คว่า ADB connection หลุดหรือไม่ (ถ้า ADB หลุด ไม่ควรถือว่าเกมปิดจน relaunch มั่ว)
     try:
-        kwargs = {'creationflags': 0x08000000} if os.name == 'nt' else {}
-        result = subprocess.run(
-            [adb_path, "-s", serial, "shell", "pidof jp.konami.pesam"],
-            capture_output=True, text=True, timeout=5, **kwargs
-        )
-        pid = result.stdout.strip()
-        return bool(pid)  # มี PID = เกมออนอยู่
+        ping = device.shell("echo 1").strip()
+        if ping == "1":
+            return False  # ADB สื่อสารได้ปกติ แต่ไม่มี PID = เกมปิดจริง!
     except Exception:
-        return True  # ADB error ถือว่าออนอยู่ (ไม่ relaunch มั่ว)
+        pass
+    return True
 
 FIXCLEAR_FIRST_SEEN = {}
 
@@ -3002,7 +3092,7 @@ def start_cpu_balancer():
 def get_screen_capture(device):
     global in_new_gacha_loop   # ประกาศหัวฟังก์ชัน (มีทั้งจุดอ่าน fixout-skip และจุดใช้ใน fixgachanew)
     try:
-        # เช็คเกมออนอยู่หรือไม่ (ทุก 30 วิ)
+        # เช็คเกมออนอยู่หรือไม่ (ทุก 8 วิ)
         if not is_game_running(device):
             # เกมตาย: ถ้าผ่าน login แล้ว (อยู่ช่วง box/gacha) → flow เดิมไม่ตรงกับเกมที่เพิ่งเปิดใหม่
             #   → restart ตั้งแต่ play8 (เก็บ login เดิม ไม่ push ซ้ำ) แทน relaunch แล้ววิ่งต่อผิดเฟสจนค้าง
@@ -3011,7 +3101,7 @@ def get_screen_capture(device):
                 gui_log(device.serial, "⚠️ เกมไม่รัน (หลัง login) → restart ตั้งแต่ play8", step="Relaunch")
                 trigger_restart_from_play8(device, device.serial, _on_gsc, reason="เกมตาย/relaunch หลัง login")
             gui_log(device.serial, "⚠️ Game not running! Relaunching...", step="Relaunch")
-            launch_game(device, settle=14)
+            launch_game(device, settle=2)
             DEVICE_LAST_GAME_CHECK[device.serial] = time.time()
 
         img = fast_screencap(device)
@@ -4490,13 +4580,13 @@ def push_dat_to_device(device, local_path):
         gui_log(serial, "Step 1: Force stopping app...", step="Cleanup")
         subprocess.run([adb_path, "-s", serial, "shell", "am force-stop jp.konami.pesam"], 
                        capture_output=True, timeout=5, **kwargs)
-        time.sleep(0.5)
+        time.sleep(0.2)
 
-        # 2. Clear remote dir
+        # 2. Clear remote dir & ensure 777 permissions
         gui_log(serial, "Step 2: Clearing auth directory...", step="Cleanup")
-        subprocess.run([adb_path, "-s", serial, "shell", f"su -c 'rm -rf {REMOTE_AUTH_DIR}/* && mkdir -p {REMOTE_AUTH_DIR}'"], 
+        subprocess.run([adb_path, "-s", serial, "shell", f"su -c 'rm -rf {REMOTE_AUTH_DIR}/* && mkdir -p {REMOTE_AUTH_DIR} && chmod 777 {REMOTE_AUTH_DIR}'"], 
                        capture_output=True, text=True, timeout=5, **kwargs)
-        time.sleep(0.3)
+        time.sleep(0.1)
 
         # 3. Copy to local temp and Push
         gui_log(serial, "Step 3: Pushing file to device...", step="Push")
@@ -4504,14 +4594,14 @@ def push_dat_to_device(device, local_path):
         subprocess.run([adb_path, "-s", serial, "push", tmp_local, tmp_remote],
                        capture_output=True, text=True, timeout=20, **kwargs)
 
-        # 4. Move to game folder
+        # 4. Move to game folder + chmod 666 + sync to storage
         gui_log(serial, "Step 4: Applying data to game...", step="Inject")
-        subprocess.run([adb_path, "-s", serial, "shell", f"su -c 'cp {tmp_remote} {REMOTE_DAT_FILE} && chmod 666 {REMOTE_DAT_FILE} && rm -f {tmp_remote}'"],
+        subprocess.run([adb_path, "-s", serial, "shell", f"su -c 'cp {tmp_remote} {REMOTE_DAT_FILE} && chmod 666 {REMOTE_DAT_FILE} && rm -f {tmp_remote} && sync'"],
                        capture_output=True, text=True, timeout=5, **kwargs)
         
         # 5. Verify
         gui_log(serial, "Step 5: Verifying...", step="Verify")
-        time.sleep(0.5)
+        time.sleep(0.2)
         check_res = subprocess.run([adb_path, "-s", serial, "shell", f"su -c 'ls -l {REMOTE_DAT_FILE}'"], 
                                    capture_output=True, text=True, timeout=5, **kwargs)
         check = check_res.stdout.strip()
@@ -6413,18 +6503,14 @@ def process_device_login(device):
                     time.sleep(5)
                     continue
 
-                # delay 5 วิ หลัง push เสร็จ ก่อนเปิดเกม — กันเคสไฟล์ยังเขียนไม่เสร็จ/ไม่เข้าจริง
-                gui_log(serial, "Push OK — delaying 5s before launch...", step="Push Settle")
-                time.sleep(5)
+                # delay สั้นๆ หลัง push เสร็จ ก่อนเปิดเกม (sync เรียบร้อยแล้ว)
+                gui_log(serial, "Push OK — launching game...", step="Push Settle")
+                time.sleep(0.5)
 
-
-
-            # 3. Launch — ตัด black-screen check ทิ้งแล้ว (ไม่ได้ใช้แล้ว)
-            #    ของเดิมรอจอสว่าง 45 วิ ไม่สว่างก็ force-stop เปิดใหม่ — หน้า Google Play
-            #    เด้งมาบนจอดำเลยถูกนับเป็น "จอค้าง" → โดนปิดแอพทิ้งก่อนจะได้กดปิด popup
+            # 3. Launch
             gui_log(serial, "Launching PES...", step="Launch", status="working")
             launch_game(device, settle=0)
-            time.sleep(3)   # settle หลังสั่งเปิดเกม
+            time.sleep(0.5)   # settle หลังสั่งเปิดเกม
 
             # 3.5 เปิดหา fix-googleplay แบบลอยๆ — ทำงานใน get_screen_capture ทุกเฟรม
             #     จนกว่าจะเจอ play8 (หรือจบเฟส login) ค่อยปิด
@@ -6552,10 +6638,10 @@ def process_device_login(device):
                         gui_log(serial, f"ไม่เจอ play8/checkpointlogin {PLAY8_STUCK_SECS:.0f}s — กด Back แล้วเปิดเกมใหม่ (รอบ {p8_rescue_n}/2)",
                                 step="play8 Rescue", status="working")
                         device.shell("input keyevent 4")
-                        time.sleep(1.0)
+                        time.sleep(0.5)
                         device.shell("am force-stop jp.konami.pesam")
-                        time.sleep(1.5)
-                        launch_game(device, settle=10)
+                        time.sleep(0.5)
+                        launch_game(device, settle=1.0)
                         p8_seen_since = time.time()
                         play8_miss = 0
                         play8_click_count = 0
@@ -9019,7 +9105,7 @@ def apply_config_now(reason=""):
         FIND_IMG = getattr(cfg, 'FIND_IMG', 0)
         FIND_IMG_DIR = getattr(cfg, 'FIND_IMG_DIR', 'find-img')
         FIND_IMG_THRESHOLD = getattr(cfg, 'FIND_IMG_THRESHOLD', 0.85)
-        PLAY8_STUCK_SECS = getattr(cfg, 'PLAY8_STUCK_SECS', 90)
+        PLAY8_STUCK_SECS = getattr(cfg, 'PLAY8_STUCK_SECS', 45)
         # Auto restart เครื่องที่ adb หลุด
         AUTO_RESTART_OFFLINE = getattr(cfg, 'AUTO_RESTART_OFFLINE', 1)
         OFFLINE_RESTART_AFTER = getattr(cfg, 'OFFLINE_RESTART_AFTER', 90)
