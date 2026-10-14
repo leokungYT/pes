@@ -24,7 +24,6 @@ import random
 import shutil
 import threading
 
-import cv2
 
 import login
 from login import (
@@ -47,8 +46,6 @@ from login import (
 from ppadb.client import Client as AdbClient
 
 # ── Config ──────────────────────────────────────────────────────────────────
-PKG = "jp.konami.pesam"
-
 TH_DIR    = "th-check"           # เจอ Thailand
 OTHER_DIR = "Other countries"    # ไม่เจอ Thailand
 
@@ -240,43 +237,6 @@ def run_check_th(device, serial, cycle_start, file_path, original_name):
 # ═══════════════════════════════════════════════════════════════════════════
 #  ขั้นตอนที่ดึงมาจาก login.py — ส่งไฟล์ → launch → play8 → stoplogin
 # ═══════════════════════════════════════════════════════════════════════════
-def launch_with_black_check(device, serial, cycle_start):
-    """เปิดเกม + เช็คจอดำ (พอร์ตจาก login.py ข้อ 3)
-       จอดำเกิน 85% นาน 45 วิ = ค้าง → force-stop แล้วเปิดใหม่ (ลองได้ 3 รอบ)"""
-    gui_log(serial, "Launching PES...", step="Launch", status="working")
-    for black_attempt in range(3):
-        launch_game(device, settle=0)
-        black_start = time.time()
-        is_stuck = False
-        while time.time() - black_start < 45:
-            check_device_reset(serial, cycle_start)
-            img = get_screen_capture(device)
-            if img is not None:
-                try:
-                    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
-                    _, thresh = cv2.threshold(gray, 50, 255, cv2.THRESH_BINARY_INV)
-                    black_ratio = cv2.countNonZero(thresh) / (gray.shape[0] * gray.shape[1])
-                    if black_ratio < 0.85:
-                        gui_log(serial, "Screen OK! (app loaded)", step="Launch OK")
-                        is_stuck = False
-                        break
-                    is_stuck = True
-                except Exception:
-                    is_stuck = True
-            else:
-                is_stuck = True
-            time.sleep(1)
-
-        if is_stuck:
-            gui_log(serial, f"[BLACK] Dark screen detected! (attempt {black_attempt+1}/3) Restarting app...",
-                    step="Black Stuck")
-            device.shell(f"am force-stop {PKG}")
-            time.sleep(5)
-        else:
-            break
-    time.sleep(8)
-
-
 def wait_login_done(device, serial, cycle_start):
     """ลูป play8 เต็มรูปแบบจาก login.py — ออกได้ทางเดียวคือผ่าน login
 
@@ -519,8 +479,8 @@ def process_device_checkth(device):
                 gui_log(serial, "Push OK — delaying 5s before launch...", step="Push Settle")
                 time.sleep(5)
 
-            # ── 3. เปิดเกม + เช็คจอดำ ──
-            launch_with_black_check(device, serial, cycle_start)
+            # ── 3. เปิดเกมและรอให้เกม settle ──
+            launch_game(device, settle=8)
 
             # ── 4. ลูป play8 จนผ่าน login ──
             passed_checkpoint = wait_login_done(device, serial, cycle_start)

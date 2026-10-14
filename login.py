@@ -6527,12 +6527,36 @@ def process_device_login(device):
             #    (กด play8 / fallback ไปเรื่อยๆ จนกว่าจะเจอ แล้วค่อยไปขั้นตอนกด Back รัวๆ)
             gui_log(serial, "Waiting checkpointlogin (clicking play8)...", step="play8/Check")
             play8_miss = 0   # นับรอบที่ play8 หาย + ยังไม่เจอ checkpoint (ไว้ทำ fallback กันค้าง)
-            p8_seen_since = time.time()   # เวลาล่าสุดที่ยัง "เห็นอะไรที่รู้จัก" บนจอ (play8/checkpoint/fixout/terms)
+            p8_seen_since = time.time()   # เวลาเริ่มรอความคืบหน้าในหน้า login; เห็น play8 ซ้ำไม่นับว่าคืบหน้า
             p8_rescue_n = 0               # จำนวนรอบที่กู้ไปแล้ว (ครบ 3 = ยอมแพ้ไฟล์นี้)
             play8_click_count = 0   # นับจำนวนครั้งที่กด play8 ติดกัน — ครบ 7 → พัก 8 วิ แล้วเช็คใหม่
             play8_pause_until = 0.0     # ช่วงพักหลังกดครบ 5 ครั้ง (พักแบบไม่หลับ — ลูปยังเช็ค checkpointlogin ตลอด)
             DEVICE_FIXOUT_CANCEL_DONE.pop(serial, None)   # ล้าง flag ค้างจากรอบ/เฟสก่อน กัน break มั่ว
             p8_cancel_done = False      # True = หลุดลูปด้วยทาง fixout→cancel (ข้ามขั้น event/Back spam ได้เลย)
+
+            def _rescue_stuck_play8():
+                nonlocal p8_rescue_n, p8_seen_since, play8_miss, play8_click_count
+                if not is_device_online(device):
+                    gui_log(serial, "ADB หลุดระหว่างรอ play8 — ส่งเข้า flow reconnect", step="play8 Offline", status="stuck")
+                    raise DeviceResetException("ADB offline while waiting for play8")
+                p8_rescue_n += 1
+                if p8_rescue_n >= 3:
+                    gui_log(serial, f"ไม่มีความคืบหน้าหน้า login เกิน {PLAY8_STUCK_SECS:.0f}s x3 — คืนไฟล์ ไปไฟล์ใหม่",
+                            step="play8 Give Up", status="stuck")
+                    device.shell("am force-stop jp.konami.pesam")
+                    time.sleep(1)
+                    raise DeviceResetException("play8 stuck — ไม่มีความคืบหน้าหน้า login")
+                gui_log(serial, f"หน้า login ไม่คืบหน้า {PLAY8_STUCK_SECS:.0f}s — กด Back แล้วเปิดเกมใหม่ (รอบ {p8_rescue_n}/2)",
+                        step="play8 Rescue", status="working")
+                device.shell("input keyevent 4")
+                time.sleep(0.5)
+                device.shell("am force-stop jp.konami.pesam")
+                time.sleep(0.5)
+                launch_game(device, settle=1.0)
+                p8_seen_since = time.time()
+                play8_miss = 0
+                play8_click_count = 0
+
             while True:
                 check_device_reset(serial, cycle_start)
                 img = get_screen_capture(device)
@@ -6603,8 +6627,10 @@ def process_device_login(device):
                     if pts_8:
                         play8_miss = 0   # เจอ play8 แล้ว รีเซ็ตตัวนับ
                         DEVICE_WATCH_GPLAY[serial] = False   # เจอ play8 แล้ว → เลิกหา fix-googleplay
-                        p8_seen_since = time.time()
-                        p8_rescue_n = 0
+                        # Seeing the same button again is not progress; keep the stuck timer.
+                        if time.time() - p8_seen_since >= PLAY8_STUCK_SECS:
+                            _rescue_stuck_play8()
+                            continue
 
                         # Prioritize fixlg3
                         pts_lg3 = img_search(img, os.path.join(IMG_DIR, "fixlg3.bmp"))
@@ -6629,29 +6655,17 @@ def process_device_login(device):
                     #     (checkpointlogin/fixout ถูกเช็คทุกเฟรมข้างบนอยู่แล้ว)
                     play8_miss += 1
 
-                    # --- 3.5 ไม่เจอ "ทั้ง play8 และ checkpointlogin" ติดกันเกิน PLAY8_STUCK_SECS วิ ---
-                    #     = ค้างอยู่หน้าที่บอทไม่รู้จัก (เกมค้างหน้า title / มีอะไรบังจอ)
+                    # --- 3.5 หน้า login ไม่มีความคืบหน้าเกิน PLAY8_STUCK_SECS วิ ---
+                    #     รวมกรณีกด play8 ซ้ำแล้วหน้าจอยังไม่เปลี่ยน หรือไม่พบทั้ง play8/checkpointlogin
                     #     เดิมลูปนี้ไม่มีทางออกเลย ต้องรอจน TIMEOUT_MINUTES (30 นาที) → เสียเวลาเปล่า
                     #     กู้เอง: กด Back + เปิดเกมใหม่ 2 รอบ ไม่ขึ้นอีกค่อยปล่อยไฟล์ไปตัวใหม่
                     if time.time() - p8_seen_since >= PLAY8_STUCK_SECS:
-                        p8_rescue_n += 1
-                        if p8_rescue_n >= 3:
-                            gui_log(serial, f"ค้างหน้า title เกิน {PLAY8_STUCK_SECS:.0f}s x3 — คืนไฟล์ ไปไฟล์ใหม่",
-                                    step="play8 Give Up", status="stuck")
-                            device.shell("am force-stop jp.konami.pesam")
-                            time.sleep(1)
-                            raise DeviceResetException("play8 stuck — ไม่เจอ play8/checkpointlogin")
-                        gui_log(serial, f"ไม่เจอ play8/checkpointlogin {PLAY8_STUCK_SECS:.0f}s — กด Back แล้วเปิดเกมใหม่ (รอบ {p8_rescue_n}/2)",
-                                step="play8 Rescue", status="working")
-                        device.shell("input keyevent 4")
-                        time.sleep(0.5)
-                        device.shell("am force-stop jp.konami.pesam")
-                        time.sleep(0.5)
-                        launch_game(device, settle=1.0)
-                        p8_seen_since = time.time()
-                        play8_miss = 0
-                        play8_click_count = 0
+                        _rescue_stuck_play8()
                         continue
+                elif time.time() - p8_seen_since >= PLAY8_STUCK_SECS:
+                    # A missing frame can mean the ADB transport has dropped; recover instead of spinning forever.
+                    _rescue_stuck_play8()
+                    continue
 
                 time.sleep(0.3)
 
