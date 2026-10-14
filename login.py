@@ -6459,11 +6459,6 @@ def process_device_login(device):
                 gui_log(serial, "root ยังไม่เปิด → เปิด root...", step="Root Check")
                 device = enable_root(device)
 
-            # 0. Force-stop
-            gui_log(serial, "Force closing app...", step="Cleanup", status="working")
-            device.shell("am force-stop jp.konami.pesam")
-            time.sleep(1)
-
             # ── restart-from-play8: เจอ fixclear หลัง login (หรือ box1 หายเกิน 5 ครั้ง) →
             #    เปิดเกมเดิมแล้วไปเริ่มที่ play8 เลย โดย "ไม่ล้าง AUTH / ไม่ push ไฟล์ซ้ำ" (เก็บ login เดิมไว้)
             #    แล้วปล่อยให้วิ่งเข้า launch → loop play8 → เฟสต่อไปตามปกติ ──
@@ -6478,10 +6473,6 @@ def process_device_login(device):
                         step="Restart play8", status="working")
             else:
                 DEVICE_RESTART_PLAY8_COUNT.pop(serial, None)   # ไฟล์ใหม่/เข้าใหม่ → รีเซ็ตตัวนับ fixclear-after-login
-                # 0.5 ลบ save data เดิมออกก่อนเริ่มวนไฟล์ใหม่ (กันข้อมูล id เก่าค้าง)
-                device.shell("su -c 'rm -f /data/data/jp.konami.pesam/files/SaveData/AUTH/online_user_id_data.dat'")
-                time.sleep(0.3)
-
                 # 1. Pick file — ถ้ามีไฟล์ค้าง "เข้าใหม่" จาก fixclear → ใช้ไฟล์เดิม (ไม่หยิบใหม่/ไม่ปล่อย lock)
                 pending = DEVICE_REENTER_FILE.pop(serial, None)
                 if pending:
@@ -8912,9 +8903,6 @@ def process_device_login(device):
                 if new_coin is not None:
                     coin_prefix = new_coin
 
-            device.shell("am force-stop jp.konami.pesam")
-            time.sleep(1)
-
             # ชื่อไฟล์ตอน export = user_code จริงจากข้างในไฟล์ .dat
             clean_orig = export_base_name(file_path, original_name, strip_dash=True)
 
@@ -9033,11 +9021,6 @@ def process_device_login(device):
             try:
                 device.shell("pm trim-caches 9999999999G")
                 device.shell("su -c 'sync && echo 3 > /proc/sys/vm/drop_caches'")
-            except Exception:
-                pass
-            # Clear remote AUTH directory at the end of the cycle to keep the emulator completely clean and secure
-            try:
-                device.shell(f"su -c 'rm -rf {REMOTE_AUTH_DIR}/*'")
             except Exception:
                 pass
             try:
