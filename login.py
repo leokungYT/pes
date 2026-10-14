@@ -4678,7 +4678,6 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
         fixfind_first_seen = None
         step_start = time.time()   # ใช้จับเวลา "ค้าง" เฉพาะ fin1
         last_countdown = None      # วินาทีล่าสุดที่ log countdown (กัน log รัว)
-        fin1_rescue_n = 0          # นับรอบ rescue ของ fin1 — เกิน 2 รอบ → แวะกด next.bmp
         while True:
             check_device_reset(serial, cycle_start)
 
@@ -4712,28 +4711,10 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
                             if pts_cb:
                                 xb, yb = pts_cb[0]
                                 gui_log(serial, f"cancel.png found at ({xb},{yb}) — clicking & stopping Back spam.", step="fin1 Rescue OK")
-                                click_cancel_until_gone(device, serial, xb, yb, step="fin1 Rescue")
+                                while not click_cancel_until_gone(device, serial, xb, yb, step="fin1 Rescue"):
+                                    check_device_reset(serial, cycle_start)
+                                    gui_log(serial, "cancel still visible after retry timeout — continuing clicks", step="fin1 Rescue")
                                 break
-
-                    # ── rescue เกิน 2 รอบแล้วยังไม่เจอ fin1 → แวะหา next.bmp แล้วกด (หน้าผลสุ่มอาจค้างอยู่) ──
-                    fin1_rescue_n += 1
-                    if fin1_rescue_n >= 2:
-                        gui_log(serial, f"fin1 rescue {fin1_rescue_n} รอบแล้วยังไม่เจอ — แวะหา next.bmp (8s)", step="fin1 Next")
-                        dl_fn = time.time() + 8
-                        while time.time() < dl_fn:
-                            check_device_reset(serial, cycle_start)
-                            img_fn = get_screen_capture(device)
-                            if img_fn is not None:
-                                pts_fn = img_search(img_fn, os.path.join(IMG_DIR, "next.bmp"))
-                                if pts_fn:
-                                    x_fn, y_fn = pts_fn[0]
-                                    gui_log(serial, f"เจอ next.bmp — กด ({x_fn},{y_fn})", step="fin1 Next")
-                                    click_next_until_gone(device, cycle_start, serial, x_fn, y_fn, tag="fin1 Next")
-                                    break
-                            time.sleep(0.3)
-                        else:
-                            gui_log(serial, "ไม่เจอ next.bmp ใน 8s — รอ fin1 ต่อ", step="fin1 Next Miss")
-                        fin1_rescue_n = 0   # เช็คแล้ว → เริ่มนับรอบใหม่
 
                     step_start = time.time()   # รีเซ็ตนาฬิกาแล้วกลับไปรอ fin1 ใหม่
                     continue
