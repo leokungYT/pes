@@ -113,11 +113,6 @@ try:
     from config import FIND_IMG_THRESHOLD
 except ImportError:
     FIND_IMG_THRESHOLD = 0.85
-# ── กันค้างหน้า title: ไม่เจอ play8/checkpointlogin ติดกันกี่วิ ถึงจะกู้เอง ──
-try:
-    from config import PLAY8_STUCK_SECS
-except ImportError:
-    PLAY8_STUCK_SECS = 45
 # ── Auto restart เครื่องที่ adb หลุด (offline ค้าง) ──
 try:
     from config import AUTO_RESTART_OFFLINE
@@ -275,6 +270,8 @@ IMAGE_CACHE          = {}
 _image_cache_lock    = threading.Lock()
 DEVICE_RESET_FLAGS   = {}
 DEVICE_FILE_ASSIGNMENTS = {}
+_DEVICE_WORKER_LOCK = threading.Lock()
+_DEVICE_WORKER_THREADS = {}
 DEVICE_DISABLE_FIXEVENT = {}
 DEVICE_IN_GACHA      = {}     # serial -> True ระหว่างอยู่ใน sequence กาชา → เปิดหา ad-rewardfix1 แบบลอยๆ ทุกเฟรม
 _GACHA_BACKHOME_SEEN = {}     # serial -> เวลาที่เริ่มเห็น backhome ค้างบนจอ (เฉพาะช่วงกาชา)
@@ -1478,10 +1475,9 @@ if GUI_ENABLED:
                     if self.is_started:
                         d = AdbClient(host="127.0.0.1", port=5037).device(dev)
                         if d:
-                            t = threading.Thread(target=process_device_login,
-                                                 args=(d,), daemon=True)
-                            t.start()
-                            self.threads.append(t)
+                            t = start_device_worker(d)
+                            if t:
+                                self.threads.append(t)
                     self.log(f"Connected: {dev}")
             self.lbl_status.configure(
                 text=f"   ● ONLINE ({len(self.device_monitors)})",
@@ -1740,11 +1736,10 @@ if GUI_ENABLED:
                     launch_device(index + 1)
                     return
 
-                self.log(f"✅ Started bot on {serial}")
-                t = threading.Thread(target=process_device_login,
-                                     args=(device,), daemon=True)
-                t.start()
-                self.threads.append(t)
+                t = start_device_worker(device)
+                if t:
+                    self.log(f"✅ Started bot on {serial}")
+                    self.threads.append(t)
 
                 if index < len(devices) - 1:
                     self.log(f"Waiting 10 seconds before starting the next device...")
@@ -6517,36 +6512,9 @@ def process_device_login(device):
             #    *** ไม่ยอมแพ้: ลูปนี้ออกได้ทางเดียวคือเจอ checkpointlogin เท่านั้น ***
             #    (กด play8 / fallback ไปเรื่อยๆ จนกว่าจะเจอ แล้วค่อยไปขั้นตอนกด Back รัวๆ)
             gui_log(serial, "Waiting checkpointlogin (clicking play8)...", step="play8/Check")
-            play8_miss = 0   # นับรอบที่ play8 หาย + ยังไม่เจอ checkpoint (ไว้ทำ fallback กันค้าง)
-            p8_seen_since = time.time()   # เวลาเริ่มรอความคืบหน้าในหน้า login; เห็น play8 ซ้ำไม่นับว่าคืบหน้า
-            p8_rescue_n = 0               # จำนวนรอบที่กู้ไปแล้ว (ครบ 3 = ยอมแพ้ไฟล์นี้)
-            play8_click_count = 0   # นับจำนวนครั้งที่กด play8 ติดกัน — ครบ 7 → พัก 8 วิ แล้วเช็คใหม่
-            play8_pause_until = 0.0     # ช่วงพักหลังกดครบ 5 ครั้ง (พักแบบไม่หลับ — ลูปยังเช็ค checkpointlogin ตลอด)
+            play8_click_count = 0
             DEVICE_FIXOUT_CANCEL_DONE.pop(serial, None)   # ล้าง flag ค้างจากรอบ/เฟสก่อน กัน break มั่ว
             p8_cancel_done = False      # True = หลุดลูปด้วยทาง fixout→cancel (ข้ามขั้น event/Back spam ได้เลย)
-
-            def _rescue_stuck_play8():
-                nonlocal p8_rescue_n, p8_seen_since, play8_miss, play8_click_count
-                if not is_device_online(device):
-                    gui_log(serial, "ADB หลุดระหว่างรอ play8 — ส่งเข้า flow reconnect", step="play8 Offline", status="stuck")
-                    raise DeviceResetException("ADB offline while waiting for play8")
-                p8_rescue_n += 1
-                if p8_rescue_n >= 3:
-                    gui_log(serial, f"ไม่มีความคืบหน้าหน้า login เกิน {PLAY8_STUCK_SECS:.0f}s x3 — คืนไฟล์ ไปไฟล์ใหม่",
-                            step="play8 Give Up", status="stuck")
-                    device.shell("am force-stop jp.konami.pesam")
-                    time.sleep(1)
-                    raise DeviceResetException("play8 stuck — ไม่มีความคืบหน้าหน้า login")
-                gui_log(serial, f"หน้า login ไม่คืบหน้า {PLAY8_STUCK_SECS:.0f}s — กด Back แล้วเปิดเกมใหม่ (รอบ {p8_rescue_n}/2)",
-                        step="play8 Rescue", status="working")
-                device.shell("input keyevent 4")
-                time.sleep(0.5)
-                device.shell("am force-stop jp.konami.pesam")
-                time.sleep(0.5)
-                launch_game(device, settle=1.0)
-                p8_seen_since = time.time()
-                play8_miss = 0
-                play8_click_count = 0
 
             while True:
                 check_device_reset(serial, cycle_start)
@@ -6593,9 +6561,7 @@ def process_device_login(device):
                     if img_search_best(img, os.path.join(IMG_DIR, "checkponit-play8.bmp"), threshold=0.9):
                         gui_log(serial, "เจอ checkponit-play8 — หยุดกด play8 ไปทำ Consent/Confirm ก่อน", step="play8 Stop")
                         run_new_stage_play8(device, serial, cycle_start)
-                        play8_miss = 0
                         play8_click_count = 0
-                        p8_seen_since = time.time()
                         continue
 
                     # --- 1.7 หา fixout ลอยๆ "ทุกเฟรม" (popup บังจอ เช่น Terms of Use) ---
@@ -6616,12 +6582,7 @@ def process_device_login(device):
                         matched_name = "play8fix"
 
                     if pts_8:
-                        play8_miss = 0   # เจอ play8 แล้ว รีเซ็ตตัวนับ
                         DEVICE_WATCH_GPLAY[serial] = False   # เจอ play8 แล้ว → เลิกหา fix-googleplay
-                        # Seeing the same button again is not progress; keep the stuck timer.
-                        if time.time() - p8_seen_since >= PLAY8_STUCK_SECS:
-                            _rescue_stuck_play8()
-                            continue
 
                         # Prioritize fixlg3
                         pts_lg3 = img_search(img, os.path.join(IMG_DIR, "fixlg3.bmp"))
@@ -6641,22 +6602,6 @@ def process_device_login(device):
                             gui_log(serial, f"Found {matched_name}! Clicked. (ครั้งที่ {play8_click_count})", step="play8")
                         time.sleep(0.5)
                         continue
-
-                    # --- 3. play8/play8fix หายแล้วแต่ยังไม่เจอ checkpoint → รอเฉยๆ วนเช็คต่อ ---
-                    #     (checkpointlogin/fixout ถูกเช็คทุกเฟรมข้างบนอยู่แล้ว)
-                    play8_miss += 1
-
-                    # --- 3.5 หน้า login ไม่มีความคืบหน้าเกิน PLAY8_STUCK_SECS วิ ---
-                    #     รวมกรณีกด play8 ซ้ำแล้วหน้าจอยังไม่เปลี่ยน หรือไม่พบทั้ง play8/checkpointlogin
-                    #     เดิมลูปนี้ไม่มีทางออกเลย ต้องรอจน TIMEOUT_MINUTES (30 นาที) → เสียเวลาเปล่า
-                    #     กู้เอง: กด Back + เปิดเกมใหม่ 2 รอบ ไม่ขึ้นอีกค่อยปล่อยไฟล์ไปตัวใหม่
-                    if time.time() - p8_seen_since >= PLAY8_STUCK_SECS:
-                        _rescue_stuck_play8()
-                        continue
-                elif time.time() - p8_seen_since >= PLAY8_STUCK_SECS:
-                    # A missing frame can mean the ADB transport has dropped; recover instead of spinning forever.
-                    _rescue_stuck_play8()
-                    continue
 
                 time.sleep(0.3)
 
@@ -9032,6 +8977,28 @@ def process_device_login(device):
 # ═════════════════════════════════════════════════════════════════════════════
 # Entry point
 # ═════════════════════════════════════════════════════════════════════════════
+def start_device_worker(device):
+    """Start at most one login worker for each emulator serial."""
+    serial = device.serial
+    with _DEVICE_WORKER_LOCK:
+        current = _DEVICE_WORKER_THREADS.get(serial)
+        if current is not None and current.is_alive():
+            duplicate = True
+        else:
+            worker = threading.Thread(target=process_device_login,
+                                      args=(device,), daemon=True,
+                                      name=f"login-{serial}")
+            _DEVICE_WORKER_THREADS[serial] = worker
+            worker.start()
+            duplicate = False
+
+    if duplicate:
+        gui_log(serial, "Worker already active for this device; ignoring duplicate start.",
+                step="Worker Duplicate")
+        return None
+    return worker
+
+
 def _disable_console_quickedit():
     """
     ปิด QuickEdit Mode ของ Windows Console กัน cmd "ค้าง" เวลารันนานๆ
@@ -9062,7 +9029,7 @@ def _disable_console_quickedit():
 def apply_config_now(reason=""):
     """โหลด config.py ใหม่แล้วอัปเดตตัวแปร runtime ทันที (ใช้ได้ทุกที่ ทุกเวลา)
     คืน True ถ้าสำเร็จ — ตัวนี้คือหัวใจของ 'แก้ config ปุ๊บ มีผลปั๊บ'"""
-    global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA, NEW_GACHA_SWIPE, GACHA_LOOP_LIMIT, GACHA500, COIN_GACHA_THRESHOLD, ONE_GACHA500, ONLY_GACHA500, CP_GACHA4_THRESHOLD, HERO_LIST, HERO_LIST_FREE, EXTAR_FIND, EXTAR_FIND_THRESHOLD, FIND_IMG, FIND_IMG_DIR, FIND_IMG_THRESHOLD, PLAY8_STUCK_SECS, AUTO_RESTART_OFFLINE, OFFLINE_RESTART_AFTER, OFFLINE_BOOT_WAIT, OFFLINE_RESTART_COOLDOWN, SCREENCAP_MAX_CONCURRENT, SCREENCAP_INTERVAL, _MIN_SCREENCAP_INTERVAL, IMG_ROI_CACHE, IMG_ROI_PAD
+    global EVENT_IMG, DO_BOX, DO_GACHA, FIND_HERO, GACHA_FREE, CHECK_COIN, GACHA_FREE_LOOPS, NOSCAN, SKIPANIMATION, GACHA_CHECK, GACHA_FIND, AUTORUN, SILENT_UPDATE_MODE, OVERWRITE_CONFIG_ON_UPDATE, GETCODE, GETCODE_TEXT, GETQUEST, LOGIN_FAST, GACHA_MIN_COIN, DEBUG_CONSOLE, MOVE_LS_ENABLE, MOVE_LS_TIME, CUSTOM_GACHA, NEW_GACHA, NEW_GACHA_SWIPE, GACHA_LOOP_LIMIT, GACHA500, COIN_GACHA_THRESHOLD, ONE_GACHA500, ONLY_GACHA500, CP_GACHA4_THRESHOLD, HERO_LIST, HERO_LIST_FREE, EXTAR_FIND, EXTAR_FIND_THRESHOLD, FIND_IMG, FIND_IMG_DIR, FIND_IMG_THRESHOLD, AUTO_RESTART_OFFLINE, OFFLINE_RESTART_AFTER, OFFLINE_BOOT_WAIT, OFFLINE_RESTART_COOLDOWN, SCREENCAP_MAX_CONCURRENT, SCREENCAP_INTERVAL, _MIN_SCREENCAP_INTERVAL, IMG_ROI_CACHE, IMG_ROI_PAD
     try:
         import importlib
         import config as cfg
@@ -9108,7 +9075,6 @@ def apply_config_now(reason=""):
         FIND_IMG = getattr(cfg, 'FIND_IMG', 0)
         FIND_IMG_DIR = getattr(cfg, 'FIND_IMG_DIR', 'find-img')
         FIND_IMG_THRESHOLD = getattr(cfg, 'FIND_IMG_THRESHOLD', 0.85)
-        PLAY8_STUCK_SECS = getattr(cfg, 'PLAY8_STUCK_SECS', 45)
         # Auto restart เครื่องที่ adb หลุด
         AUTO_RESTART_OFFLINE = getattr(cfg, 'AUTO_RESTART_OFFLINE', 1)
         OFFLINE_RESTART_AFTER = getattr(cfg, 'OFFLINE_RESTART_AFTER', 90)
@@ -9216,8 +9182,7 @@ def main():
         client = AdbClient(host="127.0.0.1", port=5037)
         for i, serial in enumerate(devices):
             device = client.device(serial)
-            threading.Thread(target=process_device_login,
-                             args=(device,), daemon=True).start()
+            start_device_worker(device)
             # ค่อยๆ ทยอยเปิดทีละจอ โดยเว้นระยะ 10 วินาที เพื่อป้องกัน CPU ค้างจากการรันพร้อมกัน
             if i < len(devices) - 1:
                 print("Waiting 10 seconds before starting the next device...")

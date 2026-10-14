@@ -13,18 +13,13 @@ from tkinter import font as tkfont
 REPO = "leokungYT/pes"
 VERSION_FILE = "version.txt"
 
-# ── ช่องทางโหลดไฟล์อัปเดต (ลองไล่ทีละอันจนกว่าจะได้) ─────────────────
-#    เจอบ่อย: raw.githubusercontent (เช็คเวอร์ชัน) ผ่าน แต่ github.com/codeload
-#    ที่ใช้โหลด ZIP โดน timeout (WinError 10060) เพราะเน็ต/ISP บล็อกคนละโดเมนกัน
+# ── ช่องทางโหลดไฟล์อัปเดตโดยตรงจาก GitHub ────────────────────────────
 def _zip_candidates(zip_url):
     urls = []
     if zip_url:
         urls.append(zip_url)
     urls.append(f"https://github.com/{REPO}/archive/refs/heads/main.zip")
     urls.append(f"https://codeload.github.com/{REPO}/zip/refs/heads/main")
-    # มิเรอร์สำรอง — เรียงตามผลทดสอบจริง (ghfast.top ตัดออก: SSL cert verify failed)
-    for pre in ("https://ghproxy.net/", "https://gh-proxy.com/"):
-        urls.append(pre + f"https://github.com/{REPO}/archive/refs/heads/main.zip")
     seen, out = set(), []
     for u in urls:
         if u and u not in seen:
