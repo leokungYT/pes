@@ -4715,13 +4715,13 @@ def push_dat_to_device(device, local_path):
         # 1. Force stop app
         gui_log(serial, "Step 1: Force stopping app...", step="Cleanup")
         subprocess.run([adb_path, "-s", serial, "shell", "am force-stop jp.konami.pesam"], 
-                       capture_output=True, timeout=5, **kwargs)
+                       capture_output=True, timeout=20, **kwargs)
         time.sleep(0.2)
 
         # 2. Clear remote dir & ensure 777 permissions
         gui_log(serial, "Step 2: Clearing auth directory...", step="Cleanup")
         subprocess.run([adb_path, "-s", serial, "shell", f"su -c 'rm -rf {REMOTE_AUTH_DIR}/* && mkdir -p {REMOTE_AUTH_DIR} && chmod 777 {REMOTE_AUTH_DIR}'"], 
-                       capture_output=True, text=True, timeout=5, **kwargs)
+                       capture_output=True, text=True, timeout=20, **kwargs)
         time.sleep(0.1)
 
         # 3. Copy to local temp and Push
