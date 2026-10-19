@@ -3202,15 +3202,30 @@ def get_screen_capture(device):
         # ค้างน้ำเงิน/ดำครบ 2 วิ → กดรัวๆ (5 ครั้ง/เฟรม) ทุกเฟรมจนกว่าจอจะเปลี่ยน (เช่น ขึ้น play8)
         _sb = device.serial
         if is_blue_screen(img):
+            # เจอจอน้ำเงิน → วนกดรัวๆ อยู่ในนี้เลยจนกว่าจอจะหาย (ไม่พึ่งจังหวะ loop ของผู้เรียก
+            # ซึ่งบางเฟสพัก 1-2 วิ/เฟรม และเฟรมที่หลุดเฟรมเดียวเคยรีเซ็ตตัวนับจนไม่เคยได้กด)
             _t0 = DEVICE_BLUE_SINCE.setdefault(_sb, time.time())
-            if time.time() - _t0 >= 2:
-                # กดรัวๆ ถี่ๆ: ยิงทีละ 5 จุดในคำสั่งเดียว (กลางจอ + รอบๆ)
+            _miss = 0
+            while _miss < 3 and time.time() - _t0 < 90:
                 device.shell("input tap 480 270; input tap 480 270; input tap 300 270; "
                              "input tap 660 270; input tap 480 270")
                 _n = DEVICE_BLUE_TAPS.get(_sb, 0) + 1
                 DEVICE_BLUE_TAPS[_sb] = _n
-                if _n % 10 == 1:
-                    gui_log(_sb, f"จอน้ำเงิน/ดำค้าง ≥2 วิ → กดรัวๆ (รอบที่ {_n})", step="Blue Tap")
+                if _n % 20 == 1:
+                    gui_log(_sb, f"จอน้ำเงิน/ดำค้าง → กดรัวๆ (รอบที่ {_n})", step="Blue Tap")
+                time.sleep(0.2)
+                _chk = fast_screencap(device)
+                if _chk is not None and is_blue_screen(_chk):
+                    _miss = 0
+                else:
+                    _miss += 1   # ต้องไม่เป็นน้ำเงิน 3 เฟรมติดถึงจะถือว่าหาย
+                if _chk is not None:
+                    img = _chk
+            if _miss >= 3:
+                gui_log(_sb, f"จอน้ำเงินหายแล้ว (กดไป {DEVICE_BLUE_TAPS.get(_sb, 0)} รอบ)", step="Blue Tap")
+                DEVICE_BLUE_SINCE.pop(_sb, None)
+                DEVICE_BLUE_TAPS.pop(_sb, None)
+            else:
                 # กดแล้วยังค้างเกิน 90 วิ → ปิดเกม ให้รอบถัดไปเปิดใหม่เอง (เช็คเกมตายด้านบน)
                 if time.time() - _t0 >= 90:
                     gui_log(_sb, "จอน้ำเงินค้างเกิน 90 วิ → ปิดเกมแล้วเปิดใหม่", step="Blue Restart", status="stuck")
