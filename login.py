@@ -403,14 +403,7 @@ def is_blue_screen(gray_img):
         # รวมจอดำล้วนด้วย: ตอนเกมค้างโหลด screencap มักได้ "ดำล้วน" ทั้งที่บนจอเห็นเป็นสีน้ำเงิน
         if med > 45:
             return False
-        s16 = small.astype(np.int16)
-        if float((np.abs(s16 - med) <= 4).mean()) >= 0.97:
-            return True
-        # จอน้ำเงินแบบมีแถบเฉียงเข้ม + วงโหลดเล็กๆ กลางจอ: ไม่ได้สีเดียวล้วน
-        # → ยอมให้มีเฉดต่างได้ แต่ต้องมืดเกือบทั้งจอ และแทบไม่มีพิกเซลสว่าง (ไม่มี UI/ตัวหนังสือ)
-        return (float((np.abs(s16 - med) <= 12).mean()) >= 0.75
-                and float((small <= 70).mean()) >= 0.98
-                and float((small > 110).mean()) <= 0.005)
+        return float((np.abs(small.astype(np.int16) - med) <= 4).mean()) >= 0.97
     except Exception:
         return False
 
@@ -3202,30 +3195,15 @@ def get_screen_capture(device):
         # ค้างน้ำเงิน/ดำครบ 2 วิ → กดรัวๆ (5 ครั้ง/เฟรม) ทุกเฟรมจนกว่าจอจะเปลี่ยน (เช่น ขึ้น play8)
         _sb = device.serial
         if is_blue_screen(img):
-            # เจอจอน้ำเงิน → วนกดรัวๆ อยู่ในนี้เลยจนกว่าจอจะหาย (ไม่พึ่งจังหวะ loop ของผู้เรียก
-            # ซึ่งบางเฟสพัก 1-2 วิ/เฟรม และเฟรมที่หลุดเฟรมเดียวเคยรีเซ็ตตัวนับจนไม่เคยได้กด)
             _t0 = DEVICE_BLUE_SINCE.setdefault(_sb, time.time())
-            _miss = 0
-            while _miss < 3 and time.time() - _t0 < 90:
+            if time.time() - _t0 >= 2:
+                # กดรัวๆ ถี่ๆ: ยิงทีละ 5 จุดในคำสั่งเดียว (กลางจอ + รอบๆ)
                 device.shell("input tap 480 270; input tap 480 270; input tap 300 270; "
                              "input tap 660 270; input tap 480 270")
                 _n = DEVICE_BLUE_TAPS.get(_sb, 0) + 1
                 DEVICE_BLUE_TAPS[_sb] = _n
-                if _n % 20 == 1:
-                    gui_log(_sb, f"จอน้ำเงิน/ดำค้าง → กดรัวๆ (รอบที่ {_n})", step="Blue Tap")
-                time.sleep(0.2)
-                _chk = fast_screencap(device)
-                if _chk is not None and is_blue_screen(_chk):
-                    _miss = 0
-                else:
-                    _miss += 1   # ต้องไม่เป็นน้ำเงิน 3 เฟรมติดถึงจะถือว่าหาย
-                if _chk is not None:
-                    img = _chk
-            if _miss >= 3:
-                gui_log(_sb, f"จอน้ำเงินหายแล้ว (กดไป {DEVICE_BLUE_TAPS.get(_sb, 0)} รอบ)", step="Blue Tap")
-                DEVICE_BLUE_SINCE.pop(_sb, None)
-                DEVICE_BLUE_TAPS.pop(_sb, None)
-            else:
+                if _n % 10 == 1:
+                    gui_log(_sb, f"จอน้ำเงิน/ดำค้าง ≥2 วิ → กดรัวๆ (รอบที่ {_n})", step="Blue Tap")
                 # กดแล้วยังค้างเกิน 90 วิ → ปิดเกม ให้รอบถัดไปเปิดใหม่เอง (เช็คเกมตายด้านบน)
                 if time.time() - _t0 >= 90:
                     gui_log(_sb, "จอน้ำเงินค้างเกิน 90 วิ → ปิดเกมแล้วเปิดใหม่", step="Blue Restart", status="stuck")
@@ -6082,7 +6060,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path, coin_
                     break
             miss_count += 1
             gui_log(serial, f"[Loop {loop_num}] gachafree1 not here, swiping... ({miss_count}/{max_miss})", step="Swipe")
-            device.shell("input swipe 618 308 54 306 3000")
+            device.shell("input swipe 618 308 54 306 1200")
             time.sleep(2.0)
 
         if not found_free:
@@ -8188,7 +8166,7 @@ def process_device_login(device):
                                             if found_g3:
                                                 break
                                     # Swipe (drag) action
-                                    device.shell("input swipe 618 308 54 306 5000")
+                                    device.shell("input swipe 618 308 54 306 3000")
                                     time.sleep(2)
 
                         # gacha4
