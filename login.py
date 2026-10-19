@@ -6537,7 +6537,8 @@ def _blue_watchdog_loop(serial):
                         continue
         except Exception:
             pass
-        time.sleep(1.0)
+        # แคปจอดิบ ~2MB/ครั้ง × 15 จอ — ถี่ทุก 1 วิเคยทำ adb ช้าจนคำสั่ง push timeout → เว้น 4 วิ
+        time.sleep(4.0)
     _BLUE_WATCHDOGS.discard(serial)
 
 def start_blue_watchdog(serial):
