@@ -6546,7 +6546,7 @@ def _blue_watchdog_loop(serial):
                         DEVICE_WD_PLAY8_TAPS[serial] = _n8
                         if _n8 % 10 == 1:
                             gui_log(serial, f"[Watchdog] เจอ play8 → กด ({x},{y}) ครั้งที่ {_n8}", step="WD play8")
-                        time.sleep(1.0)
+                        time.sleep(0.5)
                         continue
                     DEVICE_WD_PLAY8_TAPS.pop(serial, None)
                     if is_blue_screen(gray):
@@ -6560,8 +6560,9 @@ def _blue_watchdog_loop(serial):
             if time.time() - _last_err > 30:   # log error ไม่ถี่เกิน (เดิมกลืนเงียบ = ไม่รู้ว่าเธรดพัง)
                 _last_err = time.time()
                 gui_log(serial, f"[Watchdog] error: {e}", step="WD Error")
-        # แคปจอดิบ ~2MB/ครั้ง × 15 จอ — ถี่ทุก 1 วิเคยทำ adb ช้าจนคำสั่ง push timeout → เว้น 4 วิ
-        time.sleep(4.0)
+        # ช่วง login (ยังไม่ผ่าน checkpoint) = ช่วงที่ play8/จอน้ำเงินโผล่ → เช็คถี่ 0.5 วิ
+        # หลัง login แล้ว: แคปจอดิบ ~2MB × 15 จอ ถี่ๆ เคยทำ adb ช้าจน push timeout → เว้น 4 วิ
+        time.sleep(4.0 if DEVICE_PAST_LOGIN.get(serial) else 0.5)
     _BLUE_WATCHDOGS.discard(serial)
 
 def start_blue_watchdog(serial):
