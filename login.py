@@ -2873,8 +2873,9 @@ def _handle_blue_screen(device, img):
     _t0 = DEVICE_BLUE_SINCE.setdefault(_sb, time.time())
     _miss = 0
     while _miss < 3 and time.time() - _t0 < 90:
-        device.shell("input tap 480 270; input tap 480 270; input tap 300 270; "
-                     "input tap 660 270; input tap 480 270")
+        # ผ่าน subprocess + timeout: device.shell ของ ppadb ไม่มี timeout → เคยค้างเงียบทั้งเธรดเป็น 10+ นาที
+        _run_device_shell(device, "input tap 480 270; input tap 480 270; input tap 300 270; "
+                                  "input tap 660 270; input tap 480 270", timeout=5)
         _n = DEVICE_BLUE_TAPS.get(_sb, 0) + 1
         DEVICE_BLUE_TAPS[_sb] = _n
         if _n % 20 == 1:
@@ -2894,7 +2895,7 @@ def _handle_blue_screen(device, img):
         return img
     # กดแล้วยังค้างเกิน 90 วิ → ปิดเกม ให้เช็คเกมตายรอบหน้า relaunch เอง
     gui_log(_sb, "จอน้ำเงินค้างเกิน 90 วิ → ปิดเกมแล้วเปิดใหม่", step="Blue Restart", status="stuck")
-    device.shell("am force-stop jp.konami.pesam")
+    _run_device_shell(device, "am force-stop jp.konami.pesam", timeout=5)
     DEVICE_LAST_GAME_CHECK[_sb] = 0
     time.sleep(1)
     return None
@@ -2920,6 +2921,9 @@ def _fast_screencap_raw(device):
 def _screencap_io(device):
     """ส่วนที่คุยกับ adb จริง (ถูกคุมด้วย _SCREENCAP_GATE จากตัวเรียก)"""
     conn = None
+    # ppadb ตั้งต้น timeout=None → socket อ่านค้างได้ตลอดกาล (ถือ _SCREENCAP_GATE ไว้ด้วย = ลากเครื่องอื่นค้างตาม)
+    if not device.client.timeout:
+        device.client.timeout = 30
     try:
         conn = device.client.create_connection(timeout=device.client.timeout)
         conn.send(f"host:transport:{device.serial}")
