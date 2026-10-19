@@ -400,7 +400,8 @@ def is_blue_screen(gray_img):
     try:
         small = gray_img[::8, ::8]
         med = int(np.median(small))
-        if med < 12 or med > 45:
+        # รวมจอดำล้วนด้วย: ตอนเกมค้างโหลด screencap มักได้ "ดำล้วน" ทั้งที่บนจอเห็นเป็นสีน้ำเงิน
+        if med > 45:
             return False
         return float((np.abs(small.astype(np.int16) - med) <= 4).mean()) >= 0.97
     except Exception:
@@ -3191,16 +3192,27 @@ def get_screen_capture(device):
             return None
 
         # === จอน้ำเงินล้วน floating check (หาลอยๆ ทุกเฟรม ทุกเฟส) ===
-        # ค้างน้ำเงินครบ 5 วิ → กดกลางจอรัวๆ ทุกเฟรมจนกว่าจอจะเปลี่ยน (เช่น ขึ้น play8)
+        # ค้างน้ำเงิน/ดำครบ 2 วิ → กดรัวๆ (5 ครั้ง/เฟรม) ทุกเฟรมจนกว่าจอจะเปลี่ยน (เช่น ขึ้น play8)
         _sb = device.serial
         if is_blue_screen(img):
             _t0 = DEVICE_BLUE_SINCE.setdefault(_sb, time.time())
-            if time.time() - _t0 >= 5:
-                device.shell("input tap 480 270")
+            if time.time() - _t0 >= 2:
+                # กดรัวๆ ถี่ๆ: ยิงทีละ 5 จุดในคำสั่งเดียว (กลางจอ + รอบๆ)
+                device.shell("input tap 480 270; input tap 480 270; input tap 300 270; "
+                             "input tap 660 270; input tap 480 270")
                 _n = DEVICE_BLUE_TAPS.get(_sb, 0) + 1
                 DEVICE_BLUE_TAPS[_sb] = _n
                 if _n % 10 == 1:
-                    gui_log(_sb, f"จอน้ำเงินค้าง ≥5 วิ → กดกลางจอรัวๆ (ครั้งที่ {_n})", step="Blue Tap")
+                    gui_log(_sb, f"จอน้ำเงิน/ดำค้าง ≥2 วิ → กดรัวๆ (รอบที่ {_n})", step="Blue Tap")
+                # กดแล้วยังค้างเกิน 90 วิ → ปิดเกม ให้รอบถัดไปเปิดใหม่เอง (เช็คเกมตายด้านบน)
+                if time.time() - _t0 >= 90:
+                    gui_log(_sb, "จอน้ำเงินค้างเกิน 90 วิ → ปิดเกมแล้วเปิดใหม่", step="Blue Restart", status="stuck")
+                    DEVICE_BLUE_SINCE.pop(_sb, None)
+                    DEVICE_BLUE_TAPS.pop(_sb, None)
+                    device.shell("am force-stop jp.konami.pesam")
+                    DEVICE_LAST_GAME_CHECK[_sb] = 0   # บังคับเช็คเกมรอบหน้าทันที → relaunch
+                    time.sleep(1)
+                    return None
         else:
             DEVICE_BLUE_SINCE.pop(_sb, None)
             DEVICE_BLUE_TAPS.pop(_sb, None)
@@ -6692,7 +6704,7 @@ def process_device_login(device):
                 # เบาเครื่อง: ช่วงเกมกำลังโหลด (ยังไม่เห็น play8) ไม่ต้องแคปจอถี่ → พัก 2 วิ (เดิม 0.3)
                 # จอน้ำเงินค้าง (floating check กำลังกดรัวๆ) → วนถี่ 0.3 วิ ให้กดรัวจริง
                 if DEVICE_BLUE_TAPS.get(serial):
-                    time.sleep(0.3)
+                    time.sleep(0.1)
                 else:
                     time.sleep(2.0 if play8_click_count == 0 else 1.0)
 
