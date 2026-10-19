@@ -127,7 +127,7 @@ HERO_IMG_MAP = {
 #     *** ชื่อไฟล์ที่ export = UID ล้วนเสมอ ไม่มีชื่อนักเตะ (ดูหัวข้อ "ชื่อไฟล์ตอน export")
 #     ชื่อไฟล์รูปใช้โชว์ใน log ว่าเจอใคร เช่น  img/find-img/Messi.png
 #     ไม่เจอรูปไหนเลย → ไป no-hero เหมือนเดิม
-FIND_IMG = 0
+FIND_IMG = 1
 
 # โฟลเดอร์ย่อยใน img/ ที่เก็บรูปไว้สแกน (รองรับ .png .bmp .jpg)
 FIND_IMG_DIR = "find-img"
@@ -261,7 +261,8 @@ EXTAR_FIND = {
     "Johan Manzambi": "extarfind5.bmp",
     "Luka Modric": [("extarfind7.bmp", "LukaN"), ("extarfind10.bmp", "LukaO")],
     "Rui Costa": ("extarfind8.bmp", "Rui Costa"),
-    "Diego Costa": ("extarfind9.bmp", "Diego Costa")
+    "Diego Costa": ("extarfind9.bmp", "Diego Costa"),
+    "Yaya Toure": ("extarfind11.bmp", "Yaya toure")
 }
 
 # ความแม่นตอนเทียบรูปของ EXTAR_FIND (0.0 - 1.0) — ยิ่งสูงยิ่งเข้มงวด
