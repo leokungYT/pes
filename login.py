@@ -2856,49 +2856,7 @@ def launch_game(device, settle=0.0):
         time.sleep(settle)
 
 def fast_screencap(device):
-    img = _fast_screencap_raw(device)
-    if img is None:
-        return None
-    return _handle_blue_screen(device, img)
-
-def _handle_blue_screen(device, img):
-    """=== จอน้ำเงินล้วน floating check (ทุกเฟรม ทุกเฟส — อยู่ใน fast_screencap จึงครอบทุกลูป) ===
-    เจอจอน้ำเงิน → วนกดรัวๆ อยู่ในนี้เลยจนกว่าจอจะหาย (ไม่พึ่งจังหวะ loop ของผู้เรียก)
-    คืนเฟรมล่าสุดหลังจอหาย / None ถ้าค้างเกิน 90 วิ (ปิดเกมให้ relaunch)"""
-    _sb = device.serial
-    if not is_blue_screen(img):
-        DEVICE_BLUE_SINCE.pop(_sb, None)
-        DEVICE_BLUE_TAPS.pop(_sb, None)
-        return img
-    _t0 = DEVICE_BLUE_SINCE.setdefault(_sb, time.time())
-    _miss = 0
-    while _miss < 3 and time.time() - _t0 < 90:
-        # ผ่าน subprocess + timeout: device.shell ของ ppadb ไม่มี timeout → เคยค้างเงียบทั้งเธรดเป็น 10+ นาที
-        _run_device_shell(device, "input tap 480 270; input tap 480 270; input tap 300 270; "
-                                  "input tap 660 270; input tap 480 270", timeout=5)
-        _n = DEVICE_BLUE_TAPS.get(_sb, 0) + 1
-        DEVICE_BLUE_TAPS[_sb] = _n
-        if _n % 20 == 1:
-            gui_log(_sb, f"จอน้ำเงิน/ดำค้าง → กดรัวๆ (รอบที่ {_n})", step="Blue Tap")
-        time.sleep(0.2)
-        _chk = _fast_screencap_raw(device)
-        if _chk is not None and is_blue_screen(_chk):
-            _miss = 0
-        else:
-            _miss += 1   # ต้องไม่เป็นน้ำเงิน 3 เฟรมติดถึงจะถือว่าหาย
-        if _chk is not None:
-            img = _chk
-    DEVICE_BLUE_SINCE.pop(_sb, None)
-    DEVICE_BLUE_TAPS.pop(_sb, None)
-    if _miss >= 3:
-        gui_log(_sb, f"จอน้ำเงินหายแล้ว (กดไป {_n} รอบ)", step="Blue Tap")
-        return img
-    # กดแล้วยังค้างเกิน 90 วิ → ปิดเกม ให้เช็คเกมตายรอบหน้า relaunch เอง
-    gui_log(_sb, "จอน้ำเงินค้างเกิน 90 วิ → ปิดเกมแล้วเปิดใหม่", step="Blue Restart", status="stuck")
-    _run_device_shell(device, "am force-stop jp.konami.pesam", timeout=5)
-    DEVICE_LAST_GAME_CHECK[_sb] = 0
-    time.sleep(1)
-    return None
+    return _fast_screencap_raw(device)
 
 def _fast_screencap_raw(device):
     # ── per-device throttle ──
@@ -2922,9 +2880,7 @@ def _screencap_io(device):
     """ส่วนที่คุยกับ adb จริง (ถูกคุมด้วย _SCREENCAP_GATE จากตัวเรียก)"""
     conn = None
     try:
-        # ppadb Client ไม่มี attribute .timeout (เคยอ้างถึงแล้ว AttributeError หลุด try → แคปจอพังทุกเฟรม)
-        # ใส่ timeout ตรงนี้: socket อ่านค้างได้ตลอดกาลถ้าไม่ใส่ (ถือ _SCREENCAP_GATE ไว้ = ลากเครื่องอื่นค้างตาม)
-        conn = device.client.create_connection(timeout=30)
+        conn = device.client.create_connection(timeout=device.client.timeout)
         conn.send(f"host:transport:{device.serial}")
         conn.check_status()
         conn.send("shell:screencap")
@@ -3242,6 +3198,46 @@ def get_screen_capture(device):
         if img is None:
             return None
 
+        # === จอน้ำเงินล้วน floating check (หาลอยๆ ทุกเฟรม ทุกเฟส) ===
+        # ค้างน้ำเงิน/ดำครบ 2 วิ → กดรัวๆ (5 ครั้ง/เฟรม) ทุกเฟรมจนกว่าจอจะเปลี่ยน (เช่น ขึ้น play8)
+        _sb = device.serial
+        if is_blue_screen(img):
+            # เจอจอน้ำเงิน → วนกดรัวๆ อยู่ในนี้เลยจนกว่าจอจะหาย (ไม่พึ่งจังหวะ loop ของผู้เรียก
+            # ซึ่งบางเฟสพัก 1-2 วิ/เฟรม และเฟรมที่หลุดเฟรมเดียวเคยรีเซ็ตตัวนับจนไม่เคยได้กด)
+            _t0 = DEVICE_BLUE_SINCE.setdefault(_sb, time.time())
+            _miss = 0
+            while _miss < 3 and time.time() - _t0 < 90:
+                device.shell("input tap 480 270; input tap 480 270; input tap 300 270; "
+                             "input tap 660 270; input tap 480 270")
+                _n = DEVICE_BLUE_TAPS.get(_sb, 0) + 1
+                DEVICE_BLUE_TAPS[_sb] = _n
+                if _n % 20 == 1:
+                    gui_log(_sb, f"จอน้ำเงิน/ดำค้าง → กดรัวๆ (รอบที่ {_n})", step="Blue Tap")
+                time.sleep(0.2)
+                _chk = fast_screencap(device)
+                if _chk is not None and is_blue_screen(_chk):
+                    _miss = 0
+                else:
+                    _miss += 1   # ต้องไม่เป็นน้ำเงิน 3 เฟรมติดถึงจะถือว่าหาย
+                if _chk is not None:
+                    img = _chk
+            if _miss >= 3:
+                gui_log(_sb, f"จอน้ำเงินหายแล้ว (กดไป {DEVICE_BLUE_TAPS.get(_sb, 0)} รอบ)", step="Blue Tap")
+                DEVICE_BLUE_SINCE.pop(_sb, None)
+                DEVICE_BLUE_TAPS.pop(_sb, None)
+            else:
+                # กดแล้วยังค้างเกิน 90 วิ → ปิดเกม ให้รอบถัดไปเปิดใหม่เอง (เช็คเกมตายด้านบน)
+                if time.time() - _t0 >= 90:
+                    gui_log(_sb, "จอน้ำเงินค้างเกิน 90 วิ → ปิดเกมแล้วเปิดใหม่", step="Blue Restart", status="stuck")
+                    DEVICE_BLUE_SINCE.pop(_sb, None)
+                    DEVICE_BLUE_TAPS.pop(_sb, None)
+                    device.shell("am force-stop jp.konami.pesam")
+                    DEVICE_LAST_GAME_CHECK[_sb] = 0   # บังคับเช็คเกมรอบหน้าทันที → relaunch
+                    time.sleep(1)
+                    return None
+        else:
+            DEVICE_BLUE_SINCE.pop(_sb, None)
+            DEVICE_BLUE_TAPS.pop(_sb, None)
         
         if img is not None:
             # === fixnet floating check ===
@@ -4714,13 +4710,13 @@ def push_dat_to_device(device, local_path):
         # 1. Force stop app
         gui_log(serial, "Step 1: Force stopping app...", step="Cleanup")
         subprocess.run([adb_path, "-s", serial, "shell", "am force-stop jp.konami.pesam"], 
-                       capture_output=True, timeout=20, **kwargs)
+                       capture_output=True, timeout=5, **kwargs)
         time.sleep(0.2)
 
         # 2. Clear remote dir & ensure 777 permissions
         gui_log(serial, "Step 2: Clearing auth directory...", step="Cleanup")
         subprocess.run([adb_path, "-s", serial, "shell", f"su -c 'rm -rf {REMOTE_AUTH_DIR}/* && mkdir -p {REMOTE_AUTH_DIR} && chmod 777 {REMOTE_AUTH_DIR}'"], 
-                       capture_output=True, text=True, timeout=20, **kwargs)
+                       capture_output=True, text=True, timeout=5, **kwargs)
         time.sleep(0.1)
 
         # 3. Copy to local temp and Push
@@ -4732,13 +4728,13 @@ def push_dat_to_device(device, local_path):
         # 4. Move to game folder + chmod 666 + sync to storage
         gui_log(serial, "Step 4: Applying data to game...", step="Inject")
         subprocess.run([adb_path, "-s", serial, "shell", f"su -c 'cp {tmp_remote} {REMOTE_DAT_FILE} && chmod 666 {REMOTE_DAT_FILE} && rm -f {tmp_remote} && sync'"],
-                       capture_output=True, text=True, timeout=20, **kwargs)   # sync ตอนเปิด 15 จอพร้อมกันเคยเกิน 5 วิ
+                       capture_output=True, text=True, timeout=5, **kwargs)
         
         # 5. Verify
         gui_log(serial, "Step 5: Verifying...", step="Verify")
         time.sleep(0.2)
         check_res = subprocess.run([adb_path, "-s", serial, "shell", f"su -c 'ls -l {REMOTE_DAT_FILE}'"], 
-                                   capture_output=True, text=True, timeout=10, **kwargs)
+                                   capture_output=True, text=True, timeout=5, **kwargs)
         check = check_res.stdout.strip()
         
         if "No such" not in check and check:
@@ -6510,95 +6506,8 @@ def check_coin_mode(device, cycle_start, serial, original_name, file_path, coin_
 # ═════════════════════════════════════════════════════════════════════════════
 # Main bot loop
 # ═════════════════════════════════════════════════════════════════════════════
-_BLUE_WATCHDOGS = set()
-DEVICE_WD_PLAY8_TAPS = {}
-
-def _blue_watchdog_loop(serial):
-    """เธรดเฝ้าจอน้ำเงินแยกต่อเครื่อง — ไม่ขึ้นกับ flow ของ worker (worker ค้าง/อยู่ลูปไหนก็ยังกด)
-    แคปจอ + กด ผ่าน subprocess ที่มี timeout ทั้งหมด จึงไม่มีทางค้างตาย"""
-    kwargs = {'creationflags': 0x08000000} if os.name == 'nt' else {}
-    gui_log(serial, "[Watchdog] เริ่มเฝ้าจอ (จอน้ำเงิน + play8)", step="Watchdog")
-    _last_err = 0
-    while bot_running:
-        try:
-            raw = subprocess.run([adb_path, "-s", serial, "exec-out", "screencap"],
-                                 capture_output=True, timeout=8, **kwargs).stdout
-            if len(raw) > 16:
-                w = int.from_bytes(raw[0:4], 'little')
-                h = int.from_bytes(raw[4:8], 'little')
-                size = w * h * 4
-                hdr = len(raw) - size   # header 12 หรือ 16 ไบต์แล้วแต่รุ่น Android
-                if hdr not in (12, 16) and time.time() - _last_err > 30:
-                    _last_err = time.time()
-                    gui_log(serial, f"[Watchdog] ภาพจอผิดรูปแบบ ({w}x{h}, {len(raw)} bytes)", step="WD Error")
-                if hdr in (12, 16):
-                    rgba = np.frombuffer(raw, np.uint8, offset=hdr, count=size).reshape((h, w, 4))
-                    gray = cv2.cvtColor(rgba, cv2.COLOR_RGBA2GRAY)
-                    # เจอ play8 (หน้า title) → กดทันที ไม่รอ worker (worker อาจติดอยู่ลูปอื่น/รออะไรอยู่)
-                    p8 = (img_search(gray, os.path.join(IMG_DIR, "play8.bmp"))
-                          or img_search(gray, os.path.join(IMG_DIR, "play8fix.bmp"))
-                          or find_play8_ring(gray))
-                    if p8:
-                        x, y = p8[0]
-                        subprocess.run([adb_path, "-s", serial, "shell", f"input tap {x} {y}"],
-                                       capture_output=True, timeout=5, **kwargs)
-                        _n8 = DEVICE_WD_PLAY8_TAPS.get(serial, 0) + 1
-                        DEVICE_WD_PLAY8_TAPS[serial] = _n8
-                        if _n8 % 10 == 1:
-                            gui_log(serial, f"[Watchdog] เจอ play8 → กด ({x},{y}) ครั้งที่ {_n8}", step="WD play8")
-                        time.sleep(0.5)
-                        continue
-                    DEVICE_WD_PLAY8_TAPS.pop(serial, None)
-                    if is_blue_screen(gray):
-                        cx, cy = w // 2, h // 2
-                        taps = "; ".join(f"input tap {x} {cy}" for x in (cx, cx - w // 5, cx + w // 5, cx))
-                        subprocess.run([adb_path, "-s", serial, "shell", taps],
-                                       capture_output=True, timeout=5, **kwargs)
-                        time.sleep(0.2)
-                        continue
-        except Exception as e:
-            if time.time() - _last_err > 30:   # log error ไม่ถี่เกิน (เดิมกลืนเงียบ = ไม่รู้ว่าเธรดพัง)
-                _last_err = time.time()
-                gui_log(serial, f"[Watchdog] error: {e}", step="WD Error")
-        # ช่วง login (ยังไม่ผ่าน checkpoint) = ช่วงที่ play8/จอน้ำเงินโผล่ → เช็คถี่ 0.5 วิ
-        # หลัง login แล้ว: แคปจอดิบ ~2MB × 15 จอ ถี่ๆ เคยทำ adb ช้าจน push timeout → เว้น 4 วิ
-        time.sleep(4.0 if DEVICE_PAST_LOGIN.get(serial) else 0.5)
-    _BLUE_WATCHDOGS.discard(serial)
-
-def start_blue_watchdog(serial):
-    if serial in _BLUE_WATCHDOGS:
-        return
-    _BLUE_WATCHDOGS.add(serial)
-    threading.Thread(target=_blue_watchdog_loop, args=(serial,), daemon=True).start()
-
-_PLAY8_RING_BIN = None
-
-def find_play8_ring(gray_img):
-    """สำรอง play8.bmp: หาวงแหวนสีขาวปุ่ม play8 แบบไม่สนพื้นหลัง (หน้า title เปลี่ยนรูปทุกซีซั่น
-    เช่น eFootball 2027 พื้นฟองชมพู/ฟ้า → เทียบสีตรงๆ ไม่ผ่าน) — ตัดเป็นขาว/ดำก่อนแล้วค่อย match
-    หาเฉพาะโซนกลาง-ล่างของจอ (ปุ่มอยู่ใต้โลโก้ ~85% ความสูง)"""
-    global _PLAY8_RING_BIN
-    try:
-        if _PLAY8_RING_BIN is None:
-            t = cv2.imread(os.path.join(IMG_DIR, "play8.bmp"), cv2.IMREAD_GRAYSCALE)
-            _PLAY8_RING_BIN = ((t > 170) * 255).astype(np.uint8)
-        h, w = gray_img.shape[:2]
-        x0, x1, y0 = int(w * 0.35), int(w * 0.65), int(h * 0.65)
-        roi = ((gray_img[y0:, x0:x1] > 170) * 255).astype(np.uint8)
-        th, tw = _PLAY8_RING_BIN.shape
-        if roi.shape[0] < th or roi.shape[1] < tw:
-            return None
-        res = cv2.matchTemplate(roi, _PLAY8_RING_BIN, cv2.TM_CCOEFF_NORMED)
-        _, mx, _, loc = cv2.minMaxLoc(res)
-        if mx >= 0.55:
-            return [(x0 + loc[0] + tw // 2, y0 + loc[1] + th // 2)]
-    except Exception:
-        pass
-    return None
-
 def process_device_login(device):
     serial = device.serial
-    start_blue_watchdog(serial)
     gui_log(serial, "Bot started", step="Init", status="working")
 
     while bot_running:
@@ -6790,10 +6699,6 @@ def process_device_login(device):
                     if not pts_8:
                         pts_8 = img_search(img, os.path.join(IMG_DIR, "play8fix.bmp"))
                         matched_name = "play8fix"
-
-                    if not pts_8:
-                        pts_8 = find_play8_ring(img)
-                        matched_name = "play8ring"
 
                     if pts_8:
                         DEVICE_WATCH_GPLAY[serial] = False   # เจอ play8 แล้ว → เลิกหา fix-googleplay
