@@ -6547,6 +6547,31 @@ def start_blue_watchdog(serial):
     _BLUE_WATCHDOGS.add(serial)
     threading.Thread(target=_blue_watchdog_loop, args=(serial,), daemon=True).start()
 
+_PLAY8_RING_BIN = None
+
+def find_play8_ring(gray_img):
+    """สำรอง play8.bmp: หาวงแหวนสีขาวปุ่ม play8 แบบไม่สนพื้นหลัง (หน้า title เปลี่ยนรูปทุกซีซั่น
+    เช่น eFootball 2027 พื้นฟองชมพู/ฟ้า → เทียบสีตรงๆ ไม่ผ่าน) — ตัดเป็นขาว/ดำก่อนแล้วค่อย match
+    หาเฉพาะโซนกลาง-ล่างของจอ (ปุ่มอยู่ใต้โลโก้ ~85% ความสูง)"""
+    global _PLAY8_RING_BIN
+    try:
+        if _PLAY8_RING_BIN is None:
+            t = cv2.imread(os.path.join(IMG_DIR, "play8.bmp"), cv2.IMREAD_GRAYSCALE)
+            _PLAY8_RING_BIN = ((t > 170) * 255).astype(np.uint8)
+        h, w = gray_img.shape[:2]
+        x0, x1, y0 = int(w * 0.35), int(w * 0.65), int(h * 0.65)
+        roi = ((gray_img[y0:, x0:x1] > 170) * 255).astype(np.uint8)
+        th, tw = _PLAY8_RING_BIN.shape
+        if roi.shape[0] < th or roi.shape[1] < tw:
+            return None
+        res = cv2.matchTemplate(roi, _PLAY8_RING_BIN, cv2.TM_CCOEFF_NORMED)
+        _, mx, _, loc = cv2.minMaxLoc(res)
+        if mx >= 0.55:
+            return [(x0 + loc[0] + tw // 2, y0 + loc[1] + th // 2)]
+    except Exception:
+        pass
+    return None
+
 def process_device_login(device):
     serial = device.serial
     start_blue_watchdog(serial)
@@ -6741,6 +6766,10 @@ def process_device_login(device):
                     if not pts_8:
                         pts_8 = img_search(img, os.path.join(IMG_DIR, "play8fix.bmp"))
                         matched_name = "play8fix"
+
+                    if not pts_8:
+                        pts_8 = find_play8_ring(img)
+                        matched_name = "play8ring"
 
                     if pts_8:
                         DEVICE_WATCH_GPLAY[serial] = False   # เจอ play8 แล้ว → เลิกหา fix-googleplay
