@@ -280,6 +280,8 @@ _UNLOCK_HERO_SEEN    = {}     # serial -> เวลาที่เริ่ม�
 UNLOCK_HERO_STUCK_SECS = 8.0  # วิ — unlock-hero1 ค้างบนจอนานเกินนี้ = ป็อปอัพไม่ยอมไปเอง → กดปิดให้
 GACHA_BACKHOME_STUCK_SECS = 7.0   # วิ — ระหว่างสุ่มกาชา ถ้า backhome ค้างบนจอนานเกินนี้ = ไปต่อไม่ได้ → กดกลับ Home
 DEVICE_WATCH_GPLAY   = {}     # serial -> True ช่วงเปิดเกม → หา fix-googleplay ลอยๆ ทุกเฟรม (หยุดเมื่อเจอ play8)
+DEVICE_BLUE_SINCE    = {}     # serial -> เวลาที่เริ่มเห็นจอน้ำเงินล้วน (floating check)
+DEVICE_BLUE_TAPS     = {}     # serial -> จำนวนครั้งที่กดกลางจอระหว่างจอน้ำเงินค้าง
 # popup "Google Play Games": ห้ามกด Cancel — กดแล้วเกมเด้งออก
 # → แตะที่ว่างมุมซ้ายบนแทน (นอกกรอบ dialog ไม่โดนปุ่มไหน) กดซ้ำๆ จนกว่า popup จะหาย/เจอ play8
 # ตรวจจากหน้าจอจริงแล้ว: (60,60) ดำสนิท ไม่มีปุ่ม และอยู่นอกกรอบ dialog (dialog เริ่มที่ x=157)
@@ -3187,6 +3189,21 @@ def get_screen_capture(device):
         img = fast_screencap(device)
         if img is None:
             return None
+
+        # === จอน้ำเงินล้วน floating check (หาลอยๆ ทุกเฟรม ทุกเฟส) ===
+        # ค้างน้ำเงินครบ 5 วิ → กดกลางจอรัวๆ ทุกเฟรมจนกว่าจอจะเปลี่ยน (เช่น ขึ้น play8)
+        _sb = device.serial
+        if is_blue_screen(img):
+            _t0 = DEVICE_BLUE_SINCE.setdefault(_sb, time.time())
+            if time.time() - _t0 >= 5:
+                device.shell("input tap 480 270")
+                _n = DEVICE_BLUE_TAPS.get(_sb, 0) + 1
+                DEVICE_BLUE_TAPS[_sb] = _n
+                if _n % 10 == 1:
+                    gui_log(_sb, f"จอน้ำเงินค้าง ≥5 วิ → กดกลางจอรัวๆ (ครั้งที่ {_n})", step="Blue Tap")
+        else:
+            DEVICE_BLUE_SINCE.pop(_sb, None)
+            DEVICE_BLUE_TAPS.pop(_sb, None)
         
         if img is not None:
             # === fixnet floating check ===
@@ -6583,8 +6600,6 @@ def process_device_login(device):
             play8_click_count = 0
             DEVICE_FIXOUT_CANCEL_DONE.pop(serial, None)   # ล้าง flag ค้างจากรอบ/เฟสก่อน กัน break มั่ว
             p8_cancel_done = False      # True = หลุดลูปด้วยทาง fixout→cancel (ข้ามขั้น event/Back spam ได้เลย)
-            blue_since = None           # เวลาที่เริ่มเห็นจอน้ำเงินล้วน (ค้างตอนโหลดเกม)
-            blue_tap_n = 0
 
             while True:
                 check_device_reset(serial, cycle_start)
@@ -6596,20 +6611,6 @@ def process_device_login(device):
                     gui_log(serial, "fixout→cancel done — skipping checkpointlogin, proceeding to next step!", step="Checkpoint Skip")
                     p8_cancel_done = True
                     break
-
-                # --- 0. จอน้ำเงินล้วนค้าง ≥5 วิ (เกมค้างตอน start) → กดกลางจอซ้ำๆ จนกว่าจะหาย ---
-                if img is not None and is_blue_screen(img):
-                    if blue_since is None:
-                        blue_since = time.time()
-                    elif time.time() - blue_since >= 5:
-                        device.shell("input tap 480 270")
-                        blue_tap_n += 1
-                        if blue_tap_n % 5 == 1:
-                            gui_log(serial, f"จอน้ำเงินค้าง ≥5 วิ → กดกลางจอ (ครั้งที่ {blue_tap_n})", step="Blue Tap")
-                        time.sleep(1.0)
-                        continue
-                else:
-                    blue_since = None
 
                 if img is not None:
                     # --- 1. เช็ค checkpointlogin — เจอเท่านั้นถึงจะหลุดลูปไปเฟสต่อไป ---
@@ -6689,7 +6690,11 @@ def process_device_login(device):
                         continue
 
                 # เบาเครื่อง: ช่วงเกมกำลังโหลด (ยังไม่เห็น play8) ไม่ต้องแคปจอถี่ → พัก 2 วิ (เดิม 0.3)
-                time.sleep(2.0 if play8_click_count == 0 else 1.0)
+                # จอน้ำเงินค้าง (floating check กำลังกดรัวๆ) → วนถี่ 0.3 วิ ให้กดรัวจริง
+                if DEVICE_BLUE_TAPS.get(serial):
+                    time.sleep(0.3)
+                else:
+                    time.sleep(2.0 if play8_click_count == 0 else 1.0)
 
             # ผ่านหน้า login (เจอ checkpoint) แล้ว → mark ไว้: ถ้าหลังจากนี้เจอ fixclear
             # จะ restart "ตั้งแต่ play8" (เก็บ login เดิม) แทนการ push ไฟล์ + login ใหม่
@@ -8018,10 +8023,10 @@ def process_device_login(device):
 
                                                 if NEW_GACHA_SWIPE == 1:
                                                     new_g1_swipe_count += 1
-                                                    log_msg = f"new-gacha1 not found (swipe {new_g1_swipe_count}). Swiping 200 243 -> 420 240 (10000ms)..."
+                                                    log_msg = f"new-gacha1 not found (swipe {new_g1_swipe_count}). Swiping 200 243 -> 500 240 (10000ms)..."
                                                     gui_log(serial, log_msg, step="Swipe NewG1")
                                                     print(f"[{serial}] {log_msg}")
-                                                    res = device.shell("input swipe 200 243 420 240 10000")
+                                                    res = device.shell("input swipe 200 243 500 240 10000")
                                                     print(f"[{serial}] ADB swipe command executed. Result: {res.strip() if res else 'OK'}")
                                                     time.sleep(2.5)   # พักหลังเลื่อน ให้ตู้หยุดนิ่งก่อนหา/เลื่อนรอบถัดไป
                                                 time.sleep(0.1)
@@ -8070,10 +8075,10 @@ def process_device_login(device):
                                                     swipe_count += 1
                                                     if NEW_GACHA_SWIPE == 1:
                                                         # เลื่อนตำแหน่ง 144 243 -> 699 233 แล้วหาต่อ
-                                                        log_msg = f"new-gacha1 not found (swipe {swipe_count}). Swiping 200 243 -> 420 240 (10000ms)..."
+                                                        log_msg = f"new-gacha1 not found (swipe {swipe_count}). Swiping 200 243 -> 500 240 (10000ms)..."
                                                         gui_log(serial, log_msg, step="Swipe NewG")
                                                         print(f"[{serial}] {log_msg}")
-                                                        res = device.shell("input swipe 200 243 420 240 10000")
+                                                        res = device.shell("input swipe 200 243 500 240 10000")
                                                         print(f"[{serial}] ADB swipe command executed. Result: {res.strip() if res else 'OK'}")
                                                         time.sleep(2.5)   # พักหลังเลื่อน ให้ตู้หยุดนิ่งก่อนหา/เลื่อนรอบถัดไป
                                                     else:
