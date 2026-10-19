@@ -2856,7 +2856,48 @@ def launch_game(device, settle=0.0):
         time.sleep(settle)
 
 def fast_screencap(device):
-    return _fast_screencap_raw(device)
+    img = _fast_screencap_raw(device)
+    if img is None:
+        return None
+    return _handle_blue_screen(device, img)
+
+def _handle_blue_screen(device, img):
+    """=== จอน้ำเงินล้วน floating check (ทุกเฟรม ทุกเฟส — อยู่ใน fast_screencap จึงครอบทุกลูป) ===
+    เจอจอน้ำเงิน → วนกดรัวๆ อยู่ในนี้เลยจนกว่าจอจะหาย (ไม่พึ่งจังหวะ loop ของผู้เรียก)
+    คืนเฟรมล่าสุดหลังจอหาย / None ถ้าค้างเกิน 90 วิ (ปิดเกมให้ relaunch)"""
+    _sb = device.serial
+    if not is_blue_screen(img):
+        DEVICE_BLUE_SINCE.pop(_sb, None)
+        DEVICE_BLUE_TAPS.pop(_sb, None)
+        return img
+    _t0 = DEVICE_BLUE_SINCE.setdefault(_sb, time.time())
+    _miss = 0
+    while _miss < 3 and time.time() - _t0 < 90:
+        device.shell("input tap 480 270; input tap 480 270; input tap 300 270; "
+                     "input tap 660 270; input tap 480 270")
+        _n = DEVICE_BLUE_TAPS.get(_sb, 0) + 1
+        DEVICE_BLUE_TAPS[_sb] = _n
+        if _n % 20 == 1:
+            gui_log(_sb, f"จอน้ำเงิน/ดำค้าง → กดรัวๆ (รอบที่ {_n})", step="Blue Tap")
+        time.sleep(0.2)
+        _chk = _fast_screencap_raw(device)
+        if _chk is not None and is_blue_screen(_chk):
+            _miss = 0
+        else:
+            _miss += 1   # ต้องไม่เป็นน้ำเงิน 3 เฟรมติดถึงจะถือว่าหาย
+        if _chk is not None:
+            img = _chk
+    DEVICE_BLUE_SINCE.pop(_sb, None)
+    DEVICE_BLUE_TAPS.pop(_sb, None)
+    if _miss >= 3:
+        gui_log(_sb, f"จอน้ำเงินหายแล้ว (กดไป {_n} รอบ)", step="Blue Tap")
+        return img
+    # กดแล้วยังค้างเกิน 90 วิ → ปิดเกม ให้เช็คเกมตายรอบหน้า relaunch เอง
+    gui_log(_sb, "จอน้ำเงินค้างเกิน 90 วิ → ปิดเกมแล้วเปิดใหม่", step="Blue Restart", status="stuck")
+    device.shell("am force-stop jp.konami.pesam")
+    DEVICE_LAST_GAME_CHECK[_sb] = 0
+    time.sleep(1)
+    return None
 
 def _fast_screencap_raw(device):
     # ── per-device throttle ──
@@ -3198,46 +3239,6 @@ def get_screen_capture(device):
         if img is None:
             return None
 
-        # === จอน้ำเงินล้วน floating check (หาลอยๆ ทุกเฟรม ทุกเฟส) ===
-        # ค้างน้ำเงิน/ดำครบ 2 วิ → กดรัวๆ (5 ครั้ง/เฟรม) ทุกเฟรมจนกว่าจอจะเปลี่ยน (เช่น ขึ้น play8)
-        _sb = device.serial
-        if is_blue_screen(img):
-            # เจอจอน้ำเงิน → วนกดรัวๆ อยู่ในนี้เลยจนกว่าจอจะหาย (ไม่พึ่งจังหวะ loop ของผู้เรียก
-            # ซึ่งบางเฟสพัก 1-2 วิ/เฟรม และเฟรมที่หลุดเฟรมเดียวเคยรีเซ็ตตัวนับจนไม่เคยได้กด)
-            _t0 = DEVICE_BLUE_SINCE.setdefault(_sb, time.time())
-            _miss = 0
-            while _miss < 3 and time.time() - _t0 < 90:
-                device.shell("input tap 480 270; input tap 480 270; input tap 300 270; "
-                             "input tap 660 270; input tap 480 270")
-                _n = DEVICE_BLUE_TAPS.get(_sb, 0) + 1
-                DEVICE_BLUE_TAPS[_sb] = _n
-                if _n % 20 == 1:
-                    gui_log(_sb, f"จอน้ำเงิน/ดำค้าง → กดรัวๆ (รอบที่ {_n})", step="Blue Tap")
-                time.sleep(0.2)
-                _chk = fast_screencap(device)
-                if _chk is not None and is_blue_screen(_chk):
-                    _miss = 0
-                else:
-                    _miss += 1   # ต้องไม่เป็นน้ำเงิน 3 เฟรมติดถึงจะถือว่าหาย
-                if _chk is not None:
-                    img = _chk
-            if _miss >= 3:
-                gui_log(_sb, f"จอน้ำเงินหายแล้ว (กดไป {DEVICE_BLUE_TAPS.get(_sb, 0)} รอบ)", step="Blue Tap")
-                DEVICE_BLUE_SINCE.pop(_sb, None)
-                DEVICE_BLUE_TAPS.pop(_sb, None)
-            else:
-                # กดแล้วยังค้างเกิน 90 วิ → ปิดเกม ให้รอบถัดไปเปิดใหม่เอง (เช็คเกมตายด้านบน)
-                if time.time() - _t0 >= 90:
-                    gui_log(_sb, "จอน้ำเงินค้างเกิน 90 วิ → ปิดเกมแล้วเปิดใหม่", step="Blue Restart", status="stuck")
-                    DEVICE_BLUE_SINCE.pop(_sb, None)
-                    DEVICE_BLUE_TAPS.pop(_sb, None)
-                    device.shell("am force-stop jp.konami.pesam")
-                    DEVICE_LAST_GAME_CHECK[_sb] = 0   # บังคับเช็คเกมรอบหน้าทันที → relaunch
-                    time.sleep(1)
-                    return None
-        else:
-            DEVICE_BLUE_SINCE.pop(_sb, None)
-            DEVICE_BLUE_TAPS.pop(_sb, None)
         
         if img is not None:
             # === fixnet floating check ===
