@@ -6082,7 +6082,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path, coin_
                     break
             miss_count += 1
             gui_log(serial, f"[Loop {loop_num}] gachafree1 not here, swiping... ({miss_count}/{max_miss})", step="Swipe")
-            device.shell("input swipe 618 308 54 306 1200")
+            device.shell("input swipe 618 308 54 306 3000")
             time.sleep(2.0)
 
         if not found_free:
@@ -8188,7 +8188,7 @@ def process_device_login(device):
                                             if found_g3:
                                                 break
                                     # Swipe (drag) action
-                                    device.shell("input swipe 618 308 54 306 3000")
+                                    device.shell("input swipe 618 308 54 306 5000")
                                     time.sleep(2)
 
                         # gacha4
