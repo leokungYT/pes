@@ -16,11 +16,20 @@ VERSION_FILE = "version.txt"
 
 # ── ช่องทางโหลดไฟล์อัปเดตโดยตรงจาก GitHub ────────────────────────────
 def _zip_candidates(zip_url):
-    urls = []
+    branch = "main"
+    if zip_url:
+        for marker in ("/archive/refs/heads/", "/zip/refs/heads/", "/zipball/"):
+            if marker in zip_url:
+                branch = zip_url.split(marker, 1)[1].split("/", 1)[0].removesuffix(".zip")
+                break
+
+    # Prefer codeload's direct ZIP endpoint; archive URLs first redirect there.
+    urls = [
+        f"https://codeload.github.com/{REPO}/zip/refs/heads/{branch}",
+        f"https://api.github.com/repos/{REPO}/zipball/{branch}",
+    ]
     if zip_url:
         urls.append(zip_url)
-    urls.append(f"https://github.com/{REPO}/archive/refs/heads/main.zip")
-    urls.append(f"https://codeload.github.com/{REPO}/zip/refs/heads/main")
     seen, out = set(), []
     for u in urls:
         if u and u not in seen:
@@ -36,22 +45,33 @@ def download_update_zip(zip_url, tries_each=2, timeout=300):
     *** timeout ต้องยาว: ZIP ของรีโปนี้ ~28 MB (มี Tesseract-OCR + รูปทั้งหมด)
         ของเดิมตั้งไว้ 30 วิ เน็ตเครื่องลูกโหลดไม่ทัน เลยเด้ง WinError 10060 ***"""
     import time as _time
-    last_err = "ไม่ทราบสาเหตุ"
+    errors = []
     for url in _zip_candidates(zip_url):
         for attempt in range(1, tries_each + 1):
             try:
-                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                req = urllib.request.Request(url, headers={
+                    "User-Agent": "Mozilla/5.0",
+                    "Accept": "application/zip",
+                })
                 with urllib.request.urlopen(req, timeout=timeout) as resp:
-                    data = resp.read()
+                    chunks = []
+                    while True:
+                        chunk = resp.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        chunks.append(chunk)
+                    data = b"".join(chunks)
                 if len(data) > 1000 and data[:2] == b"PK":
                     print(f"[Updater] Downloaded OK ({len(data):,} bytes) from {url}")
                     return data
-                last_err = f"ไฟล์ที่ได้ไม่ใช่ zip ({len(data)} bytes)"
+                error = f"ไฟล์ที่ได้ไม่ใช่ zip ({len(data)} bytes)"
             except Exception as e:
-                last_err = str(e)
-            print(f"[Updater] โหลดไม่สำเร็จ (ครั้งที่ {attempt}/{tries_each}) {url} -> {last_err[:110]}")
+                error = str(e)
+            errors.append(f"{url}: {error}")
+            print(f"[Updater] โหลดไม่สำเร็จ (ครั้งที่ {attempt}/{tries_each}) {url} -> {error[:110]}")
             _time.sleep(3)
-    raise RuntimeError(f"โหลดไฟล์อัปเดตไม่สำเร็จทุกช่องทาง: {last_err}")
+    details = " | ".join(errors[-len(_zip_candidates(zip_url)):])
+    raise RuntimeError(f"โหลดไฟล์อัปเดตไม่สำเร็จทุกช่องทาง: {details}")
 
 def get_latest_release():
     # 🌟 ดึงข้อมูลเวอร์ชันผ่าน Raw Content ของกิ่งหลัก (main) และใช้ ZIP ล่าสุดของกิ่งนั้นโดยตรง
@@ -357,13 +377,6 @@ def update(silent=False, force=False, no_relaunch=False):
             print("[Updater] User skipped the update.")
             sys.exit(0)
         
-    # 🌟 Kill adb.exe ก่อนเพื่อคลายการล็อกไฟล์ในโฟลเดอร์ adb/ (แก้ Permission Denied บน Windows)
-    print("[Updater] Terminating active ADB server to unlock dll files...")
-    try:
-        subprocess.run(["taskkill", "/f", "/im", "adb.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=0x08000000)
-    except Exception as e:
-        print(f"[Updater] Failed to kill ADB: {e}")
-
     print(f"[Updater] Downloading update {latest_version}...")
     
     try:
@@ -373,6 +386,14 @@ def update(silent=False, force=False, no_relaunch=False):
 
     try:
         zip_bytes = download_update_zip(zip_url)
+
+        # Stop ADB only after download succeeds so network failures leave the bot usable.
+        print("[Updater] Terminating active ADB server to unlock dll files...")
+        try:
+            subprocess.run(["taskkill", "/f", "/im", "adb.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=0x08000000)
+        except Exception as e:
+            print(f"[Updater] Failed to kill ADB: {e}")
+
         with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zip_ref:
             # ไฟล์ zip จาก GitHub จะมีโฟลเดอร์หลักครอบอยู่ 1 ชั้นเสมอ
             root_folder = zip_ref.namelist()[0]

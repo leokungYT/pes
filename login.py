@@ -403,7 +403,14 @@ def is_blue_screen(gray_img):
         # รวมจอดำล้วนด้วย: ตอนเกมค้างโหลด screencap มักได้ "ดำล้วน" ทั้งที่บนจอเห็นเป็นสีน้ำเงิน
         if med > 45:
             return False
-        return float((np.abs(small.astype(np.int16) - med) <= 4).mean()) >= 0.97
+        s16 = small.astype(np.int16)
+        if float((np.abs(s16 - med) <= 4).mean()) >= 0.97:
+            return True
+        # จอน้ำเงินแบบมีแถบเฉียงเข้ม + วงโหลดเล็กๆ กลางจอ: ไม่ได้สีเดียวล้วน
+        # → ยอมให้มีเฉดต่างได้ แต่ต้องมืดเกือบทั้งจอ และแทบไม่มีพิกเซลสว่าง (ไม่มี UI/ตัวหนังสือ)
+        return (float((np.abs(s16 - med) <= 12).mean()) >= 0.75
+                and float((small <= 70).mean()) >= 0.98
+                and float((small > 110).mean()) <= 0.005)
     except Exception:
         return False
 
