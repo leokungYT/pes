@@ -4733,13 +4733,13 @@ def push_dat_to_device(device, local_path):
         # 4. Move to game folder + chmod 666 + sync to storage
         gui_log(serial, "Step 4: Applying data to game...", step="Inject")
         subprocess.run([adb_path, "-s", serial, "shell", f"su -c 'cp {tmp_remote} {REMOTE_DAT_FILE} && chmod 666 {REMOTE_DAT_FILE} && rm -f {tmp_remote} && sync'"],
-                       capture_output=True, text=True, timeout=5, **kwargs)
+                       capture_output=True, text=True, timeout=20, **kwargs)   # sync ตอนเปิด 15 จอพร้อมกันเคยเกิน 5 วิ
         
         # 5. Verify
         gui_log(serial, "Step 5: Verifying...", step="Verify")
         time.sleep(0.2)
         check_res = subprocess.run([adb_path, "-s", serial, "shell", f"su -c 'ls -l {REMOTE_DAT_FILE}'"], 
-                                   capture_output=True, text=True, timeout=5, **kwargs)
+                                   capture_output=True, text=True, timeout=10, **kwargs)
         check = check_res.stdout.strip()
         
         if "No such" not in check and check:
