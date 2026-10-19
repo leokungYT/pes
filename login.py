@@ -6511,8 +6511,44 @@ def check_coin_mode(device, cycle_start, serial, original_name, file_path, coin_
 # ═════════════════════════════════════════════════════════════════════════════
 # Main bot loop
 # ═════════════════════════════════════════════════════════════════════════════
+_BLUE_WATCHDOGS = set()
+
+def _blue_watchdog_loop(serial):
+    """เธรดเฝ้าจอน้ำเงินแยกต่อเครื่อง — ไม่ขึ้นกับ flow ของ worker (worker ค้าง/อยู่ลูปไหนก็ยังกด)
+    แคปจอ + กด ผ่าน subprocess ที่มี timeout ทั้งหมด จึงไม่มีทางค้างตาย"""
+    kwargs = {'creationflags': 0x08000000} if os.name == 'nt' else {}
+    while bot_running:
+        try:
+            raw = subprocess.run([adb_path, "-s", serial, "exec-out", "screencap"],
+                                 capture_output=True, timeout=8, **kwargs).stdout
+            if len(raw) > 16:
+                w = int.from_bytes(raw[0:4], 'little')
+                h = int.from_bytes(raw[4:8], 'little')
+                size = w * h * 4
+                hdr = len(raw) - size   # header 12 หรือ 16 ไบต์แล้วแต่รุ่น Android
+                if hdr in (12, 16):
+                    rgba = np.frombuffer(raw, np.uint8, offset=hdr, count=size).reshape((h, w, 4))
+                    if is_blue_screen(cv2.cvtColor(rgba, cv2.COLOR_RGBA2GRAY)):
+                        cx, cy = w // 2, h // 2
+                        taps = "; ".join(f"input tap {x} {cy}" for x in (cx, cx - w // 5, cx + w // 5, cx))
+                        subprocess.run([adb_path, "-s", serial, "shell", taps],
+                                       capture_output=True, timeout=5, **kwargs)
+                        time.sleep(0.2)
+                        continue
+        except Exception:
+            pass
+        time.sleep(1.0)
+    _BLUE_WATCHDOGS.discard(serial)
+
+def start_blue_watchdog(serial):
+    if serial in _BLUE_WATCHDOGS:
+        return
+    _BLUE_WATCHDOGS.add(serial)
+    threading.Thread(target=_blue_watchdog_loop, args=(serial,), daemon=True).start()
+
 def process_device_login(device):
     serial = device.serial
+    start_blue_watchdog(serial)
     gui_log(serial, "Bot started", step="Init", status="working")
 
     while bot_running:
