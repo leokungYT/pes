@@ -1,3 +1,4 @@
+import time
 import os
 import urllib.request
 import json
@@ -55,7 +56,20 @@ def download_update_zip(zip_url, tries_each=2, timeout=300):
 def get_latest_release():
     # 🌟 ดึงข้อมูลเวอร์ชันผ่าน Raw Content ของกิ่งหลัก (main) และใช้ ZIP ล่าสุดของกิ่งนั้นโดยตรง
     # ข้อดี: พี่เพียงแค่แก้เลขเวอร์ชันใน version.txt แล้ว push ขึ้น GitHub บอตเครื่องลูกจะอัปเดตทันที (ไม่ต้องกดสร้าง Release/Tag บนเว็บ)
-    url = f"https://raw.githubusercontent.com/{REPO}/main/version.txt"
+    # raw.githubusercontent แคชไว้ ~5 นาที → เพิ่ง push เลขใหม่ก็ยังได้เลขเก่า
+    # → ถาม GitHub API ก่อน (ไม่ติดแคช) ไม่ได้ค่อยถอยไปใช้ raw
+    try:
+        api = f"https://api.github.com/repos/{REPO}/contents/{VERSION_FILE}?ref=main"
+        req = urllib.request.Request(api, headers={'User-Agent': 'Mozilla/5.0',
+                                                   'Accept': 'application/vnd.github.raw',
+                                                   'Cache-Control': 'no-cache'})
+        with urllib.request.urlopen(req, timeout=10) as response:
+            tag_name = response.read().decode().strip()
+            if tag_name:
+                return tag_name, f"https://github.com/{REPO}/archive/refs/heads/main.zip"
+    except Exception:
+        pass
+    url = f"https://raw.githubusercontent.com/{REPO}/main/version.txt?t={int(time.time())}"
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=10) as response:
