@@ -328,6 +328,41 @@ _QUESTFIVE_PATHS = (
 
 file_pick_lock = threading.Lock()
 ocr_lock       = threading.Lock()   # ป้องกัน OCR หลาย device พร้อมกัน (ลด CPU spike)
+
+# ── คิวเปิดเกม: จำกัดจำนวนจอที่โหลดเกม (จอฟ้า) พร้อมกัน ──
+# serial -> เวลาที่ได้ช่อง; ช่องหมดอายุเองหลัง LAUNCH_SLOT_MAX_SEC (กันช่องค้างถ้าหลุด exception)
+_launch_slots = {}
+_launch_slots_lock = threading.Lock()
+
+def acquire_launch_slot(serial, cycle_start):
+    try:
+        import config as _c
+        max_n = int(getattr(_c, 'LAUNCH_MAX_CONCURRENT', 4))
+        max_sec = float(getattr(_c, 'LAUNCH_SLOT_MAX_SEC', 120))
+    except Exception:
+        max_n, max_sec = 4, 120.0
+    if max_n <= 0:
+        return
+    logged = False
+    while True:
+        with _launch_slots_lock:
+            now = time.time()
+            for s_, t_ in list(_launch_slots.items()):
+                if now - t_ > max_sec:
+                    _launch_slots.pop(s_, None)
+            _launch_slots.pop(serial, None)
+            if len(_launch_slots) < max_n:
+                _launch_slots[serial] = now
+                return
+        if not logged:
+            gui_log(serial, f"รอคิวเปิดเกม (โหลดพร้อมกันได้ {max_n} จอ)...", step="Launch Queue")
+            logged = True
+        check_device_reset(serial, cycle_start)
+        time.sleep(2)
+
+def release_launch_slot(serial):
+    with _launch_slots_lock:
+        _launch_slots.pop(serial, None)
 in_use_files   = set()   # filenames currently being processed
 _gui_last_update = {}    # throttle GUI text updates per-device
 
@@ -6487,6 +6522,7 @@ def process_device_login(device):
                 time.sleep(0.5)
 
             # 3. Launch
+            acquire_launch_slot(serial, cycle_start)
             gui_log(serial, "Launching PES...", step="Launch", status="working")
             launch_game(device, settle=0)
             time.sleep(0.5)   # settle หลังสั่งเปิดเกม
@@ -6570,6 +6606,7 @@ def process_device_login(device):
 
                     if pts_8:
                         DEVICE_WATCH_GPLAY[serial] = False   # เจอ play8 แล้ว → เลิกหา fix-googleplay
+                        release_launch_slot(serial)          # โหลดเกมเสร็จแล้ว → ปล่อยคิวให้จออื่นเปิด
 
                         # Prioritize fixlg3
                         pts_lg3 = img_search(img, os.path.join(IMG_DIR, "fixlg3.bmp"))
@@ -6587,14 +6624,16 @@ def process_device_login(device):
                         play8_click_count += 1
                         if play8_click_count % 5 == 1:   # log ทุก 5 ครั้ง กัน log ถี่เกิน
                             gui_log(serial, f"Found {matched_name}! Clicked. (ครั้งที่ {play8_click_count})", step="play8")
-                        time.sleep(0.5)
+                        time.sleep(1.0)   # เบาเครื่อง: เว้นจังหวะกด play8 (เดิม 0.5)
                         continue
 
-                time.sleep(0.3)
+                # เบาเครื่อง: ช่วงเกมกำลังโหลด (ยังไม่เห็น play8) ไม่ต้องแคปจอถี่ → พัก 2 วิ (เดิม 0.3)
+                time.sleep(2.0 if play8_click_count == 0 else 1.0)
 
             # ผ่านหน้า login (เจอ checkpoint) แล้ว → mark ไว้: ถ้าหลังจากนี้เจอ fixclear
             # จะ restart "ตั้งแต่ play8" (เก็บ login เดิม) แทนการ push ไฟล์ + login ใหม่
             DEVICE_PAST_LOGIN[serial] = True
+            release_launch_slot(serial)
             DEVICE_WATCH_GPLAY[serial] = False   # จบเฟส login แล้ว → หยุดหา fix-googleplay แน่นอน
 
             if LOGIN_FAST:
@@ -6661,8 +6700,13 @@ def process_device_login(device):
                 # กด Back รัวๆ จนกว่าจะเจอ cancel.bmp (ไม่มี timeout → กดไปเรื่อยๆ จนกว่าจะเจอ)
                 if not skip_cancel_step:
                     gui_log(serial, "Spamming Back until cancel.bmp...", step="Cancel")
+                    cancel_spam_start = time.time()
                     while True:
                         check_device_reset(serial, cycle_start)
+                        # กันกด Back ไม่หยุด: เกิน 30 วิ ไม่เจอ cancel → ข้ามไปทำขั้นตอนถัดไปเลย
+                        if time.time() - cancel_spam_start > 30:
+                            gui_log(serial, "⚠️ ไม่เจอ cancel.bmp ใน 30 วิ → หยุดกด Back ไปต่อ (box/gacha ฯลฯ)", step="Cancel Timeout", status="stuck")
+                            break
                         device.shell("input keyevent 4")   # KEYCODE_BACK
                         time.sleep(1.0)
                         try:
@@ -6676,7 +6720,7 @@ def process_device_login(device):
                             gui_log(serial, "fixout→cancel done — กดแล้วรอบเดียวพอ หยุด Back spam ไปต่อเลย", step="Cancel Skip")
                             break
                         if img is not None:
-                            pts = img_search(img, os.path.join(IMG_DIR, "cancel.bmp"))
+                            pts = img_search(img, os.path.join(IMG_DIR, "cancel.bmp"), threshold=0.7)
                             if pts:
                                 x, y = pts[0]
                                 gui_log(serial, f"cancel.bmp found — clicking ({x},{y})", step="Click Cancel")
