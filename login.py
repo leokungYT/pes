@@ -7913,10 +7913,10 @@ def process_device_login(device):
 
                                                 if NEW_GACHA_SWIPE == 1:
                                                     new_g1_swipe_count += 1
-                                                    log_msg = f"new-gacha1 not found (swipe {new_g1_swipe_count}). Swiping 144 243 -> 699 233 (250ms)..."
+                                                    log_msg = f"new-gacha1 not found (swipe {new_g1_swipe_count}). Swiping 200 243 -> 500 240 (8000ms)..."
                                                     gui_log(serial, log_msg, step="Swipe NewG1")
                                                     print(f"[{serial}] {log_msg}")
-                                                    res = device.shell("input swipe 144 243 699 233 250")
+                                                    res = device.shell("input swipe 200 243 500 240 8000")
                                                     print(f"[{serial}] ADB swipe command executed. Result: {res.strip() if res else 'OK'}")
                                                 time.sleep(0.1)
                                             time.sleep(0.1)
@@ -7964,10 +7964,10 @@ def process_device_login(device):
                                                     swipe_count += 1
                                                     if NEW_GACHA_SWIPE == 1:
                                                         # เลื่อนตำแหน่ง 144 243 -> 699 233 แล้วหาต่อ
-                                                        log_msg = f"new-gacha1 not found (swipe {swipe_count}). Swiping 144 243 -> 699 233 (250ms)..."
+                                                        log_msg = f"new-gacha1 not found (swipe {swipe_count}). Swiping 200 243 -> 500 240 (8000ms)..."
                                                         gui_log(serial, log_msg, step="Swipe NewG")
                                                         print(f"[{serial}] {log_msg}")
-                                                        res = device.shell("input swipe 144 243 699 233 250")
+                                                        res = device.shell("input swipe 200 243 500 240 8000")
                                                         print(f"[{serial}] ADB swipe command executed. Result: {res.strip() if res else 'OK'}")
                                                         time.sleep(0.1)
                                                     else:
