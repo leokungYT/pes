@@ -2921,11 +2921,10 @@ def _fast_screencap_raw(device):
 def _screencap_io(device):
     """ส่วนที่คุยกับ adb จริง (ถูกคุมด้วย _SCREENCAP_GATE จากตัวเรียก)"""
     conn = None
-    # ppadb ตั้งต้น timeout=None → socket อ่านค้างได้ตลอดกาล (ถือ _SCREENCAP_GATE ไว้ด้วย = ลากเครื่องอื่นค้างตาม)
-    if not device.client.timeout:
-        device.client.timeout = 30
     try:
-        conn = device.client.create_connection(timeout=device.client.timeout)
+        # ppadb Client ไม่มี attribute .timeout (เคยอ้างถึงแล้ว AttributeError หลุด try → แคปจอพังทุกเฟรม)
+        # ใส่ timeout ตรงนี้: socket อ่านค้างได้ตลอดกาลถ้าไม่ใส่ (ถือ _SCREENCAP_GATE ไว้ = ลากเครื่องอื่นค้างตาม)
+        conn = device.client.create_connection(timeout=30)
         conn.send(f"host:transport:{device.serial}")
         conn.check_status()
         conn.send("shell:screencap")
