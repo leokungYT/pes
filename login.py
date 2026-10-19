@@ -392,6 +392,18 @@ def disable_vpn(device, serial):
     except Exception as e:
         gui_log(serial, f"ปิด VPN ไม่สำเร็จ: {e}", step="VPN Off")
 
+def is_blue_screen(gray_img):
+    """จอน้ำเงินล้วนตอนโหลดเกม: ภาพ grayscale เป็นสีเดียวแทบทั้งจอ ค่าราว 12-45
+    (น้ำเงิน 0,0,~190 → gray ~22; จอดำ = 0 ไม่นับ)"""
+    try:
+        small = gray_img[::8, ::8]
+        med = int(np.median(small))
+        if med < 12 or med > 45:
+            return False
+        return float((np.abs(small.astype(np.int16) - med) <= 4).mean()) >= 0.97
+    except Exception:
+        return False
+
 def release_launch_slot(serial):
     with _launch_slots_lock:
         _launch_slots.pop(serial, None)
@@ -6571,6 +6583,8 @@ def process_device_login(device):
             play8_click_count = 0
             DEVICE_FIXOUT_CANCEL_DONE.pop(serial, None)   # ล้าง flag ค้างจากรอบ/เฟสก่อน กัน break มั่ว
             p8_cancel_done = False      # True = หลุดลูปด้วยทาง fixout→cancel (ข้ามขั้น event/Back spam ได้เลย)
+            blue_since = None           # เวลาที่เริ่มเห็นจอน้ำเงินล้วน (ค้างตอนโหลดเกม)
+            blue_tap_n = 0
 
             while True:
                 check_device_reset(serial, cycle_start)
@@ -6582,6 +6596,20 @@ def process_device_login(device):
                     gui_log(serial, "fixout→cancel done — skipping checkpointlogin, proceeding to next step!", step="Checkpoint Skip")
                     p8_cancel_done = True
                     break
+
+                # --- 0. จอน้ำเงินล้วนค้าง ≥5 วิ (เกมค้างตอน start) → กดกลางจอซ้ำๆ จนกว่าจะหาย ---
+                if img is not None and is_blue_screen(img):
+                    if blue_since is None:
+                        blue_since = time.time()
+                    elif time.time() - blue_since >= 5:
+                        device.shell("input tap 480 270")
+                        blue_tap_n += 1
+                        if blue_tap_n % 5 == 1:
+                            gui_log(serial, f"จอน้ำเงินค้าง ≥5 วิ → กดกลางจอ (ครั้งที่ {blue_tap_n})", step="Blue Tap")
+                        time.sleep(1.0)
+                        continue
+                else:
+                    blue_since = None
 
                 if img is not None:
                     # --- 1. เช็ค checkpointlogin — เจอเท่านั้นถึงจะหลุดลูปไปเฟสต่อไป ---
@@ -7990,10 +8018,10 @@ def process_device_login(device):
 
                                                 if NEW_GACHA_SWIPE == 1:
                                                     new_g1_swipe_count += 1
-                                                    log_msg = f"new-gacha1 not found (swipe {new_g1_swipe_count}). Swiping 200 243 -> 500 240 (10000ms)..."
+                                                    log_msg = f"new-gacha1 not found (swipe {new_g1_swipe_count}). Swiping 200 243 -> 420 240 (10000ms)..."
                                                     gui_log(serial, log_msg, step="Swipe NewG1")
                                                     print(f"[{serial}] {log_msg}")
-                                                    res = device.shell("input swipe 200 243 500 240 10000")
+                                                    res = device.shell("input swipe 200 243 420 240 10000")
                                                     print(f"[{serial}] ADB swipe command executed. Result: {res.strip() if res else 'OK'}")
                                                     time.sleep(2.5)   # พักหลังเลื่อน ให้ตู้หยุดนิ่งก่อนหา/เลื่อนรอบถัดไป
                                                 time.sleep(0.1)
@@ -8042,10 +8070,10 @@ def process_device_login(device):
                                                     swipe_count += 1
                                                     if NEW_GACHA_SWIPE == 1:
                                                         # เลื่อนตำแหน่ง 144 243 -> 699 233 แล้วหาต่อ
-                                                        log_msg = f"new-gacha1 not found (swipe {swipe_count}). Swiping 200 243 -> 500 240 (10000ms)..."
+                                                        log_msg = f"new-gacha1 not found (swipe {swipe_count}). Swiping 200 243 -> 420 240 (10000ms)..."
                                                         gui_log(serial, log_msg, step="Swipe NewG")
                                                         print(f"[{serial}] {log_msg}")
-                                                        res = device.shell("input swipe 200 243 500 240 10000")
+                                                        res = device.shell("input swipe 200 243 420 240 10000")
                                                         print(f"[{serial}] ADB swipe command executed. Result: {res.strip() if res else 'OK'}")
                                                         time.sleep(2.5)   # พักหลังเลื่อน ให้ตู้หยุดนิ่งก่อนหา/เลื่อนรอบถัดไป
                                                     else:
