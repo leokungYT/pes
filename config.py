@@ -103,7 +103,7 @@ LOGIN_SUCCESS_DIR = "login-success"
 # ── Find Hero Sequence ─────────────────────────────
 # 1 = ทำงาน fin1-fin8 และค้นหาฮีโร่ตามภาพ
 # 0 = ข้าม
-FIND_HERO = 0
+FIND_HERO = 1
 
 # แมพไฟล์ภาพฮีโร่เข้ากับชื่อฮีโร่
 HERO_IMG_MAP = {
@@ -127,7 +127,7 @@ HERO_IMG_MAP = {
 #     *** ชื่อไฟล์ที่ export = UID ล้วนเสมอ ไม่มีชื่อนักเตะ (ดูหัวข้อ "ชื่อไฟล์ตอน export")
 #     ชื่อไฟล์รูปใช้โชว์ใน log ว่าเจอใคร เช่น  img/find-img/Messi.png
 #     ไม่เจอรูปไหนเลย → ไป no-hero เหมือนเดิม
-FIND_IMG = 1
+FIND_IMG = 0
 
 # โฟลเดอร์ย่อยใน img/ ที่เก็บรูปไว้สแกน (รองรับ .png .bmp .jpg)
 FIND_IMG_DIR = "find-img"
@@ -227,7 +227,10 @@ list_find_hero = [
     "Gareth Bale",
     "Edwin van der",
     "Tomas Rosicky", 
-    "Carles Puyol"
+    "Carles Puyol",
+    "Clarence Seedorf",
+    "Xabi Alonso",
+    "Yaya Toure"
 ]
 
 # แชร์ list เดียวกัน — แก้ที่ list_find_hero อย่างเดียวพอ
