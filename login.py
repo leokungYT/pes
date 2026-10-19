@@ -6511,11 +6511,14 @@ def check_coin_mode(device, cycle_start, serial, original_name, file_path, coin_
 # Main bot loop
 # ═════════════════════════════════════════════════════════════════════════════
 _BLUE_WATCHDOGS = set()
+DEVICE_WD_PLAY8_TAPS = {}
 
 def _blue_watchdog_loop(serial):
     """เธรดเฝ้าจอน้ำเงินแยกต่อเครื่อง — ไม่ขึ้นกับ flow ของ worker (worker ค้าง/อยู่ลูปไหนก็ยังกด)
     แคปจอ + กด ผ่าน subprocess ที่มี timeout ทั้งหมด จึงไม่มีทางค้างตาย"""
     kwargs = {'creationflags': 0x08000000} if os.name == 'nt' else {}
+    gui_log(serial, "[Watchdog] เริ่มเฝ้าจอ (จอน้ำเงิน + play8)", step="Watchdog")
+    _last_err = 0
     while bot_running:
         try:
             raw = subprocess.run([adb_path, "-s", serial, "exec-out", "screencap"],
@@ -6525,17 +6528,38 @@ def _blue_watchdog_loop(serial):
                 h = int.from_bytes(raw[4:8], 'little')
                 size = w * h * 4
                 hdr = len(raw) - size   # header 12 หรือ 16 ไบต์แล้วแต่รุ่น Android
+                if hdr not in (12, 16) and time.time() - _last_err > 30:
+                    _last_err = time.time()
+                    gui_log(serial, f"[Watchdog] ภาพจอผิดรูปแบบ ({w}x{h}, {len(raw)} bytes)", step="WD Error")
                 if hdr in (12, 16):
                     rgba = np.frombuffer(raw, np.uint8, offset=hdr, count=size).reshape((h, w, 4))
-                    if is_blue_screen(cv2.cvtColor(rgba, cv2.COLOR_RGBA2GRAY)):
+                    gray = cv2.cvtColor(rgba, cv2.COLOR_RGBA2GRAY)
+                    # เจอ play8 (หน้า title) → กดทันที ไม่รอ worker (worker อาจติดอยู่ลูปอื่น/รออะไรอยู่)
+                    p8 = (img_search(gray, os.path.join(IMG_DIR, "play8.bmp"))
+                          or img_search(gray, os.path.join(IMG_DIR, "play8fix.bmp"))
+                          or find_play8_ring(gray))
+                    if p8:
+                        x, y = p8[0]
+                        subprocess.run([adb_path, "-s", serial, "shell", f"input tap {x} {y}"],
+                                       capture_output=True, timeout=5, **kwargs)
+                        _n8 = DEVICE_WD_PLAY8_TAPS.get(serial, 0) + 1
+                        DEVICE_WD_PLAY8_TAPS[serial] = _n8
+                        if _n8 % 10 == 1:
+                            gui_log(serial, f"[Watchdog] เจอ play8 → กด ({x},{y}) ครั้งที่ {_n8}", step="WD play8")
+                        time.sleep(1.0)
+                        continue
+                    DEVICE_WD_PLAY8_TAPS.pop(serial, None)
+                    if is_blue_screen(gray):
                         cx, cy = w // 2, h // 2
                         taps = "; ".join(f"input tap {x} {cy}" for x in (cx, cx - w // 5, cx + w // 5, cx))
                         subprocess.run([adb_path, "-s", serial, "shell", taps],
                                        capture_output=True, timeout=5, **kwargs)
                         time.sleep(0.2)
                         continue
-        except Exception:
-            pass
+        except Exception as e:
+            if time.time() - _last_err > 30:   # log error ไม่ถี่เกิน (เดิมกลืนเงียบ = ไม่รู้ว่าเธรดพัง)
+                _last_err = time.time()
+                gui_log(serial, f"[Watchdog] error: {e}", step="WD Error")
         # แคปจอดิบ ~2MB/ครั้ง × 15 จอ — ถี่ทุก 1 วิเคยทำ adb ช้าจนคำสั่ง push timeout → เว้น 4 วิ
         time.sleep(4.0)
     _BLUE_WATCHDOGS.discard(serial)
