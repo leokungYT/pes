@@ -337,10 +337,10 @@ _launch_slots_lock = threading.Lock()
 def acquire_launch_slot(serial, cycle_start):
     try:
         import config as _c
-        max_n = int(getattr(_c, 'LAUNCH_MAX_CONCURRENT', 4))
-        max_sec = float(getattr(_c, 'LAUNCH_SLOT_MAX_SEC', 120))
+        max_n = int(getattr(_c, 'LAUNCH_MAX_CONCURRENT', 8))
+        max_sec = float(getattr(_c, 'LAUNCH_SLOT_MAX_SEC', 45))
     except Exception:
-        max_n, max_sec = 4, 120.0
+        max_n, max_sec = 8, 45.0
     if max_n <= 0:
         return
     logged = False
@@ -359,6 +359,38 @@ def acquire_launch_slot(serial, cycle_start):
             logged = True
         check_device_reset(serial, cycle_start)
         time.sleep(2)
+
+# แอป VPN/Proxy ที่รู้จัก — force-stop = ตัด tunnel ทันที
+VPN_PACKAGES = [
+    "com.wireguard.android",
+    "com.cloudflare.onedotonedotone",
+    "com.v2ray.ang",
+    "com.github.kr328.clash",
+    "com.github.shadowsocks",
+    "net.openvpn.openvpn",
+    "de.blinkt.openvpn",
+]
+
+def disable_vpn(device, serial):
+    """ปิด VPN/Proxy ทุกอย่างในจอ (เรียกก่อนเปิดเกม) — ไม่ throw"""
+    try:
+        import config as _c
+        if int(getattr(_c, 'DISABLE_VPN', 1)) != 1:
+            return
+    except Exception:
+        pass
+    cmd = "; ".join([f"am force-stop {p}" for p in VPN_PACKAGES] + [
+        "settings delete secure always_on_vpn_app",
+        "settings put secure always_on_vpn_lockdown 0",
+        "settings put global http_proxy :0",
+        "settings delete global global_http_proxy_host",
+        "settings delete global global_http_proxy_port",
+    ])
+    try:
+        _run_device_shell(device, cmd, timeout=10)
+        gui_log(serial, "ปิด VPN/Proxy แล้ว", step="VPN Off")
+    except Exception as e:
+        gui_log(serial, f"ปิด VPN ไม่สำเร็จ: {e}", step="VPN Off")
 
 def release_launch_slot(serial):
     with _launch_slots_lock:
@@ -6522,6 +6554,7 @@ def process_device_login(device):
                 time.sleep(0.5)
 
             # 3. Launch
+            disable_vpn(device, serial)
             acquire_launch_slot(serial, cycle_start)
             gui_log(serial, "Launching PES...", step="Launch", status="working")
             launch_game(device, settle=0)

@@ -456,5 +456,9 @@ IMG_ROI_PAD = 40
 # เปิดเกมพร้อมกันหลายจอ = โหลดหนักจนค้างจอฟ้านาน → ให้โหลดทีละไม่กี่จอ ที่เหลือรอคิว
 # ช่องจะว่างเมื่อจอนั้นเจอ play8 / checkpointlogin หรือครบ LAUNCH_SLOT_MAX_SEC วิ
 # 0 = ไม่จำกัด
-LAUNCH_MAX_CONCURRENT = 4
-LAUNCH_SLOT_MAX_SEC = 120
+LAUNCH_MAX_CONCURRENT = 8
+LAUNCH_SLOT_MAX_SEC = 45
+
+# ── ปิด VPN/Proxy ทุกตัวในจอก่อนเปิดเกม (WireGuard / WARP / v2ray ฯลฯ) ──
+# 1 = force-stop แอป VPN + ล้าง always-on VPN + ล้าง http proxy ทุกรอบก่อนเปิดเกม
+DISABLE_VPN = 1
