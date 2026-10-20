@@ -3561,6 +3561,10 @@ def get_screen_capture(device):
                 img = fast_screencap(device)
 
             fl_pts = img_search(img, os.path.join(IMG_DIR, "fixloading.bmp"))
+            if not fl_pts:
+                # fixloading2 = เฉพาะคำว่า "Loading" — เกมเวอร์ชันใหม่ขึ้น "Loading Failed" (F ใหญ่ ไม่มีจุด)
+                # ซึ่ง "Loading failed." เดิมเทียบได้แค่ ~0.74 ไม่ผ่าน
+                fl_pts = img_search(img, os.path.join(IMG_DIR, "fixloading2.bmp"), threshold=0.9)
             if fl_pts:
                 gui_log(device.serial, "Floating: fixloading.bmp found! Executing fixload1 -> fixload2", step="Fix Loading")
                 # Wait up to 20 seconds for fixload1 and click it until it disappears
@@ -6782,9 +6786,18 @@ def process_device_login(device):
                     while True:
                         check_device_reset(serial, cycle_start)
                         # กันกด Back ไม่หยุด: เกิน 30 วิ ไม่เจอ cancel → ข้ามไปทำขั้นตอนถัดไปเลย
-                        if time.time() - cancel_spam_start > 30:
-                            gui_log(serial, "⚠️ ไม่เจอ cancel.bmp ใน 30 วิ → หยุดกด Back ไปต่อ (box/gacha ฯลฯ)", step="Cancel Timeout", status="stuck")
+                        if time.time() - cancel_spam_start > 120:
+                            gui_log(serial, "⚠️ ไม่เจอ cancel.bmp ใน 120 วิ → หยุดกด Back ไปต่อ (box/gacha ฯลฯ)", step="Cancel Timeout", status="stuck")
                             break
+                        # popup ที่ Back ปิดไม่ได้ (เช่น "Items Added to Inbox") → กด OK ก่อน แล้วค่อย Back ต่อ
+                        img_ok = fast_screencap(device)
+                        pts_ok = img_search(img_ok, os.path.join(IMG_DIR, "fixload1.bmp")) if img_ok is not None else None
+                        if pts_ok:
+                            x, y = pts_ok[0]
+                            gui_log(serial, f"เจอปุ่ม OK ระหว่างกด Back → กด OK ({x},{y})", step="Cancel OK")
+                            device.shell(f"input swipe {x} {y} {x} {y} 100")
+                            time.sleep(1.5)
+                            continue
                         device.shell("input keyevent 4")   # KEYCODE_BACK
                         time.sleep(1.0)
                         try:
