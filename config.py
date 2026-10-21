@@ -77,7 +77,7 @@ ONLY_GACHA500 = 0
 # ── Gacha + Check Mode ──────────────────────────────
 # 1 = สุ่มกาชาเสร็จแล้วกด backhome ต่อด้วยค้นหาฮีโร่ทันที
 # 0 = ข้าม
-GACHA_CHECK = 1
+GACHA_CHECK = 0
 
 # ── Gacha + Find Mode (DO_GACHA) ────────────────────
 # 1 = สุ่มกาชาแบบเสียเงิน (DO_GACHA) เสร็จแล้ว "ไม่ต้อง clear app"
