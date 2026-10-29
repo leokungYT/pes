@@ -461,5 +461,7 @@ LAUNCH_MAX_CONCURRENT = 8
 LAUNCH_SLOT_MAX_SEC = 45
 
 # ── ปิด VPN/Proxy ทุกตัวในจอก่อนเปิดเกม (WireGuard / WARP / v2ray ฯลฯ) ──
-# 1 = force-stop แอป VPN + ล้าง always-on VPN + ล้าง http proxy ทุกรอบก่อนเปิดเกม
+# 1 = force-stop แอป VPN + สั่ง pm disable-user ตัว VpnService (เช่น WireGuard
+#     ที่ PES ไม่ยอมให้ปิดเอง) + ล้าง always-on VPN + ล้าง http proxy
+#     ก่อนเปิดเกมทุกรอบ (reversible: `adb shell pm enable com.wireguard.android`)
 DISABLE_VPN = 1

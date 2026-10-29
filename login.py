@@ -374,23 +374,29 @@ VPN_PACKAGES = [
 ]
 
 def disable_vpn(device, serial):
-    """ปิด VPN/Proxy ทุกอย่างในจอ (เรียกก่อนเปิดเกม) — ไม่ throw"""
+    """ปิด VPN/Proxy ทุกอย่างในจอ (เรียกก่อนเปิดเกม) — ไม่ throw
+       WireGuard: force-stop อย่างเดียวตัด tunnel ไม่ขาด (VpnService ยังอยู่)
+       → pm disable-user ทิ้งทั้งแอป กัน tunnel reconnect ตอนเปิดเกม"""
     try:
         import config as _c
         if int(getattr(_c, 'DISABLE_VPN', 1)) != 1:
             return
     except Exception:
         pass
-    cmd = "; ".join([f"am force-stop {p}" for p in VPN_PACKAGES] + [
+    kill_cmds = [f"am force-stop {p}" for p in VPN_PACKAGES]
+    # ทิ้ง VpnService ของ WireGuard ตรงๆ (reversible: pm enable คืนได้)
+    disable_cmds = [f"pm disable-user --user 0 {p}" for p in VPN_PACKAGES]
+    settings_cmds = [
         "settings delete secure always_on_vpn_app",
         "settings put secure always_on_vpn_lockdown 0",
         "settings put global http_proxy :0",
         "settings delete global global_http_proxy_host",
         "settings delete global global_http_proxy_port",
-    ])
+    ]
+    cmd = "; ".join(kill_cmds + disable_cmds + settings_cmds)
     try:
-        _run_device_shell(device, cmd, timeout=10)
-        gui_log(serial, "ปิด VPN/Proxy แล้ว", step="VPN Off")
+        _run_device_shell(device, cmd, timeout=15)
+        gui_log(serial, "ปิด VPN/Proxy + WireGuard ในจอแล้ว", step="VPN Off")
     except Exception as e:
         gui_log(serial, f"ปิด VPN ไม่สำเร็จ: {e}", step="VPN Off")
 
