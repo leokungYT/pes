@@ -3197,21 +3197,26 @@ def get_screen_capture(device):
             return None
 
         # === จอน้ำเงินล้วน floating check (หาลอยๆ ทุกเฟรม ทุกเฟส) ===
-        # ค้างน้ำเงิน/ดำครบ 3 วิ → ปิดเกมเลย ไม่ต้องกดกลางจอให้เสียเวลา
-        # รอบถัดไปเช็คเกมตายด้านบนจะ relaunch → วิ่งเข้าลูปหา play8 ต่อเอง
+        # ค้างน้ำเงิน/ดำครบ 1 วิ → ปิดเกมเลย ไม่ต้องกดกลางจอให้เสียเวลา
+        # แต่ก่อนปิด: scan หา play8 ก่อน — เจอแปลว่าหลุดน้ำเงินแล้ว ปล่อย flow หลักกดเอง
         _sb = device.serial
         if is_blue_screen(img):
             _t0 = DEVICE_BLUE_SINCE.setdefault(_sb, time.time())
-            if time.time() - _t0 >= 3:
-                gui_log(_sb, "จอน้ำเงิน/ดำค้าง ≥3 วิ → ปิดเกมแล้วเปิดใหม่ (ไปหา play8)", step="Blue Restart", status="stuck")
-                DEVICE_BLUE_SINCE.pop(_sb, None)
-                _on_blue = DEVICE_FILE_ASSIGNMENTS.get(_sb)
-                if DEVICE_PAST_LOGIN.get(_sb) and _on_blue:
-                    trigger_restart_from_play8(device, _sb, _on_blue, reason="จอน้ำเงินค้าง")
-                device.shell("am force-stop jp.konami.pesam")
-                DEVICE_LAST_GAME_CHECK[_sb] = 0   # บังคับเช็คเกมรอบหน้าทันที → relaunch
-                time.sleep(1)
-                return None
+            if time.time() - _t0 >= 1:
+                # เจอ play8 บนจอ = หลุดน้ำเงินแล้ว, break ทันที ไป flow หลักกด play8
+                if (img_search(img, os.path.join(IMG_DIR, "play8.bmp"))
+                        or img_search_best(img, os.path.join(IMG_DIR, "checkponit-play8.bmp"), threshold=0.9)):
+                    DEVICE_BLUE_SINCE.pop(_sb, None)
+                else:
+                    gui_log(_sb, "จอน้ำเงิน/ดำค้าง ≥1 วิ → ปิดเกมแล้วเปิดใหม่ (ไปหา play8)", step="Blue Restart", status="stuck")
+                    DEVICE_BLUE_SINCE.pop(_sb, None)
+                    _on_blue = DEVICE_FILE_ASSIGNMENTS.get(_sb)
+                    if DEVICE_PAST_LOGIN.get(_sb) and _on_blue:
+                        trigger_restart_from_play8(device, _sb, _on_blue, reason="จอน้ำเงินค้าง")
+                    device.shell("am force-stop jp.konami.pesam")
+                    DEVICE_LAST_GAME_CHECK[_sb] = 0   # บังคับเช็คเกมรอบหน้าทันที → relaunch
+                    time.sleep(1)
+                    return None
         else:
             DEVICE_BLUE_SINCE.pop(_sb, None)
         
