@@ -281,7 +281,6 @@ UNLOCK_HERO_STUCK_SECS = 8.0  # วิ — unlock-hero1 ค้างบนจอ
 GACHA_BACKHOME_STUCK_SECS = 7.0   # วิ — ระหว่างสุ่มกาชา ถ้า backhome ค้างบนจอนานเกินนี้ = ไปต่อไม่ได้ → กดกลับ Home
 DEVICE_WATCH_GPLAY   = {}     # serial -> True ช่วงเปิดเกม → หา fix-googleplay ลอยๆ ทุกเฟรม (หยุดเมื่อเจอ play8)
 DEVICE_BLUE_SINCE    = {}     # serial -> เวลาที่เริ่มเห็นจอน้ำเงินล้วน (floating check)
-DEVICE_BLUE_TAPS     = {}     # serial -> จำนวนครั้งที่กดกลางจอระหว่างจอน้ำเงินค้าง
 # popup "Google Play Games": ห้ามกด Cancel — กดแล้วเกมเด้งออก
 # → แตะที่ว่างมุมซ้ายบนแทน (นอกกรอบ dialog ไม่โดนปุ่มไหน) กดซ้ำๆ จนกว่า popup จะหาย/เจอ play8
 # ตรวจจากหน้าจอจริงแล้ว: (60,60) ดำสนิท ไม่มีปุ่ม และอยู่นอกกรอบ dialog (dialog เริ่มที่ x=157)
@@ -3198,30 +3197,23 @@ def get_screen_capture(device):
             return None
 
         # === จอน้ำเงินล้วน floating check (หาลอยๆ ทุกเฟรม ทุกเฟส) ===
-        # ค้างน้ำเงิน/ดำครบ 2 วิ → กดรัวๆ (5 ครั้ง/เฟรม) ทุกเฟรมจนกว่าจอจะเปลี่ยน (เช่น ขึ้น play8)
+        # ค้างน้ำเงิน/ดำครบ 3 วิ → ปิดเกมเลย ไม่ต้องกดกลางจอให้เสียเวลา
+        # รอบถัดไปเช็คเกมตายด้านบนจะ relaunch → วิ่งเข้าลูปหา play8 ต่อเอง
         _sb = device.serial
         if is_blue_screen(img):
             _t0 = DEVICE_BLUE_SINCE.setdefault(_sb, time.time())
-            if time.time() - _t0 >= 2:
-                # กดรัวๆ ถี่ๆ: ยิงทีละ 5 จุดในคำสั่งเดียว (กลางจอ + รอบๆ)
-                device.shell("input tap 480 270; input tap 480 270; input tap 300 270; "
-                             "input tap 660 270; input tap 480 270")
-                _n = DEVICE_BLUE_TAPS.get(_sb, 0) + 1
-                DEVICE_BLUE_TAPS[_sb] = _n
-                if _n % 10 == 1:
-                    gui_log(_sb, f"จอน้ำเงิน/ดำค้าง ≥2 วิ → กดรัวๆ (รอบที่ {_n})", step="Blue Tap")
-                # กดแล้วยังค้างเกิน 90 วิ → ปิดเกม ให้รอบถัดไปเปิดใหม่เอง (เช็คเกมตายด้านบน)
-                if time.time() - _t0 >= 90:
-                    gui_log(_sb, "จอน้ำเงินค้างเกิน 90 วิ → ปิดเกมแล้วเปิดใหม่", step="Blue Restart", status="stuck")
-                    DEVICE_BLUE_SINCE.pop(_sb, None)
-                    DEVICE_BLUE_TAPS.pop(_sb, None)
-                    device.shell("am force-stop jp.konami.pesam")
-                    DEVICE_LAST_GAME_CHECK[_sb] = 0   # บังคับเช็คเกมรอบหน้าทันที → relaunch
-                    time.sleep(1)
-                    return None
+            if time.time() - _t0 >= 3:
+                gui_log(_sb, "จอน้ำเงิน/ดำค้าง ≥3 วิ → ปิดเกมแล้วเปิดใหม่ (ไปหา play8)", step="Blue Restart", status="stuck")
+                DEVICE_BLUE_SINCE.pop(_sb, None)
+                _on_blue = DEVICE_FILE_ASSIGNMENTS.get(_sb)
+                if DEVICE_PAST_LOGIN.get(_sb) and _on_blue:
+                    trigger_restart_from_play8(device, _sb, _on_blue, reason="จอน้ำเงินค้าง")
+                device.shell("am force-stop jp.konami.pesam")
+                DEVICE_LAST_GAME_CHECK[_sb] = 0   # บังคับเช็คเกมรอบหน้าทันที → relaunch
+                time.sleep(1)
+                return None
         else:
             DEVICE_BLUE_SINCE.pop(_sb, None)
-            DEVICE_BLUE_TAPS.pop(_sb, None)
         
         if img is not None:
             # === fixnet floating check ===
@@ -6711,12 +6703,8 @@ def process_device_login(device):
                         time.sleep(1.0)   # เบาเครื่อง: เว้นจังหวะกด play8 (เดิม 0.5)
                         continue
 
-                # เบาเครื่อง: ช่วงเกมกำลังโหลด (ยังไม่เห็น play8) ไม่ต้องแคปจอถี่ → พัก 2 วิ (เดิม 0.3)
-                # จอน้ำเงินค้าง (floating check กำลังกดรัวๆ) → วนถี่ 0.3 วิ ให้กดรัวจริง
-                if DEVICE_BLUE_TAPS.get(serial):
-                    time.sleep(0.1)
-                else:
-                    time.sleep(2.0 if play8_click_count == 0 else 1.0)
+                # เบาเครื่อง: ช่วงเกมกำลังโหลด (ยังไม่เห็น play8) ไม่ต้องแคปจอถี่ → พัก 2 วิ
+                time.sleep(2.0 if play8_click_count == 0 else 1.0)
 
             # ผ่านหน้า login (เจอ checkpoint) แล้ว → mark ไว้: ถ้าหลังจากนี้เจอ fixclear
             # จะ restart "ตั้งแต่ play8" (เก็บ login เดิม) แทนการ push ไฟล์ + login ใหม่
