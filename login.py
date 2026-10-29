@@ -280,7 +280,6 @@ _UNLOCK_HERO_SEEN    = {}     # serial -> เวลาที่เริ่ม�
 UNLOCK_HERO_STUCK_SECS = 8.0  # วิ — unlock-hero1 ค้างบนจอนานเกินนี้ = ป็อปอัพไม่ยอมไปเอง → กดปิดให้
 GACHA_BACKHOME_STUCK_SECS = 7.0   # วิ — ระหว่างสุ่มกาชา ถ้า backhome ค้างบนจอนานเกินนี้ = ไปต่อไม่ได้ → กดกลับ Home
 DEVICE_WATCH_GPLAY   = {}     # serial -> True ช่วงเปิดเกม → หา fix-googleplay ลอยๆ ทุกเฟรม (หยุดเมื่อเจอ play8)
-DEVICE_BLUE_SINCE    = {}     # serial -> เวลาที่เริ่มเห็นจอน้ำเงินล้วน (floating check)
 # popup "Google Play Games": ห้ามกด Cancel — กดแล้วเกมเด้งออก
 # → แตะที่ว่างมุมซ้ายบนแทน (นอกกรอบ dialog ไม่โดนปุ่มไหน) กดซ้ำๆ จนกว่า popup จะหาย/เจอ play8
 # ตรวจจากหน้าจอจริงแล้ว: (60,60) ดำสนิท ไม่มีปุ่ม และอยู่นอกกรอบ dialog (dialog เริ่มที่ x=157)
@@ -398,19 +397,6 @@ def disable_vpn(device, serial):
         gui_log(serial, "ปิด VPN/Proxy + WireGuard ในจอแล้ว", step="VPN Off")
     except Exception as e:
         gui_log(serial, f"ปิด VPN ไม่สำเร็จ: {e}", step="VPN Off")
-
-def is_blue_screen(gray_img):
-    """จอน้ำเงินล้วนตอนโหลดเกม: ภาพ grayscale เป็นสีเดียวแทบทั้งจอ ค่าราว 12-45
-    (น้ำเงิน 0,0,~190 → gray ~22; จอดำ = 0 ไม่นับ)"""
-    try:
-        small = gray_img[::8, ::8]
-        med = int(np.median(small))
-        # รวมจอดำล้วนด้วย: ตอนเกมค้างโหลด screencap มักได้ "ดำล้วน" ทั้งที่บนจอเห็นเป็นสีน้ำเงิน
-        if med > 45:
-            return False
-        return float((np.abs(small.astype(np.int16) - med) <= 4).mean()) >= 0.97
-    except Exception:
-        return False
 
 def release_launch_slot(serial):
     with _launch_slots_lock:
@@ -3196,30 +3182,6 @@ def get_screen_capture(device):
         if img is None:
             return None
 
-        # === จอน้ำเงินล้วน floating check (หาลอยๆ ทุกเฟรม ทุกเฟส) ===
-        # ค้างน้ำเงิน/ดำครบ 1 วิ → ปิดเกมเลย ไม่ต้องกดกลางจอให้เสียเวลา
-        # แต่ก่อนปิด: scan หา play8 ก่อน — เจอแปลว่าหลุดน้ำเงินแล้ว ปล่อย flow หลักกดเอง
-        _sb = device.serial
-        if is_blue_screen(img):
-            _t0 = DEVICE_BLUE_SINCE.setdefault(_sb, time.time())
-            if time.time() - _t0 >= 1:
-                # เจอ play8 บนจอ = หลุดน้ำเงินแล้ว, break ทันที ไป flow หลักกด play8
-                if (img_search(img, os.path.join(IMG_DIR, "play8.bmp"))
-                        or img_search_best(img, os.path.join(IMG_DIR, "checkponit-play8.bmp"), threshold=0.9)):
-                    DEVICE_BLUE_SINCE.pop(_sb, None)
-                else:
-                    gui_log(_sb, "จอน้ำเงิน/ดำค้าง ≥1 วิ → ปิดเกมแล้วเปิดใหม่ (ไปหา play8)", step="Blue Restart", status="stuck")
-                    DEVICE_BLUE_SINCE.pop(_sb, None)
-                    _on_blue = DEVICE_FILE_ASSIGNMENTS.get(_sb)
-                    if DEVICE_PAST_LOGIN.get(_sb) and _on_blue:
-                        trigger_restart_from_play8(device, _sb, _on_blue, reason="จอน้ำเงินค้าง")
-                    device.shell("am force-stop jp.konami.pesam")
-                    DEVICE_LAST_GAME_CHECK[_sb] = 0   # บังคับเช็คเกมรอบหน้าทันที → relaunch
-                    time.sleep(1)
-                    return None
-        else:
-            DEVICE_BLUE_SINCE.pop(_sb, None)
-        
         if img is not None:
             # === fixnet floating check ===
             fn_pts = img_search(img, _P['fixnet'])
