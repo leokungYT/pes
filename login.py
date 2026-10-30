@@ -2225,13 +2225,26 @@ def is_device_online(device):
         return False
 
 def try_reconnect_device(serial):
-    """พยายาม adb connect กลับ (เผื่อ MuMu ฟื้นจาก offline/ANR)."""
+    """พยายาม adb connect กลับ (เผื่อ MuMu ฟื้นจาก offline/ANR).
+    - start-server เผื่อ login.bat kill-server ทิ้งไปแล้ว (ครั้งแรกจะคืน offline)
+    - ลอง connect 2 รอบมี sleep คั่น (adb daemon บางทีตอบไม่ทันครั้งแรก)"""
     try:
         kwargs = {'creationflags': 0x08000000} if os.name == 'nt' else {}
-        subprocess.run([adb_path, "connect", serial],
-                       capture_output=True, text=True, timeout=5, **kwargs)
+        subprocess.run([adb_path, "start-server"],
+                       capture_output=True, timeout=5, **kwargs)
     except Exception:
         pass
+    for _ in range(2):
+        try:
+            kwargs = {'creationflags': 0x08000000} if os.name == 'nt' else {}
+            r = subprocess.run([adb_path, "connect", serial],
+                               capture_output=True, text=True, timeout=5, **kwargs)
+            out = (r.stdout or "").lower()
+            if "connected" in out and "cannot" not in out:
+                return
+        except Exception:
+            pass
+        time.sleep(0.5)
 
 # ── Root Toggle Helpers (ported from cookie-run) ──────────────────────
 SERIAL_TO_INDEX = {}
@@ -6525,6 +6538,13 @@ def process_device_login(device):
                 gui_log(serial, f"⚠️ Device OFFLINE — reconnecting & waiting... ({off_for:.0f}s)",
                         step="Offline", status="stuck")
                 try_reconnect_device(serial)
+                # ครั้งแรกที่หลุด offline → scan ทุก MuMu port เผื่อ serial เปลี่ยน
+                # (เปิด MuMu ใหม่แล้ว port เปลี่ยน / adb kill-server ทำให้ลืม serial)
+                if off_for < 2:
+                    try:
+                        connect_known_ports(quiet=True)
+                    except Exception:
+                        pass
 
                 # reconnect ติดเลย → กลับไปทำงานต่อ ไม่ต้องรีสตาร์ทอะไร
                 if is_device_online(device):
