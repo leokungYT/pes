@@ -2310,6 +2310,7 @@ def mumu_set_root(index, on):
            "-val", "true" if on else "false"])
 
 # ── Auto restart MuMu instance ที่ adb หลุด (offline ค้าง) ────────────────
+DEVICE_PUSH_FAILS = {}   # serial -> push พังติดกันกี่รอบ
 _MUMU_RESTART_LOCK  = threading.Lock()   # รีสตาร์ททีละเครื่อง — กันหลายตัวบูตพร้อมกันจนโฮสต์แขวน
 _MUMU_LAST_RESTART  = {}                 # serial -> เวลาที่สั่ง restart ล่าสุด (cooldown)
 _MUMU_LAST_BOOT_TS  = [0.0]              # เวลาที่ instance ล่าสุดถูกสั่งบูต (เว้นระยะระหว่างเครื่อง)
@@ -6556,8 +6557,16 @@ def process_device_login(device):
                 if not push_dat_to_device(device, file_path):
                     gui_log(serial, "Push FAILED!", step="Error", status="stuck")
                     release_file(original_name)
+                    # push พังติดกันหลายรอบ (adb shell timeout / su ไม่ทำงาน) = MuMu ตัวนี้แขวน → restart เฉพาะตัวนี้
+                    DEVICE_PUSH_FAILS[serial] = DEVICE_PUSH_FAILS.get(serial, 0) + 1
+                    if AUTO_RESTART_OFFLINE and DEVICE_PUSH_FAILS[serial] >= 3:
+                        gui_log(serial, f"Push พังติดกัน {DEVICE_PUSH_FAILS[serial]} รอบ → MuMu น่าจะแขวน สั่ง restart",
+                                step="Push Hang", status="stuck")
+                        if restart_mumu_instance(serial):
+                            DEVICE_PUSH_FAILS[serial] = 0
                     time.sleep(5)
                     continue
+                DEVICE_PUSH_FAILS[serial] = 0
 
                 # delay สั้นๆ หลัง push เสร็จ ก่อนเปิดเกม (sync เรียบร้อยแล้ว)
                 gui_log(serial, "Push OK — launching game...", step="Push Settle")
