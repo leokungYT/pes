@@ -7,6 +7,9 @@ echo        STEP 0: Cleanup (logs + stale python)...
 echo ------------------------------------------
 :: ลบ log เก่าทิ้ง + ฆ่า python ที่รัน login.py ค้างแรม (ไม่งั้นโหลด module เก่าค้าง ไม่ยอมอัปเดต)
 powershell -NoProfile -Command "Remove-Item '%~dp0logs\*.txt' -Force -ErrorAction SilentlyContinue; try { $ps = Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" -ErrorAction Stop } catch { try { $ps = Get-WmiObject Win32_Process -Filter \"Name='python.exe'\" -ErrorAction Stop } catch { $ps = @() } }; $ps | Where-Object { $_.CommandLine -like '*login.py*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" 2>nul
+:: ปิด adb server ค้าง (บางที adb เก่าแขวน แคปจอ/กดไม่ได้) — บอทจะเปิดใหม่เอง
+"%~dp0adb\adb.exe" kill-server >nul 2>&1
+taskkill /f /im adb.exe >nul 2>&1
 
 echo ------------------------------------------
 echo        STEP 1: Checking for updates...

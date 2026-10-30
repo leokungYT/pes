@@ -2310,6 +2310,7 @@ def mumu_set_root(index, on):
            "-val", "true" if on else "false"])
 
 # ── Auto restart MuMu instance ที่ adb หลุด (offline ค้าง) ────────────────
+DEVICE_P8_DIAG = {}     # serial -> เวลา log วินิจฉัย play8 ล่าสุด
 DEVICE_PUSH_FAILS = {}   # serial -> push พังติดกันกี่รอบ
 _MUMU_RESTART_LOCK  = threading.Lock()   # รีสตาร์ททีละเครื่อง — กันหลายตัวบูตพร้อมกันจนโฮสต์แขวน
 _MUMU_LAST_RESTART  = {}                 # serial -> เวลาที่สั่ง restart ล่าสุด (cooldown)
@@ -6679,6 +6680,17 @@ def process_device_login(device):
                             gui_log(serial, f"Found {matched_name}! Clicked. (ครั้งที่ {play8_click_count})", step="play8")
                         time.sleep(1.0)   # เบาเครื่อง: เว้นจังหวะกด play8 (เดิม 0.5)
                         continue
+
+                # วินิจฉัย: ยังไม่เคยกด play8 → log ทุก ~20 วิ ว่าจอที่แคปได้ขนาดเท่าไหร่ + คะแนน play8 เท่าไหร่
+                if play8_click_count == 0 and time.time() - DEVICE_P8_DIAG.get(serial, 0) > 20:
+                    DEVICE_P8_DIAG[serial] = time.time()
+                    if img is None:
+                        gui_log(serial, "ยังไม่เจอ play8 — แคปจอไม่ได้ (img=None)", step="play8 Diag")
+                    else:
+                        gui_log(serial, f"ยังไม่เจอ play8 — จอ {img.shape[1]}x{img.shape[0]} "
+                                        f"play8={img_match_score(img, os.path.join(IMG_DIR, 'play8.bmp')):.2f} "
+                                        f"play8fix={img_match_score(img, os.path.join(IMG_DIR, 'play8fix.bmp')):.2f}",
+                                step="play8 Diag")
 
                 # เบาเครื่อง: ช่วงเกมกำลังโหลด (ยังไม่เห็น play8) ไม่ต้องแคปจอถี่ → พัก 2 วิ
                 time.sleep(2.0 if play8_click_count == 0 else 1.0)
