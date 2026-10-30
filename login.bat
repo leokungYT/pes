@@ -6,7 +6,7 @@ echo ------------------------------------------
 echo        STEP 0: Cleanup (logs + stale python)...
 echo ------------------------------------------
 :: ลบ log เก่าทิ้ง + ฆ่า python ที่รัน login.py ค้างแรม (ไม่งั้นโหลด module เก่าค้าง ไม่ยอมอัปเดต)
-powershell -NoProfile -Command "Remove-Item 'C:\Users\Administrator\Downloads\pes-new\pes\logs\*.txt' -Force -ErrorAction SilentlyContinue; Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | Where-Object { $_.CommandLine -like '*login.py*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+powershell -NoProfile -Command "Remove-Item '%~dp0logs\*.txt' -Force -ErrorAction SilentlyContinue; try { $ps = Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" -ErrorAction Stop } catch { try { $ps = Get-WmiObject Win32_Process -Filter \"Name='python.exe'\" -ErrorAction Stop } catch { $ps = @() } }; $ps | Where-Object { $_.CommandLine -like '*login.py*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" 2>nul
 
 echo ------------------------------------------
 echo        STEP 1: Checking for updates...
