@@ -6579,7 +6579,7 @@ def process_device_login(device):
             #    (กด play8 / fallback ไปเรื่อยๆ จนกว่าจะเจอ แล้วค่อยไปขั้นตอนกด Back รัวๆ)
             gui_log(serial, "Waiting checkpointlogin (clicking play8)...", step="play8/Check")
             play8_click_count = 0
-            hunt_start = time.time()    # เริ่มจับเวลาหา play8 — ค้างเกินเวลา = ปิดเกมเปิดใหม่
+
             DEVICE_FIXOUT_CANCEL_DONE.pop(serial, None)   # ล้าง flag ค้างจากรอบ/เฟสก่อน กัน break มั่ว
             p8_cancel_done = False      # True = หลุดลูปด้วยทาง fixout→cancel (ข้ามขั้น event/Back spam ได้เลย)
 
@@ -6670,20 +6670,6 @@ def process_device_login(device):
                             gui_log(serial, f"Found {matched_name}! Clicked. (ครั้งที่ {play8_click_count})", step="play8")
                         time.sleep(1.0)   # เบาเครื่อง: เว้นจังหวะกด play8 (เดิม 0.5)
                         continue
-
-                # ค้างหา play8 ไม่เจอเกิน 120 วิ (เดิม 45 วิ สั้นไป เกมโหลดไม่ทันโดนปิดวนไม่จบ) (ไม่ว่าจอน้ำเงิน/ดำ/Unreal splash/อะไรก็ตาม)
-                # → ปิดเกมแล้วเปิดใหม่ ไปวนหา play8 รอบใหม่ ไม่นั่งรอฟรี
-                if play8_click_count == 0 and time.time() - hunt_start > 120:
-                    gui_log(serial, "ไม่เจอ play8 ใน 120 วิ → ปิดเกมแล้วเปิดใหม่", step="Stuck Restart", status="stuck")
-                    _on_stuck = DEVICE_FILE_ASSIGNMENTS.get(serial)
-                    if DEVICE_PAST_LOGIN.get(serial) and _on_stuck:
-                        trigger_restart_from_play8(device, serial, _on_stuck, reason="หา play8 ไม่เจอใน 120 วิ")
-                    device.shell("am force-stop jp.konami.pesam")
-                    DEVICE_LAST_GAME_CHECK[serial] = 0
-                    time.sleep(2)
-                    get_screen_capture(device)   # relaunch เกมให้เสร็จก่อน
-                    hunt_start = time.time()     # เริ่มนับใหม่หลังเกมเปิดแล้ว ไม่นับเวลา relaunch
-                    continue
 
                 # เบาเครื่อง: ช่วงเกมกำลังโหลด (ยังไม่เห็น play8) ไม่ต้องแคปจอถี่ → พัก 2 วิ
                 time.sleep(2.0 if play8_click_count == 0 else 1.0)
