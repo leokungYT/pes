@@ -6671,17 +6671,18 @@ def process_device_login(device):
                         time.sleep(1.0)   # เบาเครื่อง: เว้นจังหวะกด play8 (เดิม 0.5)
                         continue
 
-                # ค้างหา play8 ไม่เจอเกิน 45 วิ (ไม่ว่าจอน้ำเงิน/ดำ/Unreal splash/อะไรก็ตาม)
+                # ค้างหา play8 ไม่เจอเกิน 120 วิ (เดิม 45 วิ สั้นไป เกมโหลดไม่ทันโดนปิดวนไม่จบ) (ไม่ว่าจอน้ำเงิน/ดำ/Unreal splash/อะไรก็ตาม)
                 # → ปิดเกมแล้วเปิดใหม่ ไปวนหา play8 รอบใหม่ ไม่นั่งรอฟรี
-                if play8_click_count == 0 and time.time() - hunt_start > 45:
-                    gui_log(serial, "ไม่เจอ play8 ใน 45 วิ → ปิดเกมแล้วเปิดใหม่", step="Stuck Restart", status="stuck")
+                if play8_click_count == 0 and time.time() - hunt_start > 120:
+                    gui_log(serial, "ไม่เจอ play8 ใน 120 วิ → ปิดเกมแล้วเปิดใหม่", step="Stuck Restart", status="stuck")
                     _on_stuck = DEVICE_FILE_ASSIGNMENTS.get(serial)
                     if DEVICE_PAST_LOGIN.get(serial) and _on_stuck:
-                        trigger_restart_from_play8(device, serial, _on_stuck, reason="หา play8 ไม่เจอใน 45 วิ")
+                        trigger_restart_from_play8(device, serial, _on_stuck, reason="หา play8 ไม่เจอใน 120 วิ")
                     device.shell("am force-stop jp.konami.pesam")
                     DEVICE_LAST_GAME_CHECK[serial] = 0
-                    hunt_start = time.time()
                     time.sleep(2)
+                    get_screen_capture(device)   # relaunch เกมให้เสร็จก่อน
+                    hunt_start = time.time()     # เริ่มนับใหม่หลังเกมเปิดแล้ว ไม่นับเวลา relaunch
                     continue
 
                 # เบาเครื่อง: ช่วงเกมกำลังโหลด (ยังไม่เห็น play8) ไม่ต้องแคปจอถี่ → พัก 2 วิ
