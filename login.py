@@ -6687,10 +6687,19 @@ def process_device_login(device):
                     if img is None:
                         gui_log(serial, "ยังไม่เจอ play8 — แคปจอไม่ได้ (img=None)", step="play8 Diag")
                     else:
+                        _p8p = os.path.join(IMG_DIR, 'play8.bmp')
+                        _t8 = load_template(_p8p)
                         gui_log(serial, f"ยังไม่เจอ play8 — จอ {img.shape[1]}x{img.shape[0]} "
-                                        f"play8={img_match_score(img, os.path.join(IMG_DIR, 'play8.bmp')):.2f} "
+                                        f"mean={float(img.mean()):.0f} std={float(img.std()):.0f} "
+                                        f"tmpl={'None' if _t8 is None else _t8.shape} path={os.path.abspath(_p8p)} "
+                                        f"play8={img_match_score(img, _p8p):.2f} "
                                         f"play8fix={img_match_score(img, os.path.join(IMG_DIR, 'play8fix.bmp')):.2f}",
                                 step="play8 Diag")
+                        try:   # เซฟจอที่บอทเห็นจริงไว้ดู
+                            os.makedirs("debug-ocr", exist_ok=True)
+                            cv2.imwrite(os.path.join("debug-ocr", f"p8diag_{serial.replace(':', '_')}.png"), img)
+                        except Exception:
+                            pass
 
                 # เบาเครื่อง: ช่วงเกมกำลังโหลด (ยังไม่เห็น play8) ไม่ต้องแคปจอถี่ → พัก 2 วิ
                 time.sleep(2.0 if play8_click_count == 0 else 1.0)
