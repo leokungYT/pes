@@ -268,6 +268,7 @@ REMOTE_DAT_FILE   = f"{REMOTE_AUTH_DIR}/online_user_id_data.dat"
 
 IMAGE_CACHE          = {}
 _image_cache_lock    = threading.Lock()
+_CACHE_MISS          = object()   # sentinel: distinguish "never looked up" from "cached as None"
 DEVICE_RESET_FLAGS   = {}
 DEVICE_FILE_ASSIGNMENTS = {}
 _DEVICE_WORKER_LOCK = threading.Lock()
@@ -3796,20 +3797,51 @@ def get_screen_capture(device):
     except Exception:
         return None
 
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+def _resolve_template_path(path):
+    """ลองหา template file หลายที่: path ที่ส่งมา, abs, แล้วก็ anchor กับที่อยู่ login.py
+    (กัน cwd ไม่ตรง install dir — เช่น run จาก shortcut ที่ working dir ว่าง)"""
+    if os.path.isabs(path) and os.path.exists(path):
+        return path
+    if os.path.exists(path):
+        return os.path.abspath(path)
+    anchored = os.path.join(_SCRIPT_DIR, path)
+    if os.path.exists(anchored):
+        return anchored
+    return path  # ของเดิม → ให้ caller fallback .bmp/.png
+
+def _try_imread_bytes(path):
+    """อ่าน BMP/PNG ผ่าน imdecode — กัน cv2.imread fail เพราะ unicode path หรือ permission"""
+    try:
+        with open(path, 'rb') as f:
+            data = f.read()
+        arr = np.frombuffer(data, np.uint8)
+        return cv2.imdecode(arr, cv2.IMREAD_GRAYSCALE)
+    except Exception:
+        return None
+
 def load_template(path):
     with _image_cache_lock:
-        if path in IMAGE_CACHE:
-            return IMAGE_CACHE[path]
+        cached = IMAGE_CACHE.get(path, _CACHE_MISS)
+    if cached is not _CACHE_MISS and cached is not None:
+        return cached   # ไม่ cache ค่า None — รอบหน้าลองโหลดใหม่
+
+    resolved = _resolve_template_path(path)
     t = None
-    if os.path.exists(path):
-        t = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+    if os.path.exists(resolved):
+        t = cv2.imread(resolved, cv2.IMREAD_GRAYSCALE)
+        if t is None:
+            t = _try_imread_bytes(resolved)   # fallback: imread fail → ลองอ่าน bytes เอง
     else:
-        base, ext = os.path.splitext(path)
+        base, ext = os.path.splitext(resolved)
         for alt in (".bmp", ".png"):
             if alt.lower() != ext.lower():
                 alt_path = base + alt
                 if os.path.exists(alt_path):
                     t = cv2.imread(alt_path, cv2.IMREAD_GRAYSCALE)
+                    if t is None:
+                        t = _try_imread_bytes(alt_path)
                     if t is not None:
                         break
     if t is not None and SCREENCAP_SCALE != 1.0:
@@ -3817,8 +3849,9 @@ def load_template(path):
                        (max(1, int(t.shape[1] * SCREENCAP_SCALE)),
                         max(1, int(t.shape[0] * SCREENCAP_SCALE))),
                        interpolation=cv2.INTER_LINEAR)
-    with _image_cache_lock:
-        IMAGE_CACHE[path] = t
+    if t is not None:
+        with _image_cache_lock:
+            IMAGE_CACHE[path] = t
     return t
 
 def _group_rectangles_compat(rects):
@@ -6689,9 +6722,11 @@ def process_device_login(device):
                     else:
                         _p8p = os.path.join(IMG_DIR, 'play8.bmp')
                         _t8 = load_template(_p8p)
+                        _rp8 = _resolve_template_path(_p8p)
                         gui_log(serial, f"ยังไม่เจอ play8 — จอ {img.shape[1]}x{img.shape[0]} "
                                         f"mean={float(img.mean()):.0f} std={float(img.std()):.0f} "
-                                        f"tmpl={'None' if _t8 is None else _t8.shape} path={os.path.abspath(_p8p)} "
+                                        f"tmpl={'None' if _t8 is None else _t8.shape} "
+                                        f"resolved={_rp8} exists={os.path.exists(_rp8)} "
                                         f"play8={img_match_score(img, _p8p):.2f} "
                                         f"play8fix={img_match_score(img, os.path.join(IMG_DIR, 'play8fix.bmp')):.2f}",
                                 step="play8 Diag")
