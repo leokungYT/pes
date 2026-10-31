@@ -3184,15 +3184,15 @@ def get_screen_capture(device):
     try:
         # เช็คเกมออนอยู่หรือไม่ (ทุก 8 วิ)
         if not is_game_running(device):
-            # เกมตาย: ถ้าผ่าน login แล้ว (อยู่ช่วง box/gacha) → flow เดิมไม่ตรงกับเกมที่เพิ่งเปิดใหม่
-            #   → restart ตั้งแต่ play8 (เก็บ login เดิม ไม่ push ซ้ำ) แทน relaunch แล้ววิ่งต่อผิดเฟสจนค้าง
-            _on_gsc = DEVICE_FILE_ASSIGNMENTS.get(device.serial)
-            if DEVICE_PAST_LOGIN.get(device.serial) and _on_gsc:
-                gui_log(device.serial, "⚠️ เกมไม่รัน (หลัง login) → restart ตั้งแต่ play8", step="Relaunch")
-                trigger_restart_from_play8(device, device.serial, _on_gsc, reason="เกมตาย/relaunch หลัง login")
-            gui_log(device.serial, "⚠️ Game not running! Relaunching...", step="Relaunch")
-            launch_game(device, settle=2)
-            DEVICE_LAST_GAME_CHECK[device.serial] = time.time()
+            # ผ่าน checkpointlogin แล้ว → ห้าม clear app / ห้าม restart
+            # ปล่อยให้ flow (box/gacha/find) ตาม config ทำต่อ ถ้าจอค้างจริง timeout handler
+            # จะจัดการเองตอนครบ TIMEOUT_MINUTES — ไม่กระชากไฟล์กลับไป play8 กลางคัน
+            if DEVICE_PAST_LOGIN.get(device.serial):
+                DEVICE_LAST_GAME_CHECK[device.serial] = time.time()
+            else:
+                gui_log(device.serial, "⚠️ Game not running! Relaunching...", step="Relaunch")
+                launch_game(device, settle=2)
+                DEVICE_LAST_GAME_CHECK[device.serial] = time.time()
 
         img = fast_screencap(device)
         if img is None:
