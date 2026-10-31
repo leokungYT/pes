@@ -6711,6 +6711,15 @@ def process_device_login(device):
                         pts_8 = img_search(img, os.path.join(IMG_DIR, "play8fix.bmp"))
                         matched_name = "play8fix"
 
+                    # ยังไม่เจอ play8 (จอน้ำเงิน/ดำ/splash/โหลดค้าง) → spam-tap 5 จุดกลางจอรัวๆ
+                    # ไม่กลัวโดนปุ่มผิด เพราะยังไม่ขึ้นเมนู; เลี่ยงมุม/ขอบจอกัน Back/Close/notification
+                    # (บน 960x540: ข้างใน x 300-660, y 150-400)
+                    if not pts_8:
+                        device.shell("input tap 480 270; input tap 380 200; input tap 580 200; "
+                                     "input tap 380 340; input tap 580 340")
+                        time.sleep(0.3)
+                        continue
+
                     if pts_8:
                         DEVICE_WATCH_GPLAY[serial] = False   # เจอ play8 แล้ว → เลิกหา fix-googleplay
                         release_launch_slot(serial)          # โหลดเกมเสร็จแล้ว → ปล่อยคิวให้จออื่นเปิด
