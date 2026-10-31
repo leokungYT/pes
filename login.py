@@ -2325,6 +2325,7 @@ def mumu_set_root(index, on):
            "-val", "true" if on else "false"])
 
 # ── Auto restart MuMu instance ที่ adb หลุด (offline ค้าง) ────────────────
+DEVICE_BLUE_TAPS = {}   # serial -> รอบที่กดรัวๆ ตอนจอฟ้า
 DEVICE_P8_DIAG = {}     # serial -> เวลา log วินิจฉัย play8 ล่าสุด
 DEVICE_PUSH_FAILS = {}   # serial -> push พังติดกันกี่รอบ
 _MUMU_RESTART_LOCK  = threading.Lock()   # รีสตาร์ททีละเครื่อง — กันหลายตัวบูตพร้อมกันจนโฮสต์แขวน
@@ -6734,6 +6735,19 @@ def process_device_login(device):
                             gui_log(serial, f"Found {matched_name}! Clicked. (ครั้งที่ {play8_click_count})", step="play8")
                         time.sleep(1.0)   # เบาเครื่อง: เว้นจังหวะกด play8 (เดิม 0.5)
                         continue
+
+                # จอฟ้า/ดำล้วนค้าง (เกมรอ input ไม่ยอมไปหน้า title) → กดรัวๆ จนกว่าจอจะเปลี่ยน
+                # (ทดสอบแล้ว: คลิกรัวๆ ตรงไหนก็ได้ จอฟ้าหาย) ไม่ปิดเกม — กดอย่างเดียว
+                if play8_click_count == 0 and img is not None and float(img.std()) < 6:
+                    device.shell("input swipe 480 270 480 270 50; input tap 480 270; "
+                                 "input swipe 300 270 300 270 50; input tap 660 270; "
+                                 "input swipe 480 400 480 400 50; input tap 480 270")
+                    DEVICE_BLUE_TAPS[serial] = DEVICE_BLUE_TAPS.get(serial, 0) + 1
+                    if DEVICE_BLUE_TAPS[serial] % 10 == 1:
+                        gui_log(serial, f"จอฟ้า/ดำล้วน → กดรัวๆ ให้หลุด (รอบที่ {DEVICE_BLUE_TAPS[serial]})", step="Blue Tap")
+                    time.sleep(0.5)
+                    continue
+                DEVICE_BLUE_TAPS.pop(serial, None)
 
                 # วินิจฉัย: ยังไม่เคยกด play8 → log ทุก ~20 วิ ว่าจอที่แคปได้ขนาดเท่าไหร่ + คะแนน play8 เท่าไหร่
                 if play8_click_count == 0 and time.time() - DEVICE_P8_DIAG.get(serial, 0) > 20:
