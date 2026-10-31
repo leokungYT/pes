@@ -2325,6 +2325,7 @@ def mumu_set_root(index, on):
 
 # ── Auto restart MuMu instance ที่ adb หลุด (offline ค้าง) ────────────────
 DEVICE_P8_DIAG = {}     # serial -> เวลา log วินิจฉัย play8 ล่าสุด
+DEVICE_P8_SPAM_LOG = {} # serial -> เวลา log spam-tap ล่าสุด (กัน log ถี่)
 DEVICE_PUSH_FAILS = {}   # serial -> push พังติดกันกี่รอบ
 _MUMU_RESTART_LOCK  = threading.Lock()   # รีสตาร์ททีละเครื่อง — กันหลายตัวบูตพร้อมกันจนโฮสต์แขวน
 _MUMU_LAST_RESTART  = {}                 # serial -> เวลาที่สั่ง restart ล่าสุด (cooldown)
@@ -6711,12 +6712,16 @@ def process_device_login(device):
                         pts_8 = img_search(img, os.path.join(IMG_DIR, "play8fix.bmp"))
                         matched_name = "play8fix"
 
-                    # ยังไม่เจอ play8 (จอน้ำเงิน/ดำ/splash/โหลดค้าง) → spam-tap 5 จุดกลางจอรัวๆ
-                    # ไม่กลัวโดนปุ่มผิด เพราะยังไม่ขึ้นเมนู; เลี่ยงมุม/ขอบจอกัน Back/Close/notification
-                    # (บน 960x540: ข้างใน x 300-660, y 150-400)
+                    # ยังไม่เจอ play8 (จอน้ำเงิน/ดำ/splash/โหลดค้าง หรือมี popup event ใหม่บัง)
+                    # → spam-tap 5 จุดกลางจอ + tap ปุ่ม X มุมบนขวา (popup event/offer/campaign ที่บอทไม่มี template)
+                    # (บน 960x540: ข้างใน x 300-660, y 150-400; มุม X ปกติอยู่ช่วง x 880-940, y 50-90)
                     if not pts_8:
                         device.shell("input tap 480 270; input tap 380 200; input tap 580 200; "
-                                     "input tap 380 340; input tap 580 340")
+                                     "input tap 380 340; input tap 580 340; "
+                                     "input tap 915 65; input tap 900 80; input tap 925 90")
+                        if play8_click_count == 0 and time.time() - DEVICE_P8_SPAM_LOG.get(serial, 0) > 10:
+                            DEVICE_P8_SPAM_LOG[serial] = time.time()
+                            gui_log(serial, "ยังไม่เจอ play8 — spam-tap กลางจอ + มุม X บนขวา (เผื่อ popup event บัง)", step="play8 Hunt")
                         time.sleep(0.3)
                         continue
 
