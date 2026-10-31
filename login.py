@@ -375,7 +375,7 @@ VPN_PACKAGES = [
 def disable_vpn(device, serial):
     """ปิด VPN/Proxy ทุกอย่างในจอ (เรียกก่อนเปิดเกม) — ไม่ throw
        WireGuard: force-stop อย่างเดียวตัด tunnel ไม่ขาด (VpnService ยังอยู่)
-       → pm disable-user ทิ้งทั้งแอป กัน tunnel reconnect ตอนเปิดเกม"""
+       (เลิก pm disable-user แล้ว — ทำให้เกมค้างจอฟ้า, ตอนนี้ pm enable คืนแทน)"""
     try:
         import config as _c
         if int(getattr(_c, 'DISABLE_VPN', 1)) != 1:
@@ -383,8 +383,9 @@ def disable_vpn(device, serial):
     except Exception:
         pass
     kill_cmds = [f"am force-stop {p}" for p in VPN_PACKAGES]
-    # ทิ้ง VpnService ของ WireGuard ตรงๆ (reversible: pm enable คืนได้)
-    disable_cmds = [f"pm disable-user --user 0 {p}" for p in VPN_PACKAGES]
+    # เดิม pm disable-user ทิ้งแอป VPN → เกมค้างจอฟ้าทุกจอ (ยืนยันแล้ว WireGuard โดน disable ค้าง)
+    # → เลิก disable แล้ว pm enable คืนให้ทุกรอบ (แก้เครื่องที่โดน disable ค้างไว้แล้วด้วย) เหลือแค่ force-stop
+    disable_cmds = [f"pm enable {p} >/dev/null 2>&1" for p in VPN_PACKAGES]
     settings_cmds = [
         "settings delete secure always_on_vpn_app",
         "settings put secure always_on_vpn_lockdown 0",
@@ -4713,13 +4714,6 @@ def push_dat_to_device(device, local_path):
         subprocess.run([adb_path, "-s", serial, "shell", f"su -c 'rm -rf {REMOTE_AUTH_DIR}/* && mkdir -p {REMOTE_AUTH_DIR} && chmod 777 {REMOTE_AUTH_DIR}'"], 
                        capture_output=True, text=True, timeout=5, **kwargs)
         time.sleep(0.1)
-
-        # 2.5 ล้าง cache ของเกม (cache/ + code_cache/ เท่านั้น — ไม่แตะ files/ ข้อมูลเกม/ไฟล์ดาวน์โหลด)
-        #     กันจอฟ้า/ค้างตอนเปิดเกมจาก cache เสียสะสมข้ามไฟล์
-        gui_log(serial, "Step 2.5: Clearing game cache...", step="Cleanup")
-        subprocess.run([adb_path, "-s", serial, "shell",
-                        "su -c 'rm -rf /data/data/jp.konami.pesam/cache/* /data/data/jp.konami.pesam/code_cache/*'"],
-                       capture_output=True, text=True, timeout=10, **kwargs)
 
         # 3. Copy to local temp and Push
         gui_log(serial, "Step 3: Pushing file to device...", step="Push")
