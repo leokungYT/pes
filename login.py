@@ -4714,6 +4714,13 @@ def push_dat_to_device(device, local_path):
                        capture_output=True, text=True, timeout=5, **kwargs)
         time.sleep(0.1)
 
+        # 2.5 ล้าง cache ของเกม (cache/ + code_cache/ เท่านั้น — ไม่แตะ files/ ข้อมูลเกม/ไฟล์ดาวน์โหลด)
+        #     กันจอฟ้า/ค้างตอนเปิดเกมจาก cache เสียสะสมข้ามไฟล์
+        gui_log(serial, "Step 2.5: Clearing game cache...", step="Cleanup")
+        subprocess.run([adb_path, "-s", serial, "shell",
+                        "su -c 'rm -rf /data/data/jp.konami.pesam/cache/* /data/data/jp.konami.pesam/code_cache/*'"],
+                       capture_output=True, text=True, timeout=10, **kwargs)
+
         # 3. Copy to local temp and Push
         gui_log(serial, "Step 3: Pushing file to device...", step="Push")
         shutil.copy2(local_path, tmp_local)
