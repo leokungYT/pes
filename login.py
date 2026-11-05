@@ -2972,6 +2972,14 @@ def fixout_back_spam_until_cancel(device, serial):
                 _FIXOUT_LAST_DONE[serial] = time.time()   # เริ่ม cooldown — กดรอบเดียวแล้วเว้น ไม่ยิงซ้ำรัวๆ
                 return
 
+def safe_force_stop(device, pkg="jp.konami.pesam"):
+    """ยิง am force-stop แบบไม่ยอมให้ TimeoutError/ConnectionError ของ ppadb
+    หลุดขึ้นมาฆ่า worker thread. ถ้ายิงไม่ได้ก็ปล่อยผ่าน — รอบถัดไปจะลองใหม่เอง."""
+    try:
+        device.shell(f"am force-stop {pkg}")
+    except Exception:
+        pass
+
 def trigger_restart_from_play8(device, serial, original_name, reason="stuck"):
     """เริ่มใหม่ "ตั้งแต่ play8" (เปิดเกมเดิม เก็บ login ไม่ push ซ้ำ)
     วนซ้ำไปเรื่อยๆ จนกว่าอาการ (fixclear/ค้าง) จะหายไป — ไม่ส่ง file-error/ไม่ยอมแพ้
@@ -2979,7 +2987,7 @@ def trigger_restart_from_play8(device, serial, original_name, reason="stuck"):
     on, cnt = DEVICE_RESTART_PLAY8_COUNT.get(serial, (None, 0))
     cnt = cnt + 1 if on == original_name else 1
     DEVICE_RESTART_PLAY8_COUNT[serial] = (original_name, cnt)
-    device.shell("am force-stop jp.konami.pesam")
+    safe_force_stop(device)
     time.sleep(1)
 
     if original_name:
@@ -3239,7 +3247,7 @@ def get_screen_capture(device):
                     gui_log(serial_fn1, "fixnet1 detected! Closing app & re-entering (same file)...", step="Fix Net 1")
                     if original_name:
                         trigger_restart_from_play8(device, serial_fn1, original_name, reason="fixnet1")
-                    device.shell("am force-stop jp.konami.pesam")
+                    safe_force_stop(device)
                     time.sleep(1)
                     raise DeviceResetException("fixnet1 detected (no file)")
                 if img_fn1re is not None:
@@ -3254,7 +3262,7 @@ def get_screen_capture(device):
                     serial_ne = device.serial
                     original_name = DEVICE_FILE_ASSIGNMENTS.get(serial_ne)
                     gui_log(serial_ne, "fixneterror detected! Moving file to login-failed, next id...", step="Fix Net Error", status="error")
-                    device.shell("am force-stop jp.konami.pesam")
+                    safe_force_stop(device)
                     device.shell("su -c 'rm -f /data/data/jp.konami.pesam/files/SaveData/AUTH/online_user_id_data.dat'")
                     device.shell("su -c 'rm -rf /data/data/jp.konami.pesam/files/SaveData/AUTH/*'")
                     DEVICE_RESTART_PLAY8_COUNT.pop(serial_ne, None)
@@ -3328,7 +3336,7 @@ def get_screen_capture(device):
             fixdow1_pts = img_search(img, os.path.join(IMG_DIR, "fixdow1.bmp"))
             if fixdow1_pts:
                 gui_log(device.serial, "Floating: fixdow1 found! Clearing app & relaunching...", step="Fix Download")
-                device.shell("am force-stop jp.konami.pesam")
+                safe_force_stop(device)
                 time.sleep(2)
                 launch_game(device, settle=8)
 
@@ -3385,7 +3393,7 @@ def get_screen_capture(device):
                 sell_pts = img_search(img, os.path.join(IMG_DIR, "sellv2.bmp"))
             if sell_pts:
                 gui_log(device.serial, f"🛑 Floating: {sell_name} found! Force closing app and moving file to login-failed", step="Sell Detected")
-                device.shell("am force-stop jp.konami.pesam")
+                safe_force_stop(device)
                 time.sleep(1)
                 
                 original_name = DEVICE_FILE_ASSIGNMENTS.get(device.serial)
@@ -3408,7 +3416,7 @@ def get_screen_capture(device):
             if failed1_pts or failed2_pts or failed3_pts:
                 found_name = "failed1.bmp" if failed1_pts else ("failed2.bmp" if failed2_pts else "failed3.bmp")
                 gui_log(device.serial, f"🛑 Floating: {found_name} found! Force closing app and moving file to login-failed", step="Failed Detected")
-                device.shell("am force-stop jp.konami.pesam")
+                safe_force_stop(device)
                 time.sleep(1)
                 
                 original_name = DEVICE_FILE_ASSIGNMENTS.get(device.serial)
@@ -3432,7 +3440,7 @@ def get_screen_capture(device):
 
                 # ── เจอ fixclear1.png = ไฟล์เสีย → clear app + ล้าง AUTH + ย้ายไป file-error → id ถัดไป ──
                 gui_log(serial_fc, "fixclear1.png detected! Clearing app & moving file to file-error, next id...", step="Fix Clear Fail", status="error")
-                device.shell("am force-stop jp.konami.pesam")
+                safe_force_stop(device)
                 device.shell("su -c 'rm -f /data/data/jp.konami.pesam/files/SaveData/AUTH/online_user_id_data.dat'")
                 device.shell("su -c 'rm -rf /data/data/jp.konami.pesam/files/SaveData/AUTH/*'")
                 DEVICE_RESTART_PLAY8_COUNT.pop(serial_fc, None)
@@ -3457,7 +3465,7 @@ def get_screen_capture(device):
                 serial_un = device.serial
                 original_name = DEVICE_FILE_ASSIGNMENTS.get(serial_un)
                 gui_log(serial_un, "updatenew1 detected! Clearing app & moving file to file-error, next id...", step="UpdateNew Fail", status="error")
-                device.shell("am force-stop jp.konami.pesam")
+                safe_force_stop(device)
                 device.shell("su -c 'rm -f /data/data/jp.konami.pesam/files/SaveData/AUTH/online_user_id_data.dat'")
                 device.shell("su -c 'rm -rf /data/data/jp.konami.pesam/files/SaveData/AUTH/*'")
                 DEVICE_RESTART_PLAY8_COUNT.pop(serial_un, None)
@@ -3494,7 +3502,7 @@ def get_screen_capture(device):
             si_bmp = img_search(img, os.path.join(IMG_DIR, "sell-id.bmp"), threshold=0.99)
             if si_png or si_bmp:
                 gui_log(device.serial, "sell-id detected! Clearing app and moving file to file-error...", step="Sell ID")
-                device.shell("am force-stop jp.konami.pesam")
+                safe_force_stop(device)
                 device.shell("su -c 'rm -f /data/data/jp.konami.pesam/files/SaveData/AUTH/online_user_id_data.dat'")
                 device.shell("su -c 'rm -rf /data/data/jp.konami.pesam/files/SaveData/AUTH/*'")
 
@@ -4785,7 +4793,7 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
                         break
             if not fixteam_cancel_found:
                 gui_log(serial, "Timeout waiting for cancel.bmp in fixteam. Force stopping app...", step="Fix Team Timeout")
-                device.shell("am force-stop jp.konami.pesam")
+                safe_force_stop(device)
                 time.sleep(1)
                 raise DeviceResetException("fixteam timeout")
             return True
@@ -5264,7 +5272,7 @@ def find_hero_mode(device, cycle_start, serial, original_name, file_path, coin_p
                 time.sleep(2.0)
 
     # 7. Shutdown and Move
-    device.shell("am force-stop jp.konami.pesam")
+    safe_force_stop(device)
     time.sleep(1)
 
     # ชื่อไฟล์ตอน export = user_code จริงที่อ่านจากข้างในไฟล์ .dat (เก็บ coin tag -[เลข] ไว้)
@@ -5732,7 +5740,7 @@ def _g500_check_coin_and_collect(device, cycle_start, serial, original_name, fil
     # ชื่อไฟล์ = UID ล้วน + เลข coin ที่เพิ่งสแกนสด (โฟลเดอร์นี้เก็บตามเลข coin โดยเฉพาะ)
     final_name = apply_coin_tag(export_base_name(file_path, original_name, strip_dash=True), coin_val)
     coin_dir = f"coin{COIN_GACHA_THRESHOLD}+"
-    device.shell("am force-stop jp.konami.pesam")
+    safe_force_stop(device)
     time.sleep(1)
     dest = os.path.join(coin_dir, final_name)
     if os.path.exists(file_path):
@@ -6132,7 +6140,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path, coin_
         # ถ้าไม่เจอ gachafree2 เลย → file-error แล้วไปไฟล์ใหม่
         if not clicked_gf2:
             gui_log(serial, f"[Loop {loop_num}] gachafree2 not found in 15s → file-error", step="Error")
-            device.shell("am force-stop jp.konami.pesam")
+            safe_force_stop(device)
             time.sleep(1)
             dest = os.path.join(FILE_ERROR_DIR, export_final_name(file_path, original_name))
             if os.path.exists(file_path):
@@ -6366,7 +6374,7 @@ def gacha_free_mode(device, cycle_start, serial, original_name, file_path, coin_
         if new_coin is not None:
             coin_prefix = new_coin
 
-    device.shell("am force-stop jp.konami.pesam")
+    safe_force_stop(device)
     time.sleep(1)
 
     # ชื่อไฟล์ตอน export = user_code จริงจากข้างในไฟล์ .dat (อ่านไม่ได้ → ใช้ชื่อเดิมแบบเดิม)
@@ -6476,7 +6484,7 @@ def check_coin_mode(device, cycle_start, serial, original_name, file_path, coin_
     CHECK_COIN_DIR = "check-coin"
     os.makedirs(CHECK_COIN_DIR, exist_ok=True)
     
-    device.shell("am force-stop jp.konami.pesam")
+    safe_force_stop(device)
     time.sleep(1)
 
     dest = os.path.join(CHECK_COIN_DIR, final_name)
@@ -6672,7 +6680,7 @@ def process_device_login(device):
                     if pts_cp:
                         if LOGIN_FAST:
                             gui_log(serial, "LOGIN_FAST: checkpointlogin found — clearing app and moving to next file.", step="Fast Done", status="working")
-                            device.shell("am force-stop jp.konami.pesam")
+                            safe_force_stop(device)
                             time.sleep(0.5)
                             dest = os.path.join(LOGIN_SUCCESS_DIR, export_final_name(file_path, original_name))
                             if os.path.exists(file_path):
@@ -6785,7 +6793,7 @@ def process_device_login(device):
                     # หลุดลูปทาง fixout→cancel (ยังไม่ได้ sort ไฟล์ในลูปเหมือนทาง checkpoint)
                     # → login ผ่านแล้วเหมือนกัน sort เข้า login-success ให้ครบก่อนเริ่มไฟล์ใหม่
                     gui_log(serial, "LOGIN_FAST: (fixout→cancel) — clearing app and moving to next file.", step="Fast Done", status="working")
-                    device.shell("am force-stop jp.konami.pesam")
+                    safe_force_stop(device)
                     time.sleep(0.5)
                     dest = os.path.join(LOGIN_SUCCESS_DIR, export_final_name(file_path, original_name))
                     if os.path.exists(file_path):
@@ -7781,7 +7789,7 @@ def process_device_login(device):
             # ── ถ้าเปิดแค่ GETQUEST โดยไม่มี DO_BOX/GACHA/อื่นๆ → จบรอบเลย ──
                 if DO_BOX == 0 and DO_GACHA == 0 and GACHA_FREE == 0 and CHECK_COIN == 0 and FIND_HERO == 0 and GACHA_CHECK == 0:
                     gui_log(serial, "GETQUEST only mode — clearing app and finishing cycle.", step="Quest Only Done", status="working")
-                    device.shell("am force-stop jp.konami.pesam")
+                    safe_force_stop(device)
                     time.sleep(1)
 
                     # ชื่อไฟล์ตอน export = user_code จริงจากข้างในไฟล์ .dat (+ ยก coin tag เดิมมาไว้หน้า)
@@ -7859,7 +7867,7 @@ def process_device_login(device):
                             gui_log(serial, f"box1.bmp not found {box1_retry}x — restarting from play8 (same file, keep login)...",
                                     step="Restart play8", status="stuck")
                             DEVICE_RESTART_PLAY8[serial] = (file_path, original_name)
-                            device.shell("am force-stop jp.konami.pesam")
+                            safe_force_stop(device)
                             time.sleep(1)
                             raise RestartFromPlay8Exception("box1 not found 5x — restart from play8")
                         gui_log(serial, f"box1.bmp not found, retrying sequence ({box1_retry}/{MAX_BOX1_RETRY})", step="Retry")
@@ -9087,13 +9095,13 @@ def process_device_login(device):
         except GachaCoinCollectedException as e:
             # step1: coin >= เกณฑ์ → ย้ายไฟล์เข้า coin<threshold>+ + release_file เรียบร้อยแล้วใน loop
             gui_log(serial, f"🪙✅ Coin collected — จบรอบ ({e})", step="Coin Done", status="working")
-            device.shell("am force-stop jp.konami.pesam")
+            safe_force_stop(device)
             time.sleep(1)
             continue
 
         except DeviceTimeoutException:
             gui_log(serial, f"⏱️ Timeout Exceeded! Moving file to timeout...", step="Timeout", status="error")
-            device.shell("am force-stop jp.konami.pesam")
+            safe_force_stop(device)
             time.sleep(1)
             
             if original_name:
@@ -9111,25 +9119,25 @@ def process_device_login(device):
         except FixClearReenterException:
             # fixclear → เข้าใหม่ไฟล์เดิม: อย่า release_file (เก็บ lock + ไฟล์ไว้ทำต่อ)
             gui_log(serial, "🔁 fixclear re-enter — relaunching same file...", step="Re-enter", status="working")
-            device.shell("am force-stop jp.konami.pesam")
+            safe_force_stop(device)
             time.sleep(1)
 
         except RestartFromPlay8Exception:
             # box1 หาไม่เจอ 5 ครั้ง → เริ่มใหม่ตั้งแต่ play8 ด้วยไฟล์เดิม (อย่า release_file เก็บไฟล์ไว้)
             gui_log(serial, "🔁 Restart from play8 — relaunching same file...", step="Restart play8", status="working")
-            device.shell("am force-stop jp.konami.pesam")
+            safe_force_stop(device)
             time.sleep(1)
 
         except DeviceResetException:
             release_file(original_name)
             gui_log(serial, "🛑 Manual reset", step="Reset", status="stuck")
-            device.shell("am force-stop jp.konami.pesam")
+            safe_force_stop(device)
             time.sleep(1)
 
         except SellScreenException:
             release_file(original_name)
             gui_log(serial, "🛑 Sell screen detected - force closing app and ending cycle", step="Sell Reset", status="working")
-            device.shell("am force-stop jp.konami.pesam")
+            safe_force_stop(device)
             time.sleep(1)
 
 
