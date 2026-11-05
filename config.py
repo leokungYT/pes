@@ -432,12 +432,12 @@ OFFLINE_RESTART_COOLDOWN = 600
 # 1) เพดาน "จำนวนจอที่แคปจอพร้อมกันได้" ทั้งระบบ  ← ตัวสำคัญที่สุด
 #    จอที่เกินโควตาจะรอคิวแป๊บเดียว (ปกติไม่ถึงวินาที) ไม่ได้ทำให้บอทช้าลงจริง
 #    เปิด 72 จอ แนะนำ 12-16 / เปิดไม่กี่จอ ตั้งสูงได้หรือใส่ 0 = ไม่จำกัด
-SCREENCAP_MAX_CONCURRENT = 12
+SCREENCAP_MAX_CONCURRENT = 8
 #
 # 2) เว้นระยะขั้นต่ำระหว่างการแคปจอ "ของจอเดียวกัน" (วินาที)
 #    0.25 = แคปได้ไม่เกิน 4 ครั้ง/วิ/จอ — เพิ่มเป็น 0.4-0.5 ถ้ายังหลุดอยู่
 #    (ยิ่งมาก = ยิง adb เบาลง แต่บอทตอบสนองช้าลงนิดหน่อย)
-SCREENCAP_INTERVAL = 0.25
+SCREENCAP_INTERVAL = 0.4
 
 # ── ROI Cache: จำตำแหน่งปุ่ม ไม่ต้องกวาดหารูปทั้งจอทุกรอบ ──────────────
 # ทุกเฟรมบอทต้องไล่หา popup 12-18 รูป (fixnet/download/sell/failed/fixout/...)
@@ -457,8 +457,8 @@ IMG_ROI_PAD = 40
 # เปิดเกมพร้อมกันหลายจอ = โหลดหนักจนค้างจอฟ้านาน → ให้โหลดทีละไม่กี่จอ ที่เหลือรอคิว
 # ช่องจะว่างเมื่อจอนั้นเจอ play8 / checkpointlogin หรือครบ LAUNCH_SLOT_MAX_SEC วิ
 # 0 = ไม่จำกัด
-LAUNCH_MAX_CONCURRENT = 8
-LAUNCH_SLOT_MAX_SEC = 45
+LAUNCH_MAX_CONCURRENT = 4
+LAUNCH_SLOT_MAX_SEC = 60
 
 # ── ปิด VPN/Proxy ทุกตัวในจอก่อนเปิดเกม (WireGuard / WARP / v2ray ฯลฯ) ──
 # 1 = force-stop แอป VPN + สั่ง pm disable-user ตัว VpnService (เช่น WireGuard
