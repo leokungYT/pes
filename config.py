@@ -103,7 +103,7 @@ LOGIN_SUCCESS_DIR = "login-success"
 # ── Find Hero Sequence ─────────────────────────────
 # 1 = ทำงาน fin1-fin8 และค้นหาฮีโร่ตามภาพ
 # 0 = ข้าม
-FIND_HERO = 1
+FIND_HERO = 0
 
 # แมพไฟล์ภาพฮีโร่เข้ากับชื่อฮีโร่
 HERO_IMG_MAP = {
@@ -312,7 +312,7 @@ SKIPANIMATION = 1
 # ── Login Fast Mode ───────────────────────────────
 # 1 = เจอ checkpointlogin ปุ๊บ clear app จบรอบทันที (เร็วสุด)
 # 0 = ทำงานปกติ (กด checkpointlogin แล้วไปต่อ)
-LOGIN_FAST = 0
+LOGIN_FAST = 1
 
 # ── Timeout ───────────────────────────────────────
 # 1 = Enable, 0 = Disable
