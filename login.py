@@ -1541,6 +1541,11 @@ if GUI_ENABLED:
             threading.Thread(target=_bg_connect, daemon=True).start()
 
         def _add_missing_devices(self, new_devs):
+            try:
+                import config as _c
+                max_active = int(getattr(_c, 'MAX_ACTIVE_DEVICES', 0))
+            except Exception:
+                max_active = 0
             for dev in new_devs:
                 if dev not in self.device_monitors:
                     m = DeviceMonitorWidget(self.dev_scroll, dev,
@@ -1548,11 +1553,15 @@ if GUI_ENABLED:
                     m.pack(fill="x", pady=1)
                     self.device_monitors[dev] = m
                     if self.is_started:
-                        d = AdbClient(host="127.0.0.1", port=5037).device(dev)
-                        if d:
-                            t = start_device_worker(d)
-                            if t:
-                                self.threads.append(t)
+                        # เคารพเพดาน MAX_ACTIVE_DEVICES — เครื่องเกินโควต้าเป็น standby
+                        if max_active > 0 and len(self.threads) >= max_active:
+                            self.log(f"⏸ Standby (เกิน MAX_ACTIVE_DEVICES={max_active}): {dev}")
+                        else:
+                            d = AdbClient(host="127.0.0.1", port=5037).device(dev)
+                            if d:
+                                t = start_device_worker(d)
+                                if t:
+                                    self.threads.append(t)
                     self.log(f"Connected: {dev}")
             self.lbl_status.configure(
                 text=f"   ● ONLINE ({len(self.device_monitors)})",
@@ -1791,6 +1800,16 @@ if GUI_ENABLED:
             if not devices:
                 self.log("ERROR: Still no devices found!")
                 return
+
+            # จำกัดจำนวนจอที่รันพร้อมกันตาม MAX_ACTIVE_DEVICES (0 = ไม่จำกัด)
+            try:
+                import config as _c
+                max_active = int(getattr(_c, 'MAX_ACTIVE_DEVICES', 0))
+            except Exception:
+                max_active = 0
+            if max_active > 0 and len(devices) > max_active:
+                self.log(f"⚡ MAX_ACTIVE_DEVICES={max_active} — รัน {max_active}/{len(devices)} จอ (ที่เหลือ standby)")
+                devices = devices[:max_active]
 
             client = AdbClient(host="127.0.0.1", port=5037)
             start_cpu_balancer()   # เกลี่ย CPU ของ MuMu ข้าม socket (กันโหลดกอง group เดียวจนค้าง)
