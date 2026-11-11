@@ -1568,9 +1568,16 @@ if GUI_ENABLED:
                 text_color="#4caf50")
 
         def auto_scan_devices(self):
+            # ทุก 6 รอบ (60 วิ) ยิง connect_known_ports ให้จอที่ยังไม่ต่อ ADB โผล่เข้ามาเอง
+            # (quiet=True + 50-thread executor ยิง 101 ports จบใน ~2 วิ ไม่ได้หนักเท่า scan ทุก 10s)
+            self._scan_tick = getattr(self, '_scan_tick', 0) + 1
+            do_reconnect = (self._scan_tick % 6 == 0)
             def _thread():
-                # DO NOT scan/connect all 100 ports in a background thread every 10 seconds! That spikes CPU and freezes the system.
-                # Just call get_connected_devices() which is one fast call to see what is already connected.
+                if do_reconnect:
+                    try:
+                        connect_known_ports(quiet=True, kill_server=False)
+                    except Exception:
+                        pass
                 devices = get_connected_devices()
                 new_devs = [dev for dev in devices if dev not in self.device_monitors]
                 if new_devs:
