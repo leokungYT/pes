@@ -1860,9 +1860,8 @@ if GUI_ENABLED:
                     self.threads.append(t)
 
                 if index < len(devices) - 1:
-                    self.log(f"Waiting 10 seconds before starting the next device...")
-                    # ใช้ self.after แทน time.sleep เพื่อไม่ให้เธรด GUI ค้าง (Not Responding)
-                    self.after(10000, lambda: launch_device(index + 1))
+                    # stagger 1s/จอ — เปิดเกมทุกจอรวดเร็ว LAUNCH_MAX_CONCURRENT=0 ไม่จำกัดคิว
+                    self.after(1000, lambda: launch_device(index + 1))
 
             launch_device(0)
 
