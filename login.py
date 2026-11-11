@@ -1586,11 +1586,28 @@ if GUI_ENABLED:
             self.after(10000, self.auto_scan_devices)
 
         def _on_auto_scan_result(self, new_devs):
+            try:
+                import config as _c
+                max_active = int(getattr(_c, 'MAX_ACTIVE_DEVICES', 0))
+            except Exception:
+                max_active = 0
             for dev in new_devs:
                 if dev not in self.device_monitors:
                     m = DeviceMonitorWidget(self.dev_scroll, dev, len(self.device_monitors) + 1)
                     m.pack(fill="x", pady=1)
                     self.device_monitors[dev] = m
+                    # บอทกำลังรันอยู่ → spawn worker ให้จอใหม่ด้วย (ไม่งั้นค้าง Ready ตลอด)
+                    if self.is_started:
+                        if max_active > 0 and len(self.threads) >= max_active:
+                            self.log(f"⏸ Standby (เกิน MAX_ACTIVE_DEVICES={max_active}): {dev}")
+                        else:
+                            d = AdbClient(host="127.0.0.1", port=5037).device(dev)
+                            if d:
+                                t = start_device_worker(d)
+                                if t:
+                                    self.threads.append(t)
+                                    self.log(f"✅ Auto-started bot on {dev}")
+                                    continue
                     self.log(f"Auto-detected: {dev} (Ready)")
             self.lbl_status.configure(
                 text=f"   ● ONLINE ({len(self.device_monitors)})",
