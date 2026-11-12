@@ -86,16 +86,20 @@ def _build_zip_from_raw(branch="main", timeout=60):
     return out
 
 
-def download_update_zip(zip_url, tries_each=2, timeout=300):
+def download_update_zip(zip_url, tries_each=1, timeout=45):
     """โหลดไฟล์ ZIP อัปเดต — ลองทุกช่องทาง ช่องทางละ tries_each ครั้ง
     คืน bytes ของ zip (ตรวจ magic 'PK' ก่อน) หรือ raise ถ้าไม่ได้เลยสักช่องทาง
 
-    *** timeout ต้องยาว: ZIP ของรีโปนี้ ~28 MB (มี Tesseract-OCR + รูปทั้งหมด)
-        ของเดิมตั้งไว้ 30 วิ เน็ตเครื่องลูกโหลดไม่ทัน เลยเด้ง WinError 10060 ***"""
+    *** timeout 45s/URL + tries=1 → ล้มเร็ว ไปใช้ fallback raw ได้ไว ไม่ค้าง 10+ นาที
+        ของเดิม timeout=300 × tries=2 × 3 URL = ค้างเงียบได้ถึง 30 นาที
+        ZIP จริง ~28MB โหลดทรูพุต 1 MB/s ยังจบใน 30s — 45s เผื่อ handshake พอ ***"""
     import time as _time
     errors = []
-    for url in _zip_candidates(zip_url):
+    candidates = _zip_candidates(zip_url)
+    for url in candidates:
         for attempt in range(1, tries_each + 1):
+            print(f"[Updater] กำลังเชื่อมต่อ {url} (timeout {timeout}s)...", flush=True)
+            t0 = _time.time()
             try:
                 req = urllib.request.Request(url, headers={
                     "User-Agent": "Mozilla/5.0",
@@ -103,21 +107,27 @@ def download_update_zip(zip_url, tries_each=2, timeout=300):
                 })
                 with urllib.request.urlopen(req, timeout=timeout) as resp:
                     chunks = []
+                    got = 0
+                    last_print = _time.time()
                     while True:
                         chunk = resp.read(1024 * 1024)
                         if not chunk:
                             break
                         chunks.append(chunk)
+                        got += len(chunk)
+                        if _time.time() - last_print > 3:
+                            print(f"[Updater] ... โหลดแล้ว {got/1024/1024:.1f} MB", flush=True)
+                            last_print = _time.time()
                     data = b"".join(chunks)
                 if len(data) > 1000 and data[:2] == b"PK":
-                    print(f"[Updater] Downloaded OK ({len(data):,} bytes) from {url}")
+                    print(f"[Updater] Downloaded OK ({len(data):,} bytes) from {url}", flush=True)
                     return data
                 error = f"ไฟล์ที่ได้ไม่ใช่ zip ({len(data)} bytes)"
             except Exception as e:
-                error = str(e)
+                error = f"{type(e).__name__}: {e}"
+            dur = _time.time() - t0
             errors.append(f"{url}: {error}")
-            print(f"[Updater] โหลดไม่สำเร็จ (ครั้งที่ {attempt}/{tries_each}) {url} -> {error[:110]}")
-            _time.sleep(3)
+            print(f"[Updater] โหลดไม่สำเร็จ (ครั้งที่ {attempt}/{tries_each}, {dur:.0f}s) {url} -> {error[:110]}", flush=True)
 
     # ── last resort: codeload + zipball โดนบล็อก (ISP/firewall)
     #    ลองประกอบ zip จาก raw.githubusercontent / jsdelivr ทีละไฟล์แทน
