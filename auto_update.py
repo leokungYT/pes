@@ -38,6 +38,54 @@ def _zip_candidates(zip_url):
     return out
 
 
+def _build_zip_from_raw(branch="main", timeout=60):
+    """Fallback: codeload + zipball โดนบล็อก (WinError 10060) → ประกอบ zip
+    จาก raw.githubusercontent / jsdelivr ทีละไฟล์แทน
+    ช้ากว่าโหลด zip ตรง แต่ไปติดกับเน็ตที่ปล่อยเฉพาะ raw/CDN
+    คืน bytes ของ zip เลียนรูปแบบ zip จาก github (มีโฟลเดอร์ครอบ <repo>-<branch>/)"""
+    tree_api = f"https://api.github.com/repos/{REPO}/git/trees/{branch}?recursive=1"
+    req = urllib.request.Request(tree_api, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        tree = json.loads(r.read().decode())
+    blobs = [it for it in tree.get("tree", []) if it.get("type") == "blob"]
+    if not blobs:
+        raise RuntimeError("tree API ว่าง — โหลด fallback ไม่ได้")
+
+    repo_name = REPO.split("/")[-1]
+    root_folder = f"{repo_name}-{branch}/"
+    raw_tpl  = f"https://raw.githubusercontent.com/{REPO}/{branch}/{{p}}"
+    cdn_tpl  = f"https://cdn.jsdelivr.net/gh/{REPO}@{branch}/{{p}}"
+
+    buf = io.BytesIO()
+    total = len(blobs)
+    print(f"[Updater] (fallback raw) ประกอบ zip จาก {total} ไฟล์ ... อาจใช้เวลาสักพัก")
+    failed = []
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for i, it in enumerate(blobs, 1):
+            path = it["path"]
+            data = None
+            for url in (raw_tpl.format(p=path), cdn_tpl.format(p=path)):
+                try:
+                    r2 = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                    with urllib.request.urlopen(r2, timeout=timeout) as resp:
+                        data = resp.read()
+                    break
+                except Exception:
+                    continue
+            if data is None:
+                failed.append(path)
+                continue
+            zf.writestr(root_folder + path, data)
+            if i % 50 == 0 or i == total:
+                print(f"[Updater] (fallback raw) {i}/{total} ไฟล์")
+    if failed:
+        print(f"[Updater] (fallback raw) โหลดไม่ได้ {len(failed)} ไฟล์: {failed[:5]}{'...' if len(failed) > 5 else ''}")
+    out = buf.getvalue()
+    if len(out) < 1000 or out[:2] != b"PK":
+        raise RuntimeError("fallback raw ประกอบ zip ได้ไฟล์เปล่า/เสีย")
+    return out
+
+
 def download_update_zip(zip_url, tries_each=2, timeout=300):
     """โหลดไฟล์ ZIP อัปเดต — ลองทุกช่องทาง ช่องทางละ tries_each ครั้ง
     คืน bytes ของ zip (ตรวจ magic 'PK' ก่อน) หรือ raise ถ้าไม่ได้เลยสักช่องทาง
@@ -70,7 +118,22 @@ def download_update_zip(zip_url, tries_each=2, timeout=300):
             errors.append(f"{url}: {error}")
             print(f"[Updater] โหลดไม่สำเร็จ (ครั้งที่ {attempt}/{tries_each}) {url} -> {error[:110]}")
             _time.sleep(3)
-    details = " | ".join(errors[-len(_zip_candidates(zip_url)):])
+
+    # ── last resort: codeload + zipball โดนบล็อก (ISP/firewall)
+    #    ลองประกอบ zip จาก raw.githubusercontent / jsdelivr ทีละไฟล์แทน
+    branch = "main"
+    if zip_url:
+        for marker in ("/archive/refs/heads/", "/zip/refs/heads/", "/zipball/"):
+            if marker in zip_url:
+                branch = zip_url.split(marker, 1)[1].split("/", 1)[0].removesuffix(".zip")
+                break
+    print("[Updater] ทุกช่องทาง zip โดนบล็อก → fallback ประกอบ zip จาก raw.githubusercontent")
+    try:
+        return _build_zip_from_raw(branch=branch, timeout=60)
+    except Exception as e:
+        errors.append(f"fallback-raw: {e}")
+
+    details = " | ".join(errors[-(len(_zip_candidates(zip_url)) + 1):])
     raise RuntimeError(f"โหลดไฟล์อัปเดตไม่สำเร็จทุกช่องทาง: {details}")
 
 def get_latest_release():
