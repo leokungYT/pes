@@ -6557,6 +6557,24 @@ def process_device_login(device):
     serial = device.serial
     gui_log(serial, "Bot started", step="Init", status="working")
 
+    # ── Startup grace: 15s เงียบๆ ลอง connect_known_ports + reconnect ก่อน
+    # แล้วค่อยเข้าลูปหลัก ไม่งั้นบอทเพิ่งตื่นแล้วเจอ adb ที่ยังไม่พร้อม
+    # ขึ้น "Device OFFLINE" รัวตั้งแต่วินาทีแรก → user เข้าใจผิดว่าค้าง
+    _start_t0 = time.time()
+    while bot_running and (time.time() - _start_t0) < 15:
+        if is_device_online(device):
+            gui_log(serial, "✅ ADB พร้อมใช้งาน — เริ่มทำงาน", step="Ready", status="working")
+            break
+        try:
+            connect_known_ports(quiet=True, kill_server=False)
+        except Exception:
+            pass
+        try_reconnect_device(serial)
+        if is_device_online(device):
+            gui_log(serial, "✅ ADB พร้อมใช้งาน — เริ่มทำงาน", step="Ready", status="working")
+            break
+        time.sleep(2)
+
     while bot_running:
         import random
         time.sleep(random.uniform(0.5, 2.0)) # Jitter ป้องกัน ADB ค้าง
