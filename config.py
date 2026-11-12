@@ -127,7 +127,7 @@ HERO_IMG_MAP = {
 #     *** ชื่อไฟล์ที่ export = UID ล้วนเสมอ ไม่มีชื่อนักเตะ (ดูหัวข้อ "ชื่อไฟล์ตอน export")
 #     ชื่อไฟล์รูปใช้โชว์ใน log ว่าเจอใคร เช่น  img/find-img/Messi.png
 #     ไม่เจอรูปไหนเลย → ไป no-hero เหมือนเดิม
-FIND_IMG = 0
+FIND_IMG = 1
 
 # โฟลเดอร์ย่อยใน img/ ที่เก็บรูปไว้สแกน (รองรับ .png .bmp .jpg)
 FIND_IMG_DIR = "find-img"
@@ -231,12 +231,12 @@ list_find_hero = [
     "Clarence Seedorf",
     "Xabi Alonso",
     "Yaya Toure",
-    "Thierry Henry",
+    "Thierry Henry", 
     "Sol Campbell",
     "Dennis Bergkamp",
-    "David Seaman",
+    "David Seaman", 
     "Emmanuel Petit",
-    "Bronckhorst"
+    "Bronckhorst" 
 ]
 
 # แชร์ list เดียวกัน — แก้ที่ list_find_hero อย่างเดียวพอ
