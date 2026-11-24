@@ -8,8 +8,11 @@ echo =========================================
 echo.
 
 echo [1/3] Killing bot processes (python/adb) that may lock files...
-taskkill /f /im python.exe  >nul 2>&1
-taskkill /f /im pythonw.exe >nul 2>&1
+:: *** ห้ามใช้ taskkill /f /im python.exe เด็ดขาด ***
+::  มันฆ่า python ทุกตัวในเครื่อง รวม agent.py ของระบบ remote และ agent-sidecar.py
+::  ที่คอยปลุก agent ด้วย -> กดปุ่มนี้ทีไรเครื่องหลุดจากหน้า dashboard ทันที
+::  ฆ่าเฉพาะโปรเซสของบอทเท่านั้น โดยดูจาก command line และกัน agent ไว้ชัดๆ
+powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'python' -and ($_.CommandLine -like '*login.py*' -or $_.CommandLine -like '*auto_update.py*' -or $_.CommandLine -like '*main-pes.py*' -or $_.CommandLine -like '*cap-id.py*' -or $_.CommandLine -like '*checkTH.py*') -and $_.CommandLine -notlike '*agent.py*' -and $_.CommandLine -notlike '*agent-sidecar.py*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" >nul 2>&1
 taskkill /f /im adb.exe     >nul 2>&1
 timeout /t 1 /nobreak >nul
 echo.
